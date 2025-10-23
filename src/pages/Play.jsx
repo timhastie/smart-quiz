@@ -1,0 +1,550 @@
+// src/pages/Play.jsx
+import { useEffect, useState, useRef } from "react";
+import { useParams, Link, useNavigate } from "react-router-dom";
+import { supabase } from "../lib/supabase";
+import { useAuth } from "../auth/AuthProvider";
+
+/* ---------- Free local fuzzy helpers (cheap) ---------- */
+function normalize(s) {
+  return (s || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\b(the|a|an)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+function lev(a, b) {
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return dp[m][n];
+}
+function tokenJaccard(a, b) {
+  const A = new Set(a.split(" ").filter(Boolean));
+  const B = new Set(b.split(" ").filter(Boolean));
+  if (A.size === 0 && B.size === 0) return 1;
+  let inter = 0;
+  for (const t of A) if (B.has(t)) inter++;
+  return inter / (A.size + B.size - inter || 1);
+}
+function localGrade(userRaw, expectedRaw) {
+  const u = normalize(userRaw);
+  const e = normalize(expectedRaw);
+  if (!u || !e) return { pass: false, why: "empty" };
+  if (u === e) return { pass: true, why: "exact-normalized" };
+  const d = lev(u, e);
+  const maxEdits = Math.max(1, Math.floor(Math.min(u.length, e.length) * 0.2));
+  if (d <= maxEdits) return { pass: true, why: `lev<=${maxEdits}` };
+  const j = tokenJaccard(u, e);
+  if (j >= 0.66) return { pass: true, why: `jaccard-${j.toFixed(2)}` };
+  return { pass: false, why: "local-failed" };
+}
+
+// --- Strict fact helpers (years / numbers / codes) ---
+function norm(s) {
+  return (s || "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+function yearTokens(s) {
+  const m = String(s || "").match(/\b(1[6-9]\d{2}|20\d{2})\b/g);
+  return m ? m.map(Number) : [];
+}
+function numTokens(s) {
+  const m = String(s || "").match(/-?\d+(\.\d+)?/g);
+  return m ? m.map(x => x.trim()) : [];
+}
+function hexDecEqual(a, b) {
+  const hexRe = /^(?:\$|0x)?[0-9a-f]+$/i;
+  const toNum = (s) => {
+    const t = String(s || "").trim();
+    if (hexRe.test(t)) return parseInt(t.replace(/^\$|0x/i, ""), 16);
+    if (/^\d+$/.test(t)) return parseInt(t, 10);
+    return NaN;
+  };
+  const va = toNum(a), vb = toNum(b);
+  return Number.isFinite(va) && va === vb;
+}
+function isStrictFact(question, expected) {
+  const q = norm(question);
+  const hasYear = yearTokens(expected).length > 0;
+  const hasAnyNumber = numTokens(expected).length > 0;
+  const qHints = /(when|what year|which year|date|how many|how much|what number|tempo|bpm|cc|control change|port|channel|track|bank|pattern|page|step)\b/;
+  const shortCanon = norm(expected).split(" ").filter(Boolean).length <= 3;
+  const codeLike = /0x|\$|\bcc\b|\bctl\b|\bbpm\b|\bhz\b|\bkhz\b|\bdb\b|\bms\b|\bs\b|\d/.test(
+    String(expected).toLowerCase()
+  );
+  return hasYear || (hasAnyNumber && (qHints.test(q) || shortCanon || codeLike));
+}
+function strictFactCorrect(userAns, expected) {
+  if (norm(userAns) === norm(expected) || hexDecEqual(userAns, expected)) return true;
+
+  const expYears = yearTokens(expected);
+  const usrYears = yearTokens(userAns);
+  if (expYears.length === 1) return usrYears.length === 1 && usrYears[0] === expYears[0];
+
+  const expNums = numTokens(expected);
+  if (expNums.length > 0) {
+    const usrNums = numTokens(userAns);
+    if (usrNums.length !== expNums.length) return false;
+    const a = [...expNums].sort().join(",");
+    const b = [...usrNums].sort().join(",");
+    return a === b;
+  }
+  return false;
+}
+
+
+
+export default function Play() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { quizId } = useParams();
+
+  const [quiz, setQuiz] = useState(null);
+  const [index, setIndex] = useState(0);
+
+  // Per-question state
+  const [answered, setAnswered] = useState([]);              // "currently correct" flags (for UI)
+  const [inputs, setInputs] = useState([]);                  // cached text per Q
+  const [feedback, setFeedback] = useState("");              // UI message under "Previous"
+
+  // Scoring state
+  const [attempted, setAttempted] = useState([]);            // true once a Q has been submitted at least once
+  const [firstTryCorrect, setFirstTryCorrect] = useState([]);// true only if FIRST submission for that Q was correct
+
+  // Results modal
+  const [showResult, setShowResult] = useState(false);
+  const [scorePct, setScorePct] = useState(0);
+
+  // Skipping/return logic
+  const [returnIndex, setReturnIndex] = useState(null);
+  const [skipped, setSkipped] = useState(false);
+
+  // Input box
+  const [input, setInput] = useState("");
+  const areaRef = useRef(null);
+
+  // Strict mode (persisted)
+  const [strict, setStrict] = useState(
+    () => localStorage.getItem("quizStrictMode") === "1"
+  );
+  useEffect(() => {
+    localStorage.setItem("quizStrictMode", strict ? "1" : "0");
+  }, [strict]);
+
+  // Load quiz
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase
+  .from("quizzes")
+  .select("title, questions, file_id")   // <-- add file_id
+  .eq("id", quizId)
+  .eq("user_id", user.id)
+  .single();
+      if (!error && data) {
+        const len = data.questions?.length ?? 0;
+        setQuiz(data);
+        setIndex(0);
+        setAnswered(Array(len).fill(false));
+        setInputs(Array(len).fill(""));
+        setAttempted(Array(len).fill(false));
+        setFirstTryCorrect(Array(len).fill(false));
+        setReturnIndex(null);
+        setSkipped(false);
+        setInput("");
+        setFeedback("");
+        setShowResult(false);
+      }
+    })();
+  }, [quizId, user.id]);
+
+  const total = quiz?.questions?.length ?? 0;
+  const current = total > 0 ? quiz?.questions?.[index] : null;
+  const isFirst = index === 0;
+  const isLast = index === total - 1;
+  const hasConfetti = (scorePct >= 90);
+
+
+  // Feedback helpers
+  const isPositiveFeedback = feedback.startsWith("✅");
+  const canContinue = /press\s*c\s*to\s*continue/i.test(feedback);
+
+  // When switching questions, restore saved input & feedback
+  useEffect(() => {
+    if (!quiz) return;
+    setInput(inputs[index] || "");
+    setFeedback(answered[index] ? "✅ Correct! Press C to continue." : "");
+  }, [index, quiz]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // First earlier unanswered
+  const firstUnansweredBefore = answered.slice(0, index).findIndex((v) => !v);
+  const showGoToUnanswered = skipped && firstUnansweredBefore !== -1;
+
+  function handleChange(val) {
+    setInput(val);
+    setInputs((arr) => {
+      const next = arr.slice();
+      next[index] = val;
+      return next;
+    });
+  }
+
+  // Save latest score for Dashboard (upsert by user_id+quiz_id)
+  async function saveLatestScore(pct) {
+    try {
+      await supabase
+        .from("quiz_scores")
+        .upsert(
+          { user_id: user.id, quiz_id: quizId, last_score: pct, updated_at: new Date().toISOString() },
+          { onConflict: "user_id,quiz_id" }
+        );
+    } catch {
+      // ignore persistence errors for now
+    }
+  }
+
+  function maybeFinish(attemptedNext, firstTryNext) {
+    if (!attemptedNext.every(Boolean)) return;
+    const points = firstTryNext.filter(Boolean).length;
+    const pct = total ? Math.round((points / total) * 100) : 0;
+    setScorePct(pct);
+    setShowResult(true);
+    saveLatestScore(pct);
+  }
+
+  async function submit(e) {
+  e?.preventDefault?.();
+  if (!current) return;
+
+  const userAns = input.trim();
+  const expected = String(current.answer ?? "");
+  const question = String(current.prompt ?? "");
+  let isCorrect = false;
+
+  // 1) Strict mode (exact string)
+  if (strict) {
+    isCorrect = userAns === expected;
+  } else {
+    // 2) STRICT FACT GUARD: years/numbers/codes → exact only
+    if (isStrictFact(question, expected)) {
+      isCorrect = strictFactCorrect(userAns, expected);
+      if (!isCorrect) setFeedback("Incorrect ❌ (this one requires the exact value)");
+    } else {
+      // 3) Non-fact: try cheap local fuzzy
+      const local = localGrade(userAns, expected);
+      if (local.pass) {
+        isCorrect = true;
+      } else {
+        // 4) Fallback to server judge (LLM) for semantic fairness
+        try {
+          const { data: sessionRes } = await supabase.auth.getSession();
+          const jwt = sessionRes?.session?.access_token;
+          const res = await fetch(
+            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/grade-answer`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+              },
+              body: JSON.stringify({
+                question,           // include the prompt so server can decide strictness too
+                expected,           // stored reference
+                user_answer: userAns,
+              }),
+            }
+          );
+          if (res.ok) {
+            const out = await res.json(); // { correct, score, reasons, ... }
+            isCorrect = !!out.correct;
+            if (!isCorrect) {
+              setFeedback("Incorrect ❌ Press c to continue");
+            }
+          } else {
+            setFeedback("Incorrect ❌ Press c to continue");
+          }
+        } catch {
+          setFeedback("Incorrect ❌ Press c to continue");
+        }
+      }
+    }
+  }
+
+  // ---- Track per-question state (unchanged) ----
+  const attemptedNext = attempted.slice();
+  const firstTryNext = firstTryCorrect.slice();
+  const isFirstAttempt = !attemptedNext[index];
+
+  attemptedNext[index] = true;
+  if (isFirstAttempt) firstTryNext[index] = !!isCorrect;
+
+  setAttempted(attemptedNext);
+  setFirstTryCorrect(firstTryNext);
+
+  if (isCorrect) {
+    setAnswered((arr) => {
+      const next = arr.slice();
+      next[index] = true;
+      return next;
+    });
+    setFeedback("✅ Correct! Press C to continue.");
+  } else if (strict || isStrictFact(question, expected)) {
+    setFeedback("Incorrect ❌ (exact value needed) Press c to continue");
+  }
+
+  maybeFinish(attemptedNext, firstTryNext);
+}
+
+
+  function continueIfCorrect() {
+    if (!canContinue) return;
+
+    if (returnIndex !== null) {
+      const dest = returnIndex;
+      setReturnIndex(null);
+      setFeedback("");
+      setIndex(dest);
+      areaRef.current?.blur();
+      return;
+    }
+
+    setFeedback("");
+    setIndex((i) => Math.min(i + 1, total - 1));
+    areaRef.current?.blur();
+  }
+
+  function onKey(e) {
+    const isC = e.key === "c" || e.key === "C";
+    if (!isC) return;
+    if (!canContinue) return;
+    const tag = (e.target?.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea") return;
+    e.preventDefault();
+    continueIfCorrect();
+  }
+
+  function onTextAreaKeyDown(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      submit(e);
+      return;
+    }
+    const isC = e.key === "c" || e.key === "C";
+    if (isC && canContinue) {
+      e.preventDefault();
+      continueIfCorrect();
+    }
+  }
+
+  function goPrev() {
+    if (!isFirst) setIndex((i) => i - 1);
+  }
+  function goNext() {
+    if (!isLast) {
+      setSkipped((prev) => prev || !answered[index]);
+      setIndex((i) => i + 1);
+    }
+  }
+  function jumpToFirstUnanswered() {
+    if (firstUnansweredBefore === -1) return;
+    setReturnIndex(index);
+    setIndex(firstUnansweredBefore);
+    requestAnimationFrame(() => areaRef.current?.focus());
+  }
+
+  // Retake: reset per-question state but keep the loaded quiz
+  function retake() {
+    const len = quiz?.questions?.length ?? 0;
+    setAnswered(Array(len).fill(false));
+    setInputs(Array(len).fill(""));
+    setAttempted(Array(len).fill(false));
+    setFirstTryCorrect(Array(len).fill(false));
+    setIndex(0);
+    setReturnIndex(null);
+    setSkipped(false);
+    setInput("");
+    setFeedback("");
+    setShowResult(false);
+  }
+
+  if (!quiz) return null;
+
+  return (
+    <div className="min-h-screen bg-gray-900 text-white" onKeyDown={onKey} tabIndex={0}>
+      <header className="flex items-center justify-between p-4 border-b border-gray-800">
+        <h1 className="text-xl font-bold">{quiz.title || "Quiz"}</h1>
+        <Link to="/" className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600">
+          Back
+        </Link>
+      </header>
+
+      <main className="max-w-2xl mx-auto p-6 text-2xl">
+        {current ? (
+          <>
+            <p className="mb-4">
+              <span className="mr-2 inline-block w-6 text-right">{index + 1}.</span>
+              {current.prompt}
+            </p>
+
+            {/* Unified 2-col layout: col1 = content at textarea width, col2 = Enter button */}
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-3">
+              {/* Row 1: Strict (left) + Display answer (right) */}
+              <div className="col-start-1 flex items-center justify-between">
+                <label className="flex items-center gap-2 text-base">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={strict}
+                    onChange={(e) => setStrict(e.target.checked)}
+                  />
+                  <span className="text-sm text-gray-300">Strict mode</span>
+                </label>
+
+                <button
+                  type="button"
+                  className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-base"
+                  onClick={() => {
+                    const ans = String(current.answer ?? "");
+                    handleChange(ans);
+                    areaRef.current?.focus();
+                  }}
+                >
+                  Display answer
+                </button>
+              </div>
+              <div /> {/* empty col2 cell for row 1 */}
+
+              {/* Row 2: Textarea (col1) + Enter (col2) */}
+              <form onSubmit={submit} className="contents">
+                <textarea
+                  ref={areaRef}
+                  className="w-full p-4 text-black text-xl rounded"
+                  value={input}
+                  onChange={(e) => handleChange(e.target.value)}
+                  placeholder="Type your answer and press Enter…"
+                  onKeyDown={onTextAreaKeyDown}
+                  rows={4}
+                />
+                <button
+                  type="submit"
+                  className="self-center shrink-0 px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-base h-12"
+                  aria-label="Submit answer"
+                  title="Submit (same as pressing Enter)"
+                >
+                  Enter
+                </button>
+              </form>
+
+              {/* Row 4: Prev / Unanswered / Next — feedback lives under Previous */}
+              <div className="grid grid-cols-3 items-start text-base col-start-1">
+                {/* Left cell: Previous + feedback below it */}
+                <div className="justify-self-start">
+                  {!isFirst ? (
+                    <button
+                      type="button"
+                      className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-base"
+                      onClick={goPrev}
+                    >
+                      Previous Question
+                    </button>
+                  ) : (
+                    <div />
+                  )}
+
+                  {feedback ? (
+                    <p
+                      className={`mt-2 text-lg ${
+                        isPositiveFeedback ? "text-green-400" : "text-red-400"
+                      }`}
+                      aria-live="polite"
+                    >
+                      {feedback}
+                    </p>
+                  ) : null}
+                </div>
+
+                {/* Middle cell: Go to Unanswered (centered) */}
+                <div className="justify-self-center">
+                  {showGoToUnanswered ? (
+                    <button
+                      type="button"
+                      className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-base"
+                      onClick={jumpToFirstUnanswered}
+                    >
+                      Go to Unanswered Question
+                    </button>
+                  ) : (
+                    <div />
+                  )}
+                </div>
+
+                {/* Right cell: Next (right-aligned) */}
+                <div className="justify-self-end">
+                  <button
+                    type="button"
+                    className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-base"
+                    onClick={goNext}
+                  >
+                    Next Question
+                  </button>
+                </div>
+              </div>
+
+              <div /> {/* empty col2 cell for row 4 */}
+            </div>
+          </>
+        ) : (
+          <p>No questions yet. Add some in the editor.</p>
+        )}
+      </main>
+
+      {/* Results Modal */}
+      {showResult && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-800 text-white rounded-2xl p-6 max-w-md w-full">
+            <h2 className="text-2xl font-bold mb-2">
+  Your Score {hasConfetti ? "🎉" : ""}
+</h2>
+<p className="text-lg mb-6">
+  You scored <span className="font-semibold">{scorePct}%</span> on this quiz.
+</p>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600"
+                onClick={retake}
+              >
+                Retake Quiz
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500"
+                onClick={() => navigate("/")}
+              >
+                Return to Dashboard
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

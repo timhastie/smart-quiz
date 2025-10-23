@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Global form field look */
+@layer base {
+  input,
+  textarea,
+  select {
+    @apply bg-gray-300 text-gray-900 placeholder-gray-500
+           rounded-xl p-4
+           focus:outline-none focus:ring-2 focus:ring-emerald-500;
+  }
+
+  /* Make textareas taller by default */
+  textarea {
+    @apply min-h-[120px] leading-relaxed;
+  }
+}
+
+:root { color-scheme: dark; }
+html, body, #root { height: 100%; }
+
