@@ -1028,7 +1028,7 @@ async function generateQuiz() {
     className="fixed inset-0 bg-black/60 grid place-items-center z-[95]"
     onClick={() => {
       if (!authBusy) {
-        setAuthMessage("");   // <-- clear trial text on close
+        setAuthMessage("");   // clear any banner text when closing
         setAuthOpen(false);
       }
     }}
@@ -1041,10 +1041,12 @@ async function generateQuiz() {
     >
       <h2 className="text-xl font-bold mb-2">Create account or sign in</h2>
 
-      {/* Friendly trial message */}
-      <div className="mb-4 rounded-lg bg-emerald-900/30 border border-emerald-800 p-3 text-sm">
-        {authMessage || "Free trial limit reached. Create an account to make more quizzes."}
-      </div>
+      {/* Banner ONLY when there's a message (e.g., trial-limit hit). Otherwise show nothing. */}
+      {authMessage && (
+        <div className="mb-4 rounded-lg bg-emerald-900/30 border border-emerald-800 p-3 text-sm">
+          {authMessage}
+        </div>
+      )}
 
       <p className="text-gray-300 mb-4 text-sm">
         Creating an account upgrades your current guest session so your quizzes stay with you.
@@ -1076,7 +1078,7 @@ async function generateQuiz() {
           className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-60"
           onClick={() => {
             if (!authBusy) {
-              setAuthMessage(""); // <-- clear trial text on close
+              setAuthMessage(""); // ensure clean next open
               setAuthOpen(false);
             }
           }}
@@ -1113,7 +1115,6 @@ async function generateQuiz() {
     </div>
   </div>
 )}
-
 
 
       {/* AI generate */}
