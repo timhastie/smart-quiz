@@ -3,7 +3,15 @@
 import OpenAI from "npm:openai";
 import { createClient } from "npm:@supabase/supabase-js";
 
-const openai = new OpenAI({ apiKey: Deno.env.get("OPENAI_API_KEY")! });
+// ---- Lazy OpenAI so module load never crashes if secret is missing ----
+let _openai: OpenAI | null = null;
+function getOpenAI() {
+  if (_openai) return _openai;
+  const key = Deno.env.get("OPENAI_API_KEY");
+  if (!key) throw new Error("Missing OPENAI_API_KEY");
+  _openai = new OpenAI({ apiKey: key });
+  return _openai;
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*", // tighten for prod
@@ -75,27 +83,13 @@ async function fetchTopChunks(opts: {
   const queryText = `Generate ${n} quiz questions about: ${topic || title || "the uploaded document"}`;
 
   // 1) Embed the query
-  const emb = await openai.embeddings.create({
+  const emb = await getOpenAI().embeddings.create({
     model: "text-embedding-3-small",
     input: queryText,
   });
   const vec = emb.data[0].embedding as unknown as number[];
 
-  // 2) Call RPC to match chunks (you must create this in your DB; see SQL below)
-  // Signature example:
-  // create or replace function match_file_chunks(
-  //   p_user_id uuid,
-  //   p_file_id text,
-  //   p_query_embedding vector(1536),
-  //   p_match_count int default 15
-  // ) returns table(content text, similarity float) language sql as $$
-  //   select content,
-  //          1 - (embedding <=> p_query_embedding) as similarity
-  //   from file_chunks
-  //   where user_id = p_user_id and file_id = p_file_id
-  //   order by embedding <-> p_query_embedding
-  //   limit p_match_count;
-  // $$;
+  // 2) Call RPC to match chunks
   try {
     const { data, error } = await supa.rpc("match_file_chunks", {
       p_user_id: userId,
@@ -115,7 +109,7 @@ async function llmGenerate(
   n: number,
   prompt: string,
   priorPromptsForContext: string[],
-  docContext: string // NEW: concatenated top chunks (may be "")
+  docContext: string // concatenated top chunks (may be "")
 ): Promise<QA[]> {
   const sys = `You generate quiz questions.
 Return ONLY a JSON array of objects with keys "prompt" and "answer".
@@ -144,7 +138,7 @@ No markdown, no code fences, no commentary.`;
     priorText +
     docText;
 
-  const resp = await openai.chat.completions.create({
+  const resp = await getOpenAI().chat.completions.create({
     model: "gpt-4o-mini",
     temperature: 0.2,
     messages: [
@@ -175,6 +169,7 @@ No markdown, no code fences, no commentary.`;
 }
 
 Deno.serve(async (req) => {
+  // Always handle CORS preflight without touching secrets
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
@@ -194,8 +189,25 @@ Deno.serve(async (req) => {
     if (userErr || !userRes?.user) return text("Unauthorized", 401);
     const user = userRes.user;
 
-    // Body (NOW accepts file_id)
+    // --- Fast trial-cap precheck (BEFORE any AI work) ---
+    const isAnon =
+      user?.app_metadata?.provider === "anonymous" ||
+      user?.user_metadata?.is_anonymous === true ||
+      (Array.isArray(user?.identities) &&
+        user.identities.some((i: any) => i?.provider === "anonymous"));
+
+    if (isAnon) {
+      const { count: quizCount, error: cErr } = await supa
+        .from("quizzes")
+        .select("id", { count: "exact", head: true });
+      if (!cErr && (quizCount ?? 0) >= 2) {
+        return text("Free trial limit reached. Create an account to make more quizzes.", 403);
+      }
+    }
+
+    // Body (accepts file_id)
     const { title, topic, count, group_id, file_id } = await req.json();
+
     const n = Math.max(1, Math.min(Number(count) || 10, 30));
     const safeTitle = String(title || "Generated Quiz").slice(0, 120);
     const prompt = String(topic || "Create programming quiz questions.").slice(0, 2000);
@@ -245,16 +257,15 @@ Deno.serve(async (req) => {
           n,
           k: 15,
         });
-        // Keep doc context bounded (both in count and characters)
+        // Keep doc context bounded
         const joined = chunks.join("\n\n");
         docContext = joined.length > 12000 ? joined.slice(0, 12000) : joined;
       } catch {
-        // If retrieval fails, proceed without context
         docContext = "";
       }
     }
 
-    // Round 1 (now with docContext)
+    // Generate questions
     let generated = await llmGenerate(n, prompt, priorPrompts, docContext);
 
     // Server-side novelty enforcement:
@@ -262,7 +273,7 @@ Deno.serve(async (req) => {
     const priorSeen = new Set(priorPrompts.map(normalize));
     let unique = generated.filter((qa) => !priorSeen.has(normalize(qa.prompt)));
 
-    // 2) Drop near-duplicates vs prior (very similar phrasing)
+    // 2) Drop near-duplicates vs prior
     if (priorPrompts.length > 0) {
       unique = unique.filter((qa) => {
         for (const p of priorPrompts) {
@@ -306,18 +317,22 @@ Deno.serve(async (req) => {
 
     // Insert quiz (include group_id if present)
     const { data, error } = await supa
-  .from("quizzes")
-  .insert({
-    user_id: user.id,
-    title: safeTitle,
-    questions: generated,
-    group_id: targetGroupId,
-    file_id: file_id || null, // <-- store the indexed source id
-  })
-  .select("id, group_id, file_id")
-  .single();
+      .from("quizzes")
+      .insert({
+        user_id: user.id,
+        title: safeTitle,
+        questions: generated,
+        group_id: targetGroupId,
+        file_id: file_id || null,
+      })
+      .select("id, group_id, file_id")
+      .single();
 
     if (error) {
+      // If RLS blocked the insert (e.g., trial cap), forward a 403 for the client to catch.
+      if ((error as any).code === "42501") {
+        return text("Free trial limit reached. Create an account to make more quizzes.", 403);
+      }
       console.error("DB insert failed:", error);
       return text(`Failed to insert quiz: ${error.message}`, 500);
     }
@@ -325,6 +340,7 @@ Deno.serve(async (req) => {
     return json({ id: data.id, group_id: data.group_id }, 200);
   } catch (e: any) {
     console.error("Unhandled:", e);
+    // Return CORS-safe error
     return text(`Server error: ${e?.message ?? e}`, 500);
   }
 });

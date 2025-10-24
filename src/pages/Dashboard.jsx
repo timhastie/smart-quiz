@@ -11,13 +11,144 @@ GlobalWorkerOptions.workerSrc = workerSrc;
 
 
 export default function Dashboard() {
-  const { user, signout } = useAuth();
+  // auth
+const { user, ready, signout } = useAuth();
+
+// Robust anonymous detector that covers multiple SDK shapes
+function computeIsAnon(u) {
+  if (!u) return false;
+
+  const prov = u.app_metadata?.provider || null;
+  const provs = Array.isArray(u.app_metadata?.providers)
+    ? u.app_metadata.providers
+    : [];
+
+  return (
+    u.is_anonymous === true ||                        // sometimes top-level
+    u.user_metadata?.is_anonymous === true ||         // sometimes in user_metadata
+    prov === "anonymous" ||                           // single provider
+    provs.includes("anonymous") ||                    // providers array
+    (Array.isArray(u.identities) &&
+      u.identities.some((i) => i?.provider === "anonymous")) ||
+    // fallback: no email and no non-anon providers known
+    (!u.email && (provs.length === 0 || provs.includes("anonymous")))
+  );
+}
+
+const isAnon = computeIsAnon(user);
+
+// (optional) temporary logger — remove after verifying
+useEffect(() => {
+  if (!ready) return;
+  const snapshot = {
+    isAnon,
+    email: user?.email ?? null,
+    app_provider: user?.app_metadata?.provider ?? null,
+    app_providers: user?.app_metadata?.providers ?? null,
+    identities: Array.isArray(user?.identities)
+      ? user.identities.map((i) => i?.provider)
+      : null,
+    is_anonymous_top: user?.is_anonymous ?? null,
+    is_anonymous_meta: user?.user_metadata?.is_anonymous ?? null,
+  };
+  console.log("auth snapshot", snapshot);
+}, [ready, user, isAnon]);
   const nav = useNavigate();
 
   const [quizzes, setQuizzes] = useState([]);
 
   const [scoresByQuiz, setScoresByQuiz] = useState({}); // { [quizId]: percent }
 
+   // auth modal
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPass, setAuthPass] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authMessage, setAuthMessage] = useState("");
+
+  // Upgrade current anonymous user -> email/password (keeps same user.id & data)
+  async function upgradeToEmailPassword() {
+  try {
+    setAuthBusy(true);
+
+    const email = (authEmail || "").trim();
+    const password = authPass || "";
+
+    if (!email || !password) {
+      alert("Please enter email and password.");
+      return;
+    }
+
+    // Step 1: set email (may trigger a confirmation email depending on your project settings)
+    const { error: e1 } = await supabase.auth.updateUser({ email });
+    if (e1) {
+      alert(e1.message || "Failed to set email.");
+      return;
+    }
+
+    // Step 2: set password (some projects require confirming email before this succeeds)
+    const { error: e2 } = await supabase.auth.updateUser({ password });
+    if (e2) {
+      alert(e2.message || "Failed to set password.");
+      return;
+    }
+
+    alert("Account created! You’re now signed in with email/password.");
+    setAuthMessage("");     // <-- clear any trial message
+    setAuthOpen(false);     // close modal
+  } catch (err) {
+    console.error(err);
+    alert("Something went wrong. Please try again.");
+  } finally {
+    setAuthBusy(false);
+  }
+}
+
+// (Optional) Sign in to existing account (replaces the guest session)
+// NOTE: This will NOT merge guest data. Prefer upgradeToEmailPassword above.
+async function signInExisting() {
+  try {
+    setAuthBusy(true);
+
+    const email = (authEmail || "").trim();
+    const password = authPass || "";
+
+    if (!email || !password) {
+      alert("Please enter email and password.");
+      return;
+    }
+
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      alert(error.message || "Failed to sign in.");
+      return;
+    }
+
+    setAuthMessage("");     // <-- clear any trial message
+    setAuthOpen(false);     // close modal
+  } catch (err) {
+    console.error(err);
+    alert("Something went wrong. Please try again.");
+  } finally {
+    setAuthBusy(false);
+  }
+}
+
+  // NEW: sign out, then open the auth modal on top of the dashboard
+async function handleSignOut() {
+  await signout();
+  setAuthMessage("You’re signed out. Sign in or create an account to save your progress.");
+  setAuthOpen(true);
+}
+
+  // guest trial state (limit = 2)
+  const [trial, setTrial] = useState({ isAnon: false, remaining: Infinity, loading: true });
+
+  // Open our nice modal with a friendly message (only used when trial cap is hit)
+function openSignupModal(msg) {
+  setAuthMessage(msg || "Free trial limit reached. Create an account to make more quizzes.");
+  setAuthOpen(true);
+}
 
   // single delete
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -25,14 +156,16 @@ export default function Dashboard() {
   const [deleting, setDeleting] = useState(false);
 
   // AI generate
-  const [genOpen, setGenOpen] = useState(false);
-  const [gTitle, setGTitle] = useState("Bash Top 10");
-  const [gTopic, setGTopic] = useState("Create 10 questions that test the 10 most-used Bash commands.");
-  const [gCount, setGCount] = useState(10);
-  const [generating, setGenerating] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [gGroupId, setGGroupId] = useState(""); // "" => No group
-  const [gFile, setGFile] = useState(null); // <— newly added
+const [genOpen, setGenOpen] = useState(false);
+
+// leave these empty so the UI shows placeholders instead of hard text
+const [gTitle, setGTitle]   = useState("");
+const [gTopic, setGTopic]   = useState("");
+const [gCount, setGCount] = useState(10);
+const [generating, setGenerating] = useState(false);
+const [creating, setCreating]     = useState(false);
+const [gGroupId, setGGroupId]     = useState(""); // "" => No group
+const [gFile, setGFile]           = useState(null);
 
 
   // create group inside AI modal
@@ -125,8 +258,9 @@ const scoreSort = "asc"; // keep behavior: lowest scores first by default
   setScoresByQuiz(map);
 }
   useEffect(() => {
-    if (user) load();
-  }, [user?.id, filterGroupId]);
+  if (ready && user) load();
+}, [ready, user?.id, filterGroupId]);
+
 
   useEffect(() => {
     if (!user?.id) return;
@@ -139,6 +273,25 @@ const scoreSort = "asc"; // keep behavior: lowest scores first by default
       setGroups(data ?? []);
     })();
   }, [user?.id]);
+
+  // compute “free quizzes left” for anonymous users (limit = 2)
+useEffect(() => {
+  if (!user?.id) return;
+  (async () => {
+    if (!isAnon) {
+      setTrial({ isAnon: false, remaining: Infinity, loading: false });
+      return;
+    }
+    const { count } = await supabase
+      .from("quizzes")
+      .select("id", { count: "exact", head: true });
+    setTrial({
+      isAnon: true,
+      remaining: Math.max(0, 2 - (count ?? 0)),
+      loading: false,
+    });
+  })();
+}, [isAnon, user?.id, quizzes.length]); // re-check after list changes
 
   // ---------- helpers: selection ----------
   function toggleSelected(quizId) {
@@ -238,20 +391,32 @@ const scoreSort = "asc"; // keep behavior: lowest scores first by default
   }
 
   // ---------- create / delete (single) ----------
-  async function createQuiz() {
-    if (creating) return;
-    try {
-      setCreating(true);
-      const { data, error } = await supabase
-        .from("quizzes")
-        .insert({ user_id: user.id, title: "Untitled Quiz", questions: [] })
-        .select("id")
-        .single();
-      if (!error) nav(`/edit/${data.id}`);
-    } finally {
-      setCreating(false);
+   async function createQuiz() {
+  if (creating) return;
+  try {
+    setCreating(true);
+    const { data, error } = await supabase
+      .from("quizzes")
+      .insert({ user_id: user.id, title: "Untitled Quiz", questions: [] })
+      .select("id")
+      .single();
+
+    if (error) {
+      // RLS block when guest over the trial cap
+      if (error.code === "42501") {
+        openSignupModal("Free trial limit reached. Create an account to make more quizzes.");
+        return;
+      }
+      alert(error.message || "Failed to create quiz.");
+      return;
     }
+
+    nav(`/edit/${data.id}`);
+  } finally {
+    setCreating(false);
   }
+}
+
 
   async function handleDelete() {
     if (!target) return;
@@ -318,13 +483,41 @@ const scoreSort = "asc"; // keep behavior: lowest scores first by default
     }
 
     // Fallback: try as text
-    return await file.text();
+  return await file.text();
+}
+
+// Quick preflight: block guests at/over the limit before doing any work
+async function ensureCanCreate() {
+  // Re-check anon status + count right now (fresh)
+  const { data: ures } = await supabase.auth.getUser();
+  const anon =
+    !!ures?.user &&
+    Array.isArray(ures.user.identities) &&
+    ures.user.identities.some((i) => i?.provider === "anonymous");
+
+  if (!anon) return true;
+
+  const { count } = await supabase
+    .from("quizzes")
+    .select("id", { count: "exact", head: true });
+
+  if ((count ?? 0) >= 2) {
+    openSignupModal("Free trial limit reached. Create an account to make more quizzes.");
+    return false;
   }
+  return true;
+}
 
  // ---------- AI generate ----------
+// Replace your existing generateQuiz() with this version
 async function generateQuiz() {
   try {
     if (generating) return;
+
+    // Preflight: block instantly if at limit
+    const allowed = await ensureCanCreate();
+    if (!allowed) return;
+
     setGenerating(true);
 
     const { data: sessionRes } = await supabase.auth.getSession();
@@ -332,11 +525,11 @@ async function generateQuiz() {
     const count = Math.max(1, Math.min(Number(gCount) || 10, 30));
 
     // 1) Optional: index uploaded file (RAG)
-    let file_id = null;
+    let file_id = null; // <-- fixed: no TypeScript type here
     if (gFile) {
-      let raw = "";
+      let rawDoc = "";
       try {
-        raw = await extractTextFromFile(gFile);
+        rawDoc = await extractTextFromFile(gFile);
       } catch (e) {
         alert(`Couldn't read file "${gFile.name}". Please try a different file.\n\n${e}`);
         setGenerating(false);
@@ -344,7 +537,7 @@ async function generateQuiz() {
       }
 
       const LIMIT = 500_000; // ~500k chars
-      if (raw.length > LIMIT) raw = raw.slice(0, LIMIT);
+      if (rawDoc.length > LIMIT) rawDoc = rawDoc.slice(0, LIMIT);
 
       const idxRes = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/index-source`,
@@ -355,8 +548,8 @@ async function generateQuiz() {
             ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
           },
           body: JSON.stringify({
-            text: raw,              // server expects { text, file_name? }
-            file_name: gFile.name,  // optional
+            text: rawDoc,
+            file_name: gFile.name,
           }),
         }
       );
@@ -387,21 +580,27 @@ async function generateQuiz() {
           ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
         },
         body: JSON.stringify({
-          title: (gTitle || "").trim() || "Generated Quiz",
-          topic: (gTopic || "").trim(),   // server expects "topic"
+          // Use sensible defaults if fields are left blank
+          title: (gTitle || "").trim() || "Bash Top 10",
+          topic:
+            (gTopic || "").trim() ||
+            "Create 10 questions that test the 10 most-used Bash commands.",
           count,
           group_id: gGroupId || null,
-          file_id,                        // null when no upload
+          file_id,
         }),
       }
     );
 
-    // READ BODY ONCE
     let raw = "";
     try { raw = await res.text(); } catch {}
 
     if (!res.ok) {
-      alert(`Failed to generate quiz (${res.status}):\n${raw || "Unknown error"}`);
+      if (res.status === 403) {
+        openSignupModal("Free trial limit reached. Create an account to make more quizzes.");
+      } else {
+        alert(`Failed to generate quiz (${res.status}):\n${raw || "Unknown error"}`);
+      }
       setGenerating(false);
       return;
     }
@@ -417,7 +616,6 @@ async function generateQuiz() {
     setGenerating(false);
   }
 }
-
 
 
   async function createGroupForModal() {
@@ -575,38 +773,63 @@ async function generateQuiz() {
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       <header className="flex items-center justify-between p-4 border-b border-gray-800">
-        <h1 className="text-xl font-bold">Your Quizzes</h1>
-        <div className="flex items-center gap-3 text-sm">
-          <span className="text-gray-300">{user?.email}</span>
-          <button onClick={signout} className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600">
-            Sign out
-          </button>
-        </div>
-      </header>
+  <h1 className="text-xl font-bold">Your Quizzes</h1>
 
+  <div className="flex items-center gap-3 text-sm">
+    {!ready ? (
+      <span className="text-gray-400">Loading…</span>
+    ) : isAnon ? (
+      <>
+        <span className="text-gray-300">Guest</span>
+        {/* Guest button: open clean modal (no trial text) */}
+        <button
+          onClick={() => { setAuthMessage(""); setAuthOpen(true); }}
+          className="px-3 py-1 rounded bg-emerald-500 hover:bg-emerald-600 font-semibold"
+        >
+          Sign Up / Sign In
+        </button>
+      </>
+    ) : user ? (
+      <>
+        <span className="text-gray-300">{user.email}</span>
+        <button
+          onClick={handleSignOut /* this should setAuthMessage(...) and setAuthOpen(true) as we added earlier */}
+          className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600"
+        >
+          Sign out
+        </button>
+      </>
+    ) : (
+      // Fallback when there's no user yet: open clean modal (no trial text)
+      <button
+        onClick={() => { setAuthMessage(""); setAuthOpen(true); }}
+        className="px-3 py-1 rounded bg-emerald-500 hover:bg-emerald-600 font-semibold"
+      >
+        Sign Up / Sign In
+      </button>
+    )}
+  </div>
+</header>
       <main className="max-w-3xl mx-auto p-6">
         {/* TOOLBAR (single row, no wrapping/collapse) */}
         <div className="mb-6 flex flex-nowrap items-center gap-3">
           {/* Left: primary actions */}
           <div className="flex items-center gap-3 shrink-0">            
             <button
-              onClick={() => {
-                if (filterGroupId && filterGroupId !== "__none__") setGGroupId(filterGroupId);
-                else setGGroupId("");
-                setGenOpen(true);
-              }}
-              className="px-4 py-2 rounded bg-emerald-500 hover:bg-emerald-600 font-semibold disabled:opacity-60"
-              
-            >
-              + Generate Quiz with AI
-            </button>
-            <button
-              onClick={createQuiz}
-              disabled={creating}
-              className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600"
-            >
-              {creating ? "Creating…" : "+ New Quiz (Manual)"}
-            </button>
+  onClick={async () => {
+    if (filterGroupId && filterGroupId !== "__none__") setGGroupId(filterGroupId);
+    else setGGroupId("");
+
+    // Preflight: block instantly if at limit
+    const allowed = await ensureCanCreate();
+    if (!allowed) return;
+
+    setGenOpen(true);
+  }}
+  className="px-4 py-2 rounded bg-emerald-500 hover:bg-emerald-600 font-semibold disabled:opacity-60"
+>
+  + Generate Quiz with AI
+</button>
           </div>
 
           {/* Right: filters stacked, with bulk actions underneath (not crammed to the side) */}
@@ -798,6 +1021,101 @@ async function generateQuiz() {
     </div>
   </div>
 )}
+
+{/* Auth modal: upgrade guest OR sign in */}
+{authOpen && (
+  <div
+    className="fixed inset-0 bg-black/60 grid place-items-center z-[95]"
+    onClick={() => {
+      if (!authBusy) {
+        setAuthMessage("");   // <-- clear trial text on close
+        setAuthOpen(false);
+      }
+    }}
+    aria-modal="true"
+    role="dialog"
+  >
+    <div
+      className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <h2 className="text-xl font-bold mb-2">Create account or sign in</h2>
+
+      {/* Friendly trial message */}
+      <div className="mb-4 rounded-lg bg-emerald-900/30 border border-emerald-800 p-3 text-sm">
+        {authMessage || "Free trial limit reached. Create an account to make more quizzes."}
+      </div>
+
+      <p className="text-gray-300 mb-4 text-sm">
+        Creating an account upgrades your current guest session so your quizzes stay with you.
+      </p>
+
+      <label className="block text-sm text-gray-300 mb-1" htmlFor="auth-email">Email</label>
+      <input
+        id="auth-email"
+        className="w-full p-3 rounded bg-gray-900 text-white border border-gray-700 mb-3"
+        type="email"
+        placeholder="you@example.com"
+        value={authEmail}
+        onChange={(e) => setAuthEmail(e.target.value)}
+        autoFocus
+      />
+
+      <label className="block text-sm text-gray-300 mb-1" htmlFor="auth-pass">Password</label>
+      <input
+        id="auth-pass"
+        className="w-full p-3 rounded bg-gray-900 text-white border border-gray-700 mb-4"
+        type="password"
+        placeholder="••••••••"
+        value={authPass}
+        onChange={(e) => setAuthPass(e.target.value)}
+      />
+
+      <div className="flex flex-col sm:flex-row justify-end gap-2">
+        <button
+          className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-60"
+          onClick={() => {
+            if (!authBusy) {
+              setAuthMessage(""); // <-- clear trial text on close
+              setAuthOpen(false);
+            }
+          }}
+          disabled={authBusy}
+        >
+          Not now
+        </button>
+
+        {/* Primary: upgrade guest to email/password (preserves data) */}
+        <button
+          className="px-3 py-2 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60"
+          onClick={upgradeToEmailPassword}
+          disabled={authBusy}
+          title="Upgrade this guest to an email/password account"
+        >
+          {authBusy ? "Working…" : "Create account"}
+        </button>
+
+        {/* Secondary: sign in to existing account (replaces guest session) */}
+        <button
+          className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-60"
+          onClick={async () => {
+            const ok = confirm(
+              "Signing in to an existing account will replace your guest session. Continue?"
+            );
+            if (ok) await signInExisting();
+          }}
+          disabled={authBusy}
+          title="Sign in to an existing account (replaces guest session)"
+        >
+          Sign in instead
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
+
+
       {/* AI generate */}
       {genOpen && (
         <div
@@ -818,12 +1136,12 @@ async function generateQuiz() {
                   Name
                 </label>
                 <input
-                  id="gen-title"
-                  className="field w-full"
-                  placeholder="Quiz title"
-                  value={gTitle}
-                  onChange={(e) => setGTitle(e.target.value)}
-                />
+  id="gen-title"
+  className="field w-full placeholder:text-gray-400"
+  placeholder="Bash Top 10"
+  value={gTitle}
+  onChange={(e) => setGTitle(e.target.value)}
+/>
               </div>
 
               <div className="sm:col-span-2">
@@ -831,12 +1149,12 @@ async function generateQuiz() {
                   Prompt
                 </label>
                 <textarea
-                  id="gen-topic"
-                  className="field-textarea w-full min-h-[8rem] resize-y"
-                  placeholder="Describe what to generate…"
-                  value={gTopic}
-                  onChange={(e) => setGTopic(e.target.value)}
-                />
+  id="gen-topic"
+  className="field-textarea w-full min-h-[8rem] resize-y placeholder:text-gray-400"
+  placeholder="Create 10 questions that test the 10 most-used Bash commands."
+  value={gTopic}
+  onChange={(e) => setGTopic(e.target.value)}
+/>
               </div>
 
                             {/* Optional source file (PDF/TXT/MD) */}
