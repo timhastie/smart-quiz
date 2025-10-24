@@ -111,8 +111,6 @@ function strictFactCorrect(userAns, expected) {
   return false;
 }
 
-
-
 export default function Play() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -154,11 +152,11 @@ export default function Play() {
   useEffect(() => {
     (async () => {
       const { data, error } = await supabase
-  .from("quizzes")
-  .select("title, questions, file_id")   // <-- add file_id
-  .eq("id", quizId)
-  .eq("user_id", user.id)
-  .single();
+        .from("quizzes")
+        .select("title, questions, file_id")
+        .eq("id", quizId)
+        .eq("user_id", user.id)
+        .single();
       if (!error && data) {
         const len = data.questions?.length ?? 0;
         setQuiz(data);
@@ -181,7 +179,6 @@ export default function Play() {
   const isFirst = index === 0;
   const isLast = index === total - 1;
   const hasConfetti = (scorePct >= 90);
-
 
   // Feedback helpers
   const isPositiveFeedback = feedback.startsWith("✅");
@@ -231,88 +228,87 @@ export default function Play() {
   }
 
   async function submit(e) {
-  e?.preventDefault?.();
-  if (!current) return;
+    e?.preventDefault?.();
+    if (!current) return;
 
-  const userAns = input.trim();
-  const expected = String(current.answer ?? "");
-  const question = String(current.prompt ?? "");
-  let isCorrect = false;
+    const userAns = input.trim();
+    const expected = String(current.answer ?? "");
+    const question = String(current.prompt ?? "");
+    let isCorrect = false;
 
-  // 1) Strict mode (exact string)
-  if (strict) {
-    isCorrect = userAns === expected;
-  } else {
-    // 2) STRICT FACT GUARD: years/numbers/codes → exact only
-    if (isStrictFact(question, expected)) {
-      isCorrect = strictFactCorrect(userAns, expected);
-      if (!isCorrect) setFeedback("Incorrect ❌ (this one requires the exact value)");
+    // 1) Strict mode (exact string)
+    if (strict) {
+      isCorrect = userAns === expected;
     } else {
-      // 3) Non-fact: try cheap local fuzzy
-      const local = localGrade(userAns, expected);
-      if (local.pass) {
-        isCorrect = true;
+      // 2) STRICT FACT GUARD: years/numbers/codes → exact only
+      if (isStrictFact(question, expected)) {
+        isCorrect = strictFactCorrect(userAns, expected);
+        if (!isCorrect) setFeedback("Incorrect ❌ (this one requires the exact value)");
       } else {
-        // 4) Fallback to server judge (LLM) for semantic fairness
-        try {
-          const { data: sessionRes } = await supabase.auth.getSession();
-          const jwt = sessionRes?.session?.access_token;
-          const res = await fetch(
-            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/grade-answer`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
-              },
-              body: JSON.stringify({
-                question,           // include the prompt so server can decide strictness too
-                expected,           // stored reference
-                user_answer: userAns,
-              }),
-            }
-          );
-          if (res.ok) {
-            const out = await res.json(); // { correct, score, reasons, ... }
-            isCorrect = !!out.correct;
-            if (!isCorrect) {
+        // 3) Non-fact: try cheap local fuzzy
+        const local = localGrade(userAns, expected);
+        if (local.pass) {
+          isCorrect = true;
+        } else {
+          // 4) Fallback to server judge (LLM) for semantic fairness
+          try {
+            const { data: sessionRes } = await supabase.auth.getSession();
+            const jwt = sessionRes?.session?.access_token;
+            const res = await fetch(
+              `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/grade-answer`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+                },
+                body: JSON.stringify({
+                  question,           // include the prompt so server can decide strictness too
+                  expected,           // stored reference
+                  user_answer: userAns,
+                }),
+              }
+            );
+            if (res.ok) {
+              const out = await res.json(); // { correct, score, reasons, ... }
+              isCorrect = !!out.correct;
+              if (!isCorrect) {
+                setFeedback("Incorrect ❌ Press c to continue");
+              }
+            } else {
               setFeedback("Incorrect ❌ Press c to continue");
             }
-          } else {
+          } catch {
             setFeedback("Incorrect ❌ Press c to continue");
           }
-        } catch {
-          setFeedback("Incorrect ❌ Press c to continue");
         }
       }
     }
+
+    // ---- Track per-question state (unchanged) ----
+    const attemptedNext = attempted.slice();
+    const firstTryNext = firstTryCorrect.slice();
+    const isFirstAttempt = !attemptedNext[index];
+
+    attemptedNext[index] = true;
+    if (isFirstAttempt) firstTryNext[index] = !!isCorrect;
+
+    setAttempted(attemptedNext);
+    setFirstTryCorrect(firstTryNext);
+
+    if (isCorrect) {
+      setAnswered((arr) => {
+        const next = arr.slice();
+        next[index] = true;
+        return next;
+      });
+      setFeedback("✅ Correct! Press C to continue.");
+    } else if (strict || isStrictFact(question, expected)) {
+      setFeedback("Incorrect ❌ (exact value needed) Press c to continue");
+    }
+
+    maybeFinish(attemptedNext, firstTryNext);
   }
-
-  // ---- Track per-question state (unchanged) ----
-  const attemptedNext = attempted.slice();
-  const firstTryNext = firstTryCorrect.slice();
-  const isFirstAttempt = !attemptedNext[index];
-
-  attemptedNext[index] = true;
-  if (isFirstAttempt) firstTryNext[index] = !!isCorrect;
-
-  setAttempted(attemptedNext);
-  setFirstTryCorrect(firstTryNext);
-
-  if (isCorrect) {
-    setAnswered((arr) => {
-      const next = arr.slice();
-      next[index] = true;
-      return next;
-    });
-    setFeedback("✅ Correct! Press C to continue.");
-  } else if (strict || isStrictFact(question, expected)) {
-    setFeedback("Incorrect ❌ (exact value needed) Press c to continue");
-  }
-
-  maybeFinish(attemptedNext, firstTryNext);
-}
-
 
   function continueIfCorrect() {
     if (!canContinue) return;
@@ -388,64 +384,78 @@ export default function Play() {
   if (!quiz) return null;
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white" onKeyDown={onKey} tabIndex={0}>
-      <header className="flex items-center justify-between p-4 border-b border-gray-800">
-        <h1 className="text-xl font-bold">{quiz.title || "Quiz"}</h1>
-        <Link to="/" className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600">
+    <div
+  className="quiz-play min-h-screen bg-gray-900 text-white"
+  onKeyDown={onKey}
+  tabIndex={0}
+>
+      <header className="flex items-center justify-between p-3 sm:p-4 border-b border-gray-800">
+        <h1 className="text-lg sm:text-xl font-bold truncate pr-3">
+          {quiz.title || "Quiz"}
+        </h1>
+        <Link
+          to="/"
+          className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm sm:text-base"
+        >
           Back
         </Link>
       </header>
 
-      <main className="max-w-2xl mx-auto p-6 text-2xl">
+      <main className="max-w-2xl mx-auto p-4 sm:p-6 text-base sm:text-2xl">
         {current ? (
           <>
-            <p className="mb-4">
-              <span className="mr-2 inline-block w-6 text-right">{index + 1}.</span>
+            <p className="mb-3 sm:mb-4 leading-snug">
+              <span className="mr-2 inline-block w-6 text-right">
+                {index + 1}.
+              </span>
               {current.prompt}
             </p>
 
-            {/* Unified 2-col layout: col1 = content at textarea width, col2 = Enter button */}
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-3">
-              {/* Row 1: Strict (left) + Display answer (right) */}
-              <div className="col-start-1 flex items-center justify-between">
-                <label className="flex items-center gap-2 text-base">
+            {/* On mobile: single column; from sm: two columns with a narrow action rail */}
+            <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-3">
+              {/* Row 1: Strict + Display answer (stack on mobile) */}
+              <div className="col-start-1 flex flex-col sm:flex-row sm:items-center gap-2">
+                <label className="inline-flex items-center gap-2 text-sm sm:text-base">
                   <input
                     type="checkbox"
                     className="h-4 w-4"
                     checked={strict}
                     onChange={(e) => setStrict(e.target.checked)}
                   />
-                  <span className="text-sm text-gray-300">Strict mode</span>
+                  <span className="text-gray-300">Strict mode</span>
                 </label>
 
-                <button
-                  type="button"
-                  className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-base"
-                  onClick={() => {
-                    const ans = String(current.answer ?? "");
-                    handleChange(ans);
-                    areaRef.current?.focus();
-                  }}
-                >
-                  Display answer
-                </button>
+                <div className="sm:ml-auto">
+                  <button
+                    type="button"
+                    className="w-full sm:w-auto px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm sm:text-base"
+                    onClick={() => {
+                      const ans = String(current.answer ?? "");
+                      handleChange(ans);
+                      areaRef.current?.focus();
+                    }}
+                  >
+                    Display answer
+                  </button>
+                </div>
               </div>
-              <div /> {/* empty col2 cell for row 1 */}
+              <div className="hidden sm:block" />
 
               {/* Row 2: Textarea (col1) + Enter (col2) */}
               <form onSubmit={submit} className="contents">
                 <textarea
-                  ref={areaRef}
-                  className="w-full p-4 text-black text-xl rounded"
-                  value={input}
-                  onChange={(e) => handleChange(e.target.value)}
-                  placeholder="Type your answer and press Enter…"
-                  onKeyDown={onTextAreaKeyDown}
-                  rows={4}
-                />
+  ref={areaRef}
+  className="w-full p-4 rounded bg-white text-gray-900 border border-gray-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-base sm:text-xl placeholder:text-gray-500"
+  value={input}
+  onChange={(e) => handleChange(e.target.value)}
+  placeholder="Type your answer and press Enter…"
+  onKeyDown={onTextAreaKeyDown}
+  rows={5}
+  inputMode="text"
+/>
                 <button
                   type="submit"
-                  className="self-center shrink-0 px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-base h-12"
+                  className="sm:self-start sm:shrink-0 px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm sm:text-base h-12 w-full sm:w-auto"
                   aria-label="Submit answer"
                   title="Submit (same as pressing Enter)"
                 >
@@ -453,25 +463,25 @@ export default function Play() {
                 </button>
               </form>
 
-              {/* Row 4: Prev / Unanswered / Next — feedback lives under Previous */}
-              <div className="grid grid-cols-3 items-start text-base col-start-1">
-                {/* Left cell: Previous + feedback below it */}
-                <div className="justify-self-start">
+              {/* Controls row: Previous / Unanswered / Next with feedback under Previous */}
+              <div className="col-start-1 grid grid-cols-1 sm:grid-cols-3 items-start text-sm sm:text-base gap-2">
+                {/* Previous + feedback */}
+                <div className="justify-self-stretch sm:justify-self-start">
                   {!isFirst ? (
                     <button
                       type="button"
-                      className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-base"
+                      className="w-full sm:w-auto px-4 py-2 rounded bg-gray-700 hover:bg-gray-600"
                       onClick={goPrev}
                     >
                       Previous Question
                     </button>
                   ) : (
-                    <div />
+                    <div className="h-10" />
                   )}
 
                   {feedback ? (
                     <p
-                      className={`mt-2 text-lg ${
+                      className={`mt-2 text-base sm:text-lg ${
                         isPositiveFeedback ? "text-green-400" : "text-red-400"
                       }`}
                       aria-live="polite"
@@ -481,26 +491,26 @@ export default function Play() {
                   ) : null}
                 </div>
 
-                {/* Middle cell: Go to Unanswered (centered) */}
-                <div className="justify-self-center">
+                {/* Go to Unanswered */}
+                <div className="justify-self-stretch sm:justify-self-center">
                   {showGoToUnanswered ? (
                     <button
                       type="button"
-                      className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-base"
+                      className="w-full sm:w-auto px-4 py-2 rounded bg-gray-700 hover:bg-gray-600"
                       onClick={jumpToFirstUnanswered}
                     >
                       Go to Unanswered Question
                     </button>
                   ) : (
-                    <div />
+                    <div className="h-10" />
                   )}
                 </div>
 
-                {/* Right cell: Next (right-aligned) */}
-                <div className="justify-self-end">
+                {/* Next */}
+                <div className="justify-self-stretch sm:justify-self-end">
                   <button
                     type="button"
-                    className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-base"
+                    className="w-full sm:w-auto px-4 py-2 rounded bg-gray-700 hover:bg-gray-600"
                     onClick={goNext}
                   >
                     Next Question
@@ -508,35 +518,35 @@ export default function Play() {
                 </div>
               </div>
 
-              <div /> {/* empty col2 cell for row 4 */}
+              <div className="hidden sm:block" />
             </div>
           </>
         ) : (
-          <p>No questions yet. Add some in the editor.</p>
+          <p className="text-gray-300">No questions yet. Add some in the editor.</p>
         )}
       </main>
 
       {/* Results Modal */}
       {showResult && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-800 text-white rounded-2xl p-6 max-w-md w-full">
-            <h2 className="text-2xl font-bold mb-2">
-  Your Score {hasConfetti ? "🎉" : ""}
-</h2>
-<p className="text-lg mb-6">
-  You scored <span className="font-semibold">{scorePct}%</span> on this quiz.
-</p>
-            <div className="flex items-center justify-end gap-3">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-3 sm:p-4 z-50">
+          <div className="bg-gray-800 text-white rounded-2xl p-5 sm:p-6 max-w-md w-full max-h-[85vh] overflow-y-auto">
+            <h2 className="text-xl sm:text-2xl font-bold mb-2">
+              Your Score {hasConfetti ? "🎉" : ""}
+            </h2>
+            <p className="text-base sm:text-lg mb-6">
+              You scored <span className="font-semibold">{scorePct}%</span> on this quiz.
+            </p>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2">
               <button
                 type="button"
-                className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600"
+                className="w-full sm:w-auto px-4 py-2 rounded bg-gray-700 hover:bg-gray-600"
                 onClick={retake}
               >
                 Retake Quiz
               </button>
               <button
                 type="button"
-                className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500"
+                className="w-full sm:w-auto px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500"
                 onClick={() => navigate("/")}
               >
                 Return to Dashboard

@@ -1,3 +1,4 @@
+// src/pages/Editor.jsx
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
@@ -222,30 +223,38 @@ export default function Editor() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
-      <header className="flex items-center justify-between p-4 border-b border-gray-800">
-        <h1 className="text-xl font-bold">Edit Quiz</h1>
-        <div className="flex gap-2">
-          <Link to="/" className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600">
+      {/* Header */}
+      <header className="flex flex-wrap items-center gap-2 justify-between p-3 sm:p-4 border-b border-gray-800">
+        <h1 className="text-lg sm:text-xl font-bold">Edit Quiz</h1>
+        <div className="flex w-full sm:w-auto gap-2">
+          <Link
+            to="/"
+            className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm sm:text-base text-center"
+          >
             Back
           </Link>
           <button
             onClick={save}
-            className="px-3 py-1 rounded bg-emerald-500 hover:bg-emerald-600 font-semibold"
+            className="w-full sm:w-auto px-3 py-2 rounded bg-emerald-500 hover:bg-emerald-600 font-semibold text-sm sm:text-base"
           >
             Save
           </button>
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto p-6 space-y-6">
-        {msg && <div className="text-emerald-400">{msg}</div>}
+      <main className="max-w-3xl mx-auto p-4 sm:p-6 space-y-6">
+        {msg && (
+          <div className="rounded-lg border border-emerald-800 bg-emerald-900/30 text-emerald-300 px-3 py-2 text-sm sm:text-base">
+            {msg}
+          </div>
+        )}
 
         {/* Title + Group row */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
           <div className="md:col-span-2">
-            <label className="block text-sm text-gray-300 mb-1">Title</label>
+            <label className="block text-xs sm:text-sm text-gray-300 mb-1">Title</label>
             <input
-              className="w-full p-3 rounded text-black text-xl"
+              className="w-full p-3 rounded bg-white text-gray-900 border border-gray-300 placeholder:text-gray-500 text-base sm:text-lg"
               placeholder="Quiz title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -253,10 +262,10 @@ export default function Editor() {
           </div>
 
           <div>
-            <label className="block text-sm text-gray-300 mb-1">Group</label>
+            <label className="block text-xs sm:text-sm text-gray-300 mb-1">Group</label>
             <div className="flex gap-2">
               <select
-                className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 disabled:opacity-60"
+                className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 disabled:opacity-60 text-base"
                 value={groupId}
                 onChange={handleGroupChange}
                 disabled={savingGroup}
@@ -269,7 +278,7 @@ export default function Editor() {
                 ))}
               </select>
               <button
-                className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 whitespace-nowrap"
+                className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 whitespace-nowrap text-sm sm:text-base"
                 onClick={() => setNewOpen(true)}
                 disabled={savingGroup}
               >
@@ -283,28 +292,36 @@ export default function Editor() {
         <div className="space-y-4">
           {questions.map((row, i) => (
             <div key={i} className="bg-gray-800 p-4 rounded-xl">
+              <label className="block text-xs sm:text-sm text-gray-300 mb-1">
+                Question {i + 1}
+              </label>
               <textarea
-                className="w-full p-3 rounded text-black mb-3"
+                className="w-full p-3 rounded bg-white text-gray-900 border border-gray-300 placeholder:text-gray-500 mb-3 text-base sm:text-lg"
                 placeholder={`Question ${i + 1} prompt`}
                 value={row.prompt}
                 onChange={(e) => updateRow(i, "prompt", e.target.value)}
+                rows={3}
               />
+              <label className="block text-xs sm:text-sm text-gray-300 mb-1">
+                Exact answer
+              </label>
               <textarea
-                className="w-full p-3 rounded text-black"
+                className="w-full p-3 rounded bg-white text-gray-900 border border-gray-300 placeholder:text-gray-500 text-base sm:text-lg"
                 placeholder="Exact correct answer"
                 value={row.answer}
                 onChange={(e) => updateRow(i, "answer", e.target.value)}
+                rows={2}
               />
-              <div className="mt-3 flex justify-end gap-2">
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-2">
                 <button
                   onClick={save}
-                  className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600"
+                  className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm sm:text-base"
                 >
                   Save
                 </button>
                 <button
                   onClick={() => removeRow(i)}
-                  className="px-3 py-1 rounded bg-red-500 hover:bg-red-600"
+                  className="w-full sm:w-auto px-3 py-2 rounded bg-red-500 hover:bg-red-600 text-sm sm:text-base"
                 >
                   Delete
                 </button>
@@ -315,7 +332,7 @@ export default function Editor() {
 
         <button
           onClick={addRow}
-          className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600"
+          className="w-full sm:w-auto px-4 py-2 rounded bg-gray-700 hover:bg-gray-600"
         >
           + Add Question
         </button>
@@ -324,11 +341,11 @@ export default function Editor() {
       {/* New Group modal */}
       {newOpen && (
         <div
-          className="fixed inset-0 bg-black/60 grid place-items-center z-50"
+          className="fixed inset-0 bg-black/60 flex items-center justify-center p-3 sm:p-4 z-50"
           onClick={() => setNewOpen(false)}
         >
           <div
-            className="w-full max-w-sm bg-gray-800 text-white rounded-2xl p-6 shadow-xl"
+            className="w-full max-w-sm bg-gray-800 text-white rounded-2xl p-5 sm:p-6 shadow-xl max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               if (creatingGroup) return;
@@ -340,7 +357,7 @@ export default function Editor() {
             }}
             tabIndex={0}
           >
-            <h2 className="text-lg font-bold mb-3">Create new group</h2>
+            <h2 className="text-lg sm:text-xl font-bold mb-3">Create new group</h2>
             <input
               className="w-full p-3 rounded bg-gray-900 text-white border border-gray-700 mb-4"
               placeholder="Group name"
@@ -348,16 +365,16 @@ export default function Editor() {
               onChange={(e) => setNewName(e.target.value)}
               autoFocus
             />
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-col sm:flex-row justify-end gap-2">
               <button
-                className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600"
+                className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600"
                 onClick={() => setNewOpen(false)}
                 disabled={creatingGroup}
               >
                 Cancel
               </button>
               <button
-                className="px-3 py-1 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60"
+                className="w-full sm:w-auto px-3 py-2 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60"
                 onClick={createGroup}
                 disabled={creatingGroup || !newName.trim()}
               >
@@ -371,28 +388,28 @@ export default function Editor() {
       {/* Empty-group cleanup modal */}
       {cleanupOpen && cleanupGroup && (
         <div
-          className="fixed inset-0 bg-black/60 grid place-items-center z-[60]"
+          className="fixed inset-0 bg-black/60 flex items-center justify-center p-3 sm:p-4 z-[60]"
           onClick={() => !cleaning && setCleanupOpen(false)}
         >
           <div
-            className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl"
+            className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-5 sm:p-6 shadow-xl max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-xl font-bold mb-2">Delete empty group?</h2>
             <p className="text-gray-300 mb-6">
-              The group <span className="font-semibold">{cleanupGroup.name}</span> no longer has any quizzes.
-              Would you like to delete this group?
+              The group <span className="font-semibold">{cleanupGroup.name}</span> no longer has any
+              quizzes. Would you like to delete this group?
             </p>
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-col sm:flex-row justify-end gap-2">
               <button
-                className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600"
+                className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600"
                 onClick={() => setCleanupOpen(false)}
                 disabled={cleaning}
               >
                 Keep group
               </button>
               <button
-                className="px-3 py-1 rounded bg-red-500 hover:bg-red-600 disabled:opacity-60"
+                className="w-full sm:w-auto px-3 py-2 rounded bg-red-500 hover:bg-red-600 disabled:opacity-60"
                 onClick={deleteEmptyGroupNow}
                 disabled={cleaning}
               >
