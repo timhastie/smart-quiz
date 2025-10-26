@@ -38,6 +38,9 @@ export default function AuthCallback() {
         const guestFromLS = localStorage.getItem("guest_to_adopt");
         const oldId = guestFromUrl || guestFromLS;
 
+        console.log("[callback] guestFromUrl:", guestFromUrl, "guestFromLS:", guestFromLS);
+
+
         if (oldId) {
           const { error: adoptErr } = await supabase.rpc("adopt_guest", {
             p_old_user: oldId,

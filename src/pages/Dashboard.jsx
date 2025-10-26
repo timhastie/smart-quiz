@@ -66,10 +66,10 @@ export default function Dashboard() {
 
   // Upgrade current anonymous user -> email/password (keeps same user.id & data)
   // Upgrade current anonymous user -> email/password (keeps same user.id & data)
-async function upgradeToEmailPassword() {
+// Create account (guest → email). Triggers the email that includes ?guest=<anonId>
+async function handleCreateAccount() {
   try {
     setAuthBusy(true);
-
     const email = (authEmail || "").trim();
     const password = authPass || "";
     if (!email || !password) {
@@ -77,24 +77,17 @@ async function upgradeToEmailPassword() {
       return;
     }
 
-    // IMPORTANT: this will link the email/password to the *anonymous* user
-    // if they're a guest; otherwise it performs a normal sign-up.
-    await signupOrLink(email, password);
+    await signupOrLink(email, password); // <-- THIS kicks off the adoption flow
 
-    // If your project requires email confirmation, user must click the email link.
-    alert(
-      "Account created. If email confirmation is enabled, check your inbox.\nYour quizzes stay attached to this account."
-    );
-    setAuthMessage("");
-    setAuthOpen(false);
+    // keep the modal open so the user sees this instruction
+    setAuthMessage("Check your email to confirm your account, then return here.");
   } catch (err) {
     console.error(err);
-    alert(err?.message || "Couldn't create account. Please try again.");
+    alert(err?.message || "Failed to start signup.");
   } finally {
     setAuthBusy(false);
   }
 }
-
 
   // (Optional) Sign in to existing account (replaces the guest session)
   // NOTE: This will NOT merge guest data. Prefer upgradeToEmailPassword above.
@@ -1137,7 +1130,7 @@ async function signInExisting() {
               {/* Primary: upgrade guest to email/password (preserves data) */}
               <button
                 className="w-full sm:w-auto px-3 py-2 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60"
-                onClick={upgradeToEmailPassword}
+                onClick={handleCreateAccount}
                 disabled={authBusy}
                 title="Upgrade this guest to an email/password account"
               >

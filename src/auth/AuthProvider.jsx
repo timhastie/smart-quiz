@@ -12,39 +12,47 @@ function buildRedirectURL(guestId) {
   return url.toString();
 }
 
+function onAuthCallbackPath() {
+  try {
+    return window.location.pathname.startsWith("/auth/callback");
+  } catch {
+    return false;
+  }
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [ready, setReady] = useState(false);
 
-  // NEW: don’t bootstrap anon on the callback page
-  const isAuthCallback =
-    typeof window !== "undefined" &&
-    window.location.pathname.startsWith("/auth/callback");
-
   async function ensureSession() {
+    let mounted = true;
     try {
       const { data: sess } = await supabase.auth.getSession();
-      if (sess?.session?.user) {
+      if (mounted && sess?.session?.user) {
         setUser(sess.session.user);
         return;
       }
+
       // No session -> start anonymous (but NOT on /auth/callback)
-      if (!isAuthCallback) {
+      if (!onAuthCallbackPath()) {
         const { data: anonRes, error } = await supabase.auth.signInAnonymously();
         if (error) {
           console.error("Anonymous sign-in failed:", error);
-          setUser(null);
+          if (mounted) setUser(null);
           return;
         }
-        setUser(anonRes?.user ?? null);
+        if (mounted) setUser(anonRes?.user ?? null);
       }
     } finally {
-      setReady(true);
+      if (mounted) setReady(true);
     }
+    return () => {
+      mounted = false;
+    };
   }
 
   useEffect(() => {
-    ensureSession();
+    const cleanup = ensureSession();
 
     const { data: listener } = supabase.auth.onAuthStateChange((_evt, session) => {
       setUser(session?.user ?? null);
@@ -54,8 +62,9 @@ export function AuthProvider({ children }) {
       try {
         listener?.subscription?.unsubscribe();
       } catch {}
+      if (typeof cleanup === "function") cleanup();
     };
-  }, [isAuthCallback]);
+  }, []);
 
   // --------- Email/password: ALWAYS sign up (to trigger Confirm signup) ----------
   async function signupOrLink(email, password) {
@@ -93,11 +102,17 @@ export function AuthProvider({ children }) {
     const redirectTo = buildRedirectURL(null);
 
     if (current?.is_anonymous) {
-      const { error } = await supabase.auth.linkIdentity({ provider, options: { redirectTo } });
+      const { error } = await supabase.auth.linkIdentity({
+        provider,
+        options: { redirectTo },
+      });
       if (error) throw error;
       return { linked: true };
     } else {
-      const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo } });
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: { redirectTo },
+      });
       if (error) throw error;
       return { signedIn: true };
     }
@@ -106,9 +121,11 @@ export function AuthProvider({ children }) {
   const signout = async () => {
     setReady(false);
     await supabase.auth.signOut();
-    // Optional: keep creating a fresh anon on signout (this is fine)
+
+    // Start fresh anon session (normal app flow)
     const { data: anonRes, error: anonErr } = await supabase.auth.signInAnonymously();
     if (anonErr) console.error("Failed to start anonymous session after sign out:", anonErr);
+
     const { data } = await supabase.auth.getUser();
     setUser(data?.user ?? null);
     setReady(true);
