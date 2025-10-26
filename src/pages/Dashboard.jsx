@@ -10,7 +10,7 @@ GlobalWorkerOptions.workerSrc = workerSrc;
 
 export default function Dashboard() {
   // auth
-  const { user, ready, signout } = useAuth();
+  const { user, ready, signout, signupOrLink, signin } = useAuth();
 
   // Robust anonymous detector that covers multiple SDK shapes
   function computeIsAnon(u) {
@@ -65,75 +65,66 @@ export default function Dashboard() {
   const [authMessage, setAuthMessage] = useState("");
 
   // Upgrade current anonymous user -> email/password (keeps same user.id & data)
-  async function upgradeToEmailPassword() {
-    try {
-      setAuthBusy(true);
+  // Upgrade current anonymous user -> email/password (keeps same user.id & data)
+async function upgradeToEmailPassword() {
+  try {
+    setAuthBusy(true);
 
-      const email = (authEmail || "").trim();
-      const password = authPass || "";
-
-      if (!email || !password) {
-        alert("Please enter email and password.");
-        return;
-      }
-
-      // Step 1: set email (may trigger a confirmation email depending on your project settings)
-      const { error: e1 } = await supabase.auth.updateUser({ email });
-      if (e1) {
-        alert(e1.message || "Failed to set email.");
-        return;
-      }
-
-      // Step 2: set password (some projects require confirming email before this succeeds)
-      const { error: e2 } = await supabase.auth.updateUser({ password });
-      if (e2) {
-        alert(e2.message || "Failed to set password.");
-        return;
-      }
-
-      alert("Account created! You’re now signed in with email/password.");
-      setAuthMessage(""); // <-- clear any trial message
-      setAuthOpen(false); // close modal
-    } catch (err) {
-      console.error(err);
-      alert("Something went wrong. Please try again.");
-    } finally {
-      setAuthBusy(false);
+    const email = (authEmail || "").trim();
+    const password = authPass || "";
+    if (!email || !password) {
+      alert("Please enter email and password.");
+      return;
     }
+
+    // IMPORTANT: this will link the email/password to the *anonymous* user
+    // if they're a guest; otherwise it performs a normal sign-up.
+    await signupOrLink(email, password);
+
+    // If your project requires email confirmation, user must click the email link.
+    alert(
+      "Account created. If email confirmation is enabled, check your inbox.\nYour quizzes stay attached to this account."
+    );
+    setAuthMessage("");
+    setAuthOpen(false);
+  } catch (err) {
+    console.error(err);
+    alert(err?.message || "Couldn't create account. Please try again.");
+  } finally {
+    setAuthBusy(false);
   }
+}
+
 
   // (Optional) Sign in to existing account (replaces the guest session)
   // NOTE: This will NOT merge guest data. Prefer upgradeToEmailPassword above.
-  async function signInExisting() {
-    try {
-      setAuthBusy(true);
+  // Sign in to an existing account (replaces the guest session)
+async function signInExisting() {
+  try {
+    setAuthBusy(true);
 
-      const email = (authEmail || "").trim();
-      const password = authPass || "";
-
-      if (!email || !password) {
-        alert("Please enter email and password.");
-        return;
-      }
-
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      if (error) {
-        alert(error.message || "Failed to sign in.");
-        return;
-      }
-
-      setAuthMessage(""); // <-- clear any trial message
-      setAuthOpen(false); // close modal
-    } catch (err) {
-      console.error(err);
-      alert("Something went wrong. Please try again.");
-    } finally {
-      setAuthBusy(false);
+    const email = (authEmail || "").trim();
+    const password = authPass || "";
+    if (!email || !password) {
+      alert("Please enter email and password.");
+      return;
     }
+
+    const res = await signin(email, password);
+    if (res?.error) {
+      alert(res.error.message || "Failed to sign in.");
+      return;
+    }
+
+    setAuthMessage("");
+    setAuthOpen(false);
+  } catch (err) {
+    console.error(err);
+    alert("Something went wrong. Please try again.");
+  } finally {
+    setAuthBusy(false);
   }
+}
 
   // NEW: sign out, then open the auth modal on top of the dashboard
   async function handleSignOut() {

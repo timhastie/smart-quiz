@@ -5,6 +5,7 @@ import Editor from './pages/Editor';
 import Play from './pages/Play';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
+import AuthCallback from "./pages/AuthCallback.jsx";
 
 export default function App() {
   return (
@@ -14,6 +15,7 @@ export default function App() {
       <Route path="/play/:quizId" element={<ProtectedRoute><Play /></ProtectedRoute>} />
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
+      <Route path="/auth/callback" element={<AuthCallback />} />
     </Routes>
   );
 }
