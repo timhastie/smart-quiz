@@ -24,47 +24,78 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [ready, setReady] = useState(false);
 
-  async function ensureSession() {
+  // --- bootstrap session (don’t create anon on /auth/callback) ---
+  useEffect(() => {
     let mounted = true;
-    try {
-      const { data: sess } = await supabase.auth.getSession();
-      if (mounted && sess?.session?.user) {
-        setUser(sess.session.user);
-        return;
-      }
 
-      // No session -> start anonymous (but NOT on /auth/callback)
-      if (!onAuthCallbackPath()) {
-        const { data: anonRes, error } = await supabase.auth.signInAnonymously();
-        if (error) {
-          console.error("Anonymous sign-in failed:", error);
-          if (mounted) setUser(null);
+    async function ensureSession() {
+      try {
+        const { data: sess } = await supabase.auth.getSession();
+        if (mounted && sess?.session?.user) {
+          setUser(sess.session.user);
           return;
         }
-        if (mounted) setUser(anonRes?.user ?? null);
+        // No session -> start anonymous (but NOT on /auth/callback)
+        if (!onAuthCallbackPath()) {
+          const { data: anonRes, error } = await supabase.auth.signInAnonymously();
+          if (error) {
+            console.error("Anonymous sign-in failed:", error);
+            if (mounted) setUser(null);
+            return;
+          }
+          if (mounted) setUser(anonRes?.user ?? null);
+        }
+      } finally {
+        if (mounted) setReady(true);
       }
-    } finally {
-      if (mounted) setReady(true);
     }
-    return () => {
-      mounted = false;
-    };
-  }
 
-  useEffect(() => {
-    const cleanup = ensureSession();
+    ensureSession();
 
     const { data: listener } = supabase.auth.onAuthStateChange((_evt, session) => {
-      setUser(session?.user ?? null);
+      if (mounted) setUser(session?.user ?? null);
     });
 
     return () => {
+      mounted = false;
       try {
         listener?.subscription?.unsubscribe();
       } catch {}
-      if (typeof cleanup === "function") cleanup();
     };
   }, []);
+
+  // helper
+  function isAnonymous(u) {
+    if (!u) return false;
+    const prov = u.app_metadata?.provider || null;
+    const provs = Array.isArray(u.app_metadata?.providers) ? u.app_metadata.providers : [];
+    return (
+      u.is_anonymous === true ||
+      u.user_metadata?.is_anonymous === true ||
+      prov === "anonymous" ||
+      provs.includes("anonymous") ||
+      (Array.isArray(u.identities) && u.identities.some((i) => i?.provider === "anonymous")) ||
+      (!u.email && (provs.length === 0 || provs.includes("anonymous")))
+    );
+  }
+
+  // One-time adopt if we land as a real user and a guest id is stored locally.
+  // This covers cases where the callback didn’t include ?guest=...
+  useEffect(() => {
+    if (!ready || !user) return;
+    const oldId = localStorage.getItem("guest_to_adopt");
+    if (!oldId) return;
+    if (isAnonymous(user)) return; // only adopt after we are a non-anon user
+
+    (async () => {
+      const { error } = await supabase.rpc("adopt_guest", { p_old_user: oldId });
+      if (!error) {
+        localStorage.removeItem("guest_to_adopt");
+      } else {
+        console.warn("adopt_guest (post-login) failed:", error);
+      }
+    })();
+  }, [ready, user?.id]);
 
   // --------- Email/password: ALWAYS sign up (to trigger Confirm signup) ----------
   async function signupOrLink(email, password) {
