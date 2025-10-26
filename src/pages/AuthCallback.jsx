@@ -8,39 +8,59 @@ export default function AuthCallback() {
 
   useEffect(() => {
     (async () => {
-      const url = new URL(window.location.href);
-      const error = url.searchParams.get("error");
-      const code = url.searchParams.get("code");
+      try {
+        const url = new URL(window.location.href);
+        const error = url.searchParams.get("error");
+        // Supabase v2 sends ?code=... (fallbacks included just in case)
+        const code =
+          url.searchParams.get("code") ||
+          url.searchParams.get("token") ||
+          url.searchParams.get("auth_code");
 
-      if (error) { setMsg(`Auth error: ${error}`); return; }
-      if (!code) { setMsg("Missing auth code."); return; }
-
-      // 1) Finish the Supabase auth exchange
-      const { error: exchErr } = await supabase.auth.exchangeCodeForSession(code);
-      if (exchErr) { setMsg(exchErr.message || "Could not finish sign-in."); return; }
-
-      // 2) If we created a new email/password account as a fallback,
-      //    adopt data from the previous anonymous user id.
-      const oldId = localStorage.getItem("guest_to_adopt");
-      if (oldId) {
-        try {
-          const { error: adoptErr } = await supabase.rpc("adopt_guest", { p_old_user: oldId });
-          if (adoptErr) {
-            // Don’t block the user—just show a note.
-            console.error("adopt_guest failed:", adoptErr);
-            setMsg("Signed in, but couldn't move guest data automatically. You can keep using the app.");
-          } else {
-            setMsg("Account upgraded. Your quizzes were moved to this account. Redirecting…");
-          }
-        } finally {
-          localStorage.removeItem("guest_to_adopt");
+        if (error) {
+          setMsg(`Auth error: ${error}`);
+          return;
         }
-      } else {
-        setMsg("Signed in. Redirecting…");
-      }
+        if (!code) {
+          setMsg("Missing auth code.");
+          return;
+        }
 
-      // 3) Go to the app
-      nav("/", { replace: true });
+        // 1) Finish the Supabase auth exchange (PKCE)
+        const { error: exchErr } = await supabase.auth.exchangeCodeForSession(code);
+        if (exchErr) {
+          setMsg(exchErr.message || "Could not finish sign-in.");
+          return;
+        }
+
+        // 2) If signup created a NEW account (guest fallback), adopt guest data now
+        const oldId = localStorage.getItem("guest_to_adopt");
+        if (oldId) {
+          const { error: adoptErr } = await supabase.rpc("adopt_guest", {
+            p_old_user: oldId,
+          });
+
+          if (adoptErr) {
+            console.error("adopt_guest failed:", adoptErr);
+            setMsg(
+              "Signed in, but we couldn't automatically move your guest data. You can keep using the app."
+            );
+          } else {
+            setMsg(
+              "Account confirmed! Your guest quizzes were moved to this account. Redirecting…"
+            );
+          }
+          localStorage.removeItem("guest_to_adopt");
+        } else {
+          setMsg("Signed in. Redirecting…");
+        }
+
+        // 3) Redirect home (change if you prefer a different landing page)
+        nav("/", { replace: true });
+      } catch (e) {
+        console.error(e);
+        setMsg("Unexpected error finishing sign-in.");
+      }
     })();
   }, [nav]);
 

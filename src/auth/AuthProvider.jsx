@@ -50,45 +50,36 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  // --------- Email/password: sign up OR link to anonymous ----------
- async function signupOrLink(email, password) {
+  // Force the "Confirm signup" email instead of "Change email":
+// Create a new account, then move guest data on the callback page.
+async function signupOrLink(email, password) {
   const { data: { user: current } = {} } = await supabase.auth.getUser();
   const emailRedirectTo = getRedirectTo();
 
+  // If the user is a guest, create a NEW account (triggers Confirm signup)
   if (current?.is_anonymous) {
-    // try preferred path first
-    const tryLink = await supabase.auth.linkIdentity({
-      provider: "email",
-      email,
-      password,
-      options: { emailRedirectTo },
-    });
+    const oldGuestId = current.id;
 
-    if (!tryLink.error) return { linked: true };
-
-    // fallback: create a real account, then adopt guest data
-    // store old (guest) id before signUp
-    const oldId = current.id;
-
-    const su = await supabase.auth.signUp({
-      email,
-      password,
-      options: { emailRedirectTo },
-    });
-    if (su.error) throw su.error;
-
-    // tell the app which guest id to adopt after the callback sign-in completes
-    localStorage.setItem("guest_to_adopt", oldId);
-    return { signedUp: true, fallback: true };
-  } else {
     const { error } = await supabase.auth.signUp({
       email,
       password,
       options: { emailRedirectTo },
     });
     if (error) throw error;
-    return { signedUp: true };
+
+    // Remember which guest to adopt after the user returns from email
+    localStorage.setItem("guest_to_adopt", oldGuestId);
+    return { signedUp: true, fallback: true };
   }
+
+  // Non-guest: normal signup
+  const { error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { emailRedirectTo },
+  });
+  if (error) throw error;
+  return { signedUp: true };
 }
 
 
