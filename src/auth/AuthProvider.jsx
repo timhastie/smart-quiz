@@ -5,10 +5,11 @@ import { supabase } from "../lib/supabase";
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
 
-function getRedirectTo() {
-  // Must be allowed in Supabase → Auth → URL Configuration → Redirect URLs
-  // e.g. https://smart-quiz.app/auth/callback and http://localhost:5173/auth/callback
-  return `${window.location.origin}/auth/callback`;
+// Build the callback URL; include the guest id when we have one
+function buildRedirectURL(guestId /* string | null */) {
+  const url = new URL(`${window.location.origin}/auth/callback`);
+  if (guestId) url.searchParams.set("guest", guestId);
+  return url.toString();
 }
 
 export function AuthProvider({ children }) {
@@ -50,38 +51,39 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  // Force the "Confirm signup" email instead of "Change email":
-// Create a new account, then move guest data on the callback page.
-async function signupOrLink(email, password) {
-  const { data: { user: current } = {} } = await supabase.auth.getUser();
-  const emailRedirectTo = getRedirectTo();
+  // --------- Email/password: ALWAYS sign up (to trigger "Confirm signup")
+  // Then adopt guest data on the callback page.
+  async function signupOrLink(email, password) {
+    const { data: { user: current } = {} } = await supabase.auth.getUser();
 
-  // If the user is a guest, create a NEW account (triggers Confirm signup)
-  if (current?.is_anonymous) {
-    const oldGuestId = current.id;
+    if (current?.is_anonymous) {
+      const oldGuestId = current.id;
 
+      // store locally (same-device)
+      localStorage.setItem("guest_to_adopt", oldGuestId);
+
+      // include guest id in the email redirect (cross-device)
+      const emailRedirectTo = buildRedirectURL(oldGuestId);
+
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { emailRedirectTo },
+      });
+      if (error) throw error;
+
+      return { signedUp: true, fallback: true };
+    }
+
+    // Non-guest: normal signup
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo },
+      options: { emailRedirectTo: buildRedirectURL(null) },
     });
     if (error) throw error;
-
-    // Remember which guest to adopt after the user returns from email
-    localStorage.setItem("guest_to_adopt", oldGuestId);
-    return { signedUp: true, fallback: true };
+    return { signedUp: true };
   }
-
-  // Non-guest: normal signup
-  const { error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: { emailRedirectTo },
-  });
-  if (error) throw error;
-  return { signedUp: true };
-}
-
 
   // --------- Email/password: sign in (normal) ----------
   function signin(email, password) {
@@ -91,9 +93,10 @@ async function signupOrLink(email, password) {
   // --------- OAuth: sign in OR link to anonymous ----------
   async function oauthOrLink(provider /* 'google' | 'github' | ... */) {
     const { data: { user: current } = {} } = await supabase.auth.getUser();
-    const redirectTo = getRedirectTo();
+    const redirectTo = buildRedirectURL(null); // no adoption needed for OAuth link
 
     if (current?.is_anonymous) {
+      // OAuth linking keeps same user.id, so no adopt step required
       const { error } = await supabase.auth.linkIdentity({
         provider,
         options: { redirectTo },
@@ -129,9 +132,9 @@ async function signupOrLink(email, password) {
       value={{
         user,
         ready,
-        signupOrLink,   // <- use this for your “Create account” button
+        signupOrLink,   // use for “Create account”
         signin,
-        oauthOrLink,    // <- use this for your OAuth buttons
+        oauthOrLink,    // use for OAuth buttons
         signout,
       }}
     >

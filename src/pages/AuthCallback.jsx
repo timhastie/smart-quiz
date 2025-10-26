@@ -11,7 +11,7 @@ export default function AuthCallback() {
       try {
         const url = new URL(window.location.href);
         const error = url.searchParams.get("error");
-        // Supabase v2 sends ?code=... (fallbacks included just in case)
+        // Supabase v2 sends ?code=... (fallback keys included just in case)
         const code =
           url.searchParams.get("code") ||
           url.searchParams.get("token") ||
@@ -33,8 +33,11 @@ export default function AuthCallback() {
           return;
         }
 
-        // 2) If signup created a NEW account (guest fallback), adopt guest data now
-        const oldId = localStorage.getItem("guest_to_adopt");
+        // 2) Determine old guest id: prefer URL param, fallback to localStorage
+        const guestFromUrl = url.searchParams.get("guest");
+        const guestFromLS = localStorage.getItem("guest_to_adopt");
+        const oldId = guestFromUrl || guestFromLS;
+
         if (oldId) {
           const { error: adoptErr } = await supabase.rpc("adopt_guest", {
             p_old_user: oldId,
@@ -50,12 +53,13 @@ export default function AuthCallback() {
               "Account confirmed! Your guest quizzes were moved to this account. Redirecting…"
             );
           }
+          // clean up local marker
           localStorage.removeItem("guest_to_adopt");
         } else {
           setMsg("Signed in. Redirecting…");
         }
 
-        // 3) Redirect home (change if you prefer a different landing page)
+        // 3) Redirect home (or change to your preferred landing page)
         nav("/", { replace: true });
       } catch (e) {
         console.error(e);
