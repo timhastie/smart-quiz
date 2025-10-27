@@ -120,21 +120,20 @@ export default function Play() {
   const [index, setIndex] = useState(0);
 
   // Per-question state
-  const [answered, setAnswered] = useState([]);              // "currently correct" flags (for UI)
-  const [inputs, setInputs] = useState([]);                  // cached text per Q
-  const [feedback, setFeedback] = useState("");              // UI message under "Previous"
+  const [answered, setAnswered] = useState([]);               // correct flags
+  const [inputs, setInputs] = useState([]);                   // cached text per Q
+  const [feedback, setFeedback] = useState("");               // UI message
 
-  // Scoring state
-  const [attempted, setAttempted] = useState([]);            // true once a Q has been submitted at least once
-  const [firstTryCorrect, setFirstTryCorrect] = useState([]);// true only if FIRST submission for that Q was correct
+  // Scoring/attempt state
+  const [attempted, setAttempted] = useState([]);             // true once a Q has been submitted at least once
+  const [firstTryCorrect, setFirstTryCorrect] = useState([]); // true only if FIRST submission was correct
 
   // Results modal
   const [showResult, setShowResult] = useState(false);
   const [scorePct, setScorePct] = useState(0);
 
-  // Skipping/return logic
+  // Return jump
   const [returnIndex, setReturnIndex] = useState(null);
-  const [skipped, setSkipped] = useState(false);
 
   // Input box
   const [input, setInput] = useState("");
@@ -166,7 +165,6 @@ export default function Play() {
         setAttempted(Array(len).fill(false));
         setFirstTryCorrect(Array(len).fill(false));
         setReturnIndex(null);
-        setSkipped(false);
         setInput("");
         setFeedback("");
         setShowResult(false);
@@ -178,7 +176,7 @@ export default function Play() {
   const current = total > 0 ? quiz?.questions?.[index] : null;
   const isFirst = index === 0;
   const isLast = index === total - 1;
-  const hasConfetti = (scorePct >= 90);
+  const hasConfetti = scorePct >= 90;
 
   // Feedback helpers
   const isPositiveFeedback = feedback.startsWith("✅");
@@ -191,9 +189,9 @@ export default function Play() {
     setFeedback(answered[index] ? "✅ Correct! Press C to continue." : "");
   }, [index, quiz]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // First earlier unanswered
-  const firstUnansweredBefore = answered.slice(0, index).findIndex((v) => !v);
-  const showGoToUnanswered = skipped && firstUnansweredBefore !== -1;
+  // --- Unanswered (not attempted) earlier question detection ---
+  const firstUnansweredBefore = attempted.slice(0, index).findIndex((v) => !v);
+  const showGoToUnanswered = firstUnansweredBefore !== -1; // only if a prior Q has NOT been attempted
 
   function handleChange(val) {
     setInput(val);
@@ -221,6 +219,15 @@ export default function Play() {
   function maybeFinish(attemptedNext, firstTryNext) {
     if (!attemptedNext.every(Boolean)) return;
     const points = firstTryNext.filter(Boolean).length;
+    const pct = total ? Math.round((points / total) * 100) : 0;
+    setScorePct(pct);
+    setShowResult(true);
+    saveLatestScore(pct);
+  }
+
+  // Allow submission at any time (even if not all attempted)
+  function submitQuizNow() {
+    const points = firstTryCorrect.filter(Boolean).length;
     const pct = total ? Math.round((points / total) * 100) : 0;
     setScorePct(pct);
     setShowResult(true);
@@ -263,14 +270,14 @@ export default function Play() {
                   ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
                 },
                 body: JSON.stringify({
-                  question,           // include the prompt so server can decide strictness too
-                  expected,           // stored reference
+                  question,
+                  expected,
                   user_answer: userAns,
                 }),
               }
             );
             if (res.ok) {
-              const out = await res.json(); // { correct, score, reasons, ... }
+              const out = await res.json();
               isCorrect = !!out.correct;
               if (!isCorrect) {
                 setFeedback("Incorrect ❌ Press c to continue");
@@ -285,7 +292,7 @@ export default function Play() {
       }
     }
 
-    // ---- Track per-question state (unchanged) ----
+    // ---- Track per-question state ----
     const attemptedNext = attempted.slice();
     const firstTryNext = firstTryCorrect.slice();
     const isFirstAttempt = !attemptedNext[index];
@@ -354,10 +361,7 @@ export default function Play() {
     if (!isFirst) setIndex((i) => i - 1);
   }
   function goNext() {
-    if (!isLast) {
-      setSkipped((prev) => prev || !answered[index]);
-      setIndex((i) => i + 1);
-    }
+    if (!isLast) setIndex((i) => i + 1);
   }
   function jumpToFirstUnanswered() {
     if (firstUnansweredBefore === -1) return;
@@ -375,28 +379,33 @@ export default function Play() {
     setFirstTryCorrect(Array(len).fill(false));
     setIndex(0);
     setReturnIndex(null);
-    setSkipped(false);
     setInput("");
     setFeedback("");
     setShowResult(false);
   }
 
+  // --- UI helpers / styles ---
+  const pressAnim = "transition-transform duration-100 active:scale-95";
+  const btnBase = "px-4 py-2 rounded text-sm sm:text-base disabled:opacity-50 disabled:cursor-not-allowed";
+  const btnGray = `bg-gray-700 hover:bg-gray-600 ${pressAnim}`;
+  const btnIndigo = `bg-indigo-600 hover:bg-indigo-500 ${pressAnim}`;
+
+  // Force consistent/tall action height from the very start, independent of middle button presence.
+  const actionH = "h-12 sm:h-14"; // adjust if you want even taller
+
   if (!quiz) return null;
 
   return (
     <div
-  className="quiz-play min-h-screen bg-gray-900 text-white"
-  onKeyDown={onKey}
-  tabIndex={0}
->
+      className="quiz-play min-h-screen bg-gray-900 text-white"
+      onKeyDown={onKey}
+      tabIndex={0}
+    >
       <header className="flex items-center justify-between p-3 sm:p-4 border-b border-gray-800">
         <h1 className="text-lg sm:text-xl font-bold truncate pr-3">
           {quiz.title || "Quiz"}
         </h1>
-        <Link
-          to="/"
-          className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm sm:text-base"
-        >
+        <Link to="/" className={`${btnBase} ${btnGray}`}>
           Back
         </Link>
       </header>
@@ -405,8 +414,8 @@ export default function Play() {
         {current ? (
           <>
             <p className="mb-3 sm:mb-4 leading-snug">
-              <span className="mr-2 inline-block w-6 text-right">
-                {index + 1}.
+              <span className="mr-2 inline-block w-14 text-right">
+                {index + 1}/{total}
               </span>
               {current.prompt}
             </p>
@@ -428,7 +437,7 @@ export default function Play() {
                 <div className="sm:ml-auto">
                   <button
                     type="button"
-                    className="w-full sm:w-auto px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm sm:text-base"
+                    className={`w-full sm:w-auto ${btnBase} ${btnGray}`}
                     onClick={() => {
                       const ans = String(current.answer ?? "");
                       handleChange(ans);
@@ -441,21 +450,21 @@ export default function Play() {
               </div>
               <div className="hidden sm:block" />
 
-              {/* Row 2: Textarea (col1) + Enter (col2) */}
+              {/* Row 2: Textarea (col1) + Enter (col2) — Enter vertically centered beside textarea on ≥sm */}
               <form onSubmit={submit} className="contents">
                 <textarea
-  ref={areaRef}
-  className="w-full p-4 rounded bg-white text-gray-900 border border-gray-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-base sm:text-xl placeholder:text-gray-500"
-  value={input}
-  onChange={(e) => handleChange(e.target.value)}
-  placeholder="Type your answer and press Enter…"
-  onKeyDown={onTextAreaKeyDown}
-  rows={5}
-  inputMode="text"
-/>
+                  ref={areaRef}
+                  className="w-full p-4 rounded bg-white text-gray-900 border border-gray-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-base sm:text-xl placeholder:text-gray-500"
+                  value={input}
+                  onChange={(e) => handleChange(e.target.value)}
+                  placeholder="Type your answer and press Enter…"
+                  onKeyDown={onTextAreaKeyDown}
+                  rows={5}
+                  inputMode="text"
+                />
                 <button
                   type="submit"
-                  className="sm:self-start sm:shrink-0 px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm sm:text-base h-12 w-full sm:w-auto"
+                  className={`sm:self-center sm:shrink-0 ${btnBase} ${btnGray} ${actionH} w-full sm:w-auto`}
                   aria-label="Submit answer"
                   title="Submit (same as pressing Enter)"
                 >
@@ -463,59 +472,74 @@ export default function Play() {
                 </button>
               </form>
 
-              {/* Controls row: Previous / Unanswered / Next with feedback under Previous */}
-              <div className="col-start-1 grid grid-cols-1 sm:grid-cols-3 items-start text-sm sm:text-base gap-2">
-                {/* Previous + feedback */}
-                <div className="justify-self-stretch sm:justify-self-start">
-                  {!isFirst ? (
+              {/* Row 3: Action buttons — middle button is OUT of the DOM until needed */}
+              <div className="col-start-1">
+                <div
+                  className={`grid grid-cols-1 ${
+                    showGoToUnanswered ? "sm:grid-cols-3" : "sm:grid-cols-2"
+                  } gap-2 items-stretch`}
+                >
+                  {/* Previous (always shown; disabled on first question) */}
+                  <div className="w-full">
                     <button
                       type="button"
-                      className="w-full sm:w-auto px-4 py-2 rounded bg-gray-700 hover:bg-gray-600"
+                      disabled={isFirst}
+                      className={`w-full ${btnBase} ${btnGray} ${actionH}`}
                       onClick={goPrev}
                     >
                       Previous Question
                     </button>
-                  ) : (
-                    <div className="h-10" />
+                  </div>
+
+                  {/* Go to Unanswered — completely hidden from DOM unless a prior Q is unattempted */}
+                  {showGoToUnanswered && (
+                    <div className="w-full">
+                      <button
+                        type="button"
+                        className={`w-full ${btnBase} ${btnGray} ${actionH} text-center`}
+                        onClick={jumpToFirstUnanswered}
+                      >
+                        Go to Unanswered Question
+                      </button>
+                    </div>
                   )}
 
-                  {feedback ? (
-                    <p
-                      className={`mt-2 text-base sm:text-lg ${
-                        isPositiveFeedback ? "text-green-400" : "text-red-400"
-                      }`}
-                      aria-live="polite"
-                    >
-                      {feedback}
-                    </p>
-                  ) : null}
-                </div>
-
-                {/* Go to Unanswered */}
-                <div className="justify-self-stretch sm:justify-self-center">
-                  {showGoToUnanswered ? (
+                  {/* Next */}
+                  <div className="w-full">
                     <button
                       type="button"
-                      className="w-full sm:w-auto px-4 py-2 rounded bg-gray-700 hover:bg-gray-600"
-                      onClick={jumpToFirstUnanswered}
+                      className={`w-full ${btnBase} ${btnGray} ${actionH}`}
+                      onClick={goNext}
+                      disabled={isLast}
                     >
-                      Go to Unanswered Question
+                      Next Question
                     </button>
-                  ) : (
-                    <div className="h-10" />
-                  )}
+                  </div>
                 </div>
 
-                {/* Next */}
-                <div className="justify-self-stretch sm:justify-self-end">
+                {/* Submit Quiz centered under the action row */}
+                <div className="mt-2 flex justify-center">
                   <button
                     type="button"
-                    className="w-full sm:w-auto px-4 py-2 rounded bg-gray-700 hover:bg-gray-600"
-                    onClick={goNext}
+                    onClick={submitQuizNow}
+                    className={`px-5 py-2 rounded ${btnIndigo} text-sm sm:text-base`}
+                    title="Submit the quiz now and see your score"
                   >
-                    Next Question
+                    Submit Quiz
                   </button>
                 </div>
+
+                {/* Feedback sits below the buttons so it doesn't affect their height */}
+                {feedback ? (
+                  <p
+                    className={`mt-2 text-base sm:text-lg ${
+                      isPositiveFeedback ? "text-green-400" : "text-red-400"
+                    }`}
+                    aria-live="polite"
+                  >
+                    {feedback}
+                  </p>
+                ) : null}
               </div>
 
               <div className="hidden sm:block" />
@@ -539,14 +563,14 @@ export default function Play() {
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2">
               <button
                 type="button"
-                className="w-full sm:w-auto px-4 py-2 rounded bg-gray-700 hover:bg-gray-600"
+                className={`${btnBase} ${btnGray} w-full sm:w-auto`}
                 onClick={retake}
               >
                 Retake Quiz
               </button>
               <button
                 type="button"
-                className="w-full sm:w-auto px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500"
+                className={`${btnBase} ${btnIndigo} w-full sm:w-auto`}
                 onClick={() => navigate("/")}
               >
                 Return to Dashboard

@@ -1,5 +1,5 @@
 // src/pages/Dashboard.jsx
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { supabase } from "../lib/supabase";
@@ -7,6 +7,9 @@ import { supabase } from "../lib/supabase";
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist/build/pdf.mjs";
 import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url"; // <-- Vite will emit an asset URL
 GlobalWorkerOptions.workerSrc = workerSrc;
+
+// Sentinel used to represent "No group" in selects/filters
+const NO_GROUP = "__none__";
 
 export default function Dashboard() {
   // auth
@@ -35,9 +38,10 @@ export default function Dashboard() {
 
   const isAnon = computeIsAnon(user);
 
-  // (optional) temporary logger — remove after verifying
+  // (optional) temporary logger — dev-only
   useEffect(() => {
     if (!ready) return;
+    if (!import.meta.env.DEV) return; // only log in dev
     const snapshot = {
       isAnon,
       email: user?.email ?? null,
@@ -65,59 +69,57 @@ export default function Dashboard() {
   const [authMessage, setAuthMessage] = useState("");
 
   // Upgrade current anonymous user -> email/password (keeps same user.id & data)
-  // Upgrade current anonymous user -> email/password (keeps same user.id & data)
-// Create account (guest → email). Triggers the email that includes ?guest=<anonId>
-async function handleCreateAccount() {
-  try {
-    setAuthBusy(true);
-    const email = (authEmail || "").trim();
-    const password = authPass || "";
-    if (!email || !password) {
-      alert("Please enter email and password.");
-      return;
+  // Create account (guest → email). Triggers the email that includes ?guest=<anonId>
+  async function handleCreateAccount() {
+    try {
+      setAuthBusy(true);
+      const email = (authEmail || "").trim();
+      const password = authPass || "";
+      if (!email || !password) {
+        alert("Please enter email and password.");
+        return;
+      }
+
+      await signupOrLink(email, password); // <-- THIS kicks off the adoption flow
+
+      // keep the modal open so the user sees this instruction
+      setAuthMessage("Check your email to confirm your account, then return here.");
+    } catch (err) {
+      console.error(err);
+      alert(err?.message || "Failed to start signup.");
+    } finally {
+      setAuthBusy(false);
     }
-
-    await signupOrLink(email, password); // <-- THIS kicks off the adoption flow
-
-    // keep the modal open so the user sees this instruction
-    setAuthMessage("Check your email to confirm your account, then return here.");
-  } catch (err) {
-    console.error(err);
-    alert(err?.message || "Failed to start signup.");
-  } finally {
-    setAuthBusy(false);
   }
-}
 
   // (Optional) Sign in to existing account (replaces the guest session)
   // NOTE: This will NOT merge guest data. Prefer upgradeToEmailPassword above.
-  // Sign in to an existing account (replaces the guest session)
-async function signInExisting() {
-  try {
-    setAuthBusy(true);
+  async function signInExisting() {
+    try {
+      setAuthBusy(true);
 
-    const email = (authEmail || "").trim();
-    const password = authPass || "";
-    if (!email || !password) {
-      alert("Please enter email and password.");
-      return;
+      const email = (authEmail || "").trim();
+      const password = authPass || "";
+      if (!email || !password) {
+        alert("Please enter email and password.");
+        return;
+      }
+
+      const res = await signin(email, password);
+      if (res?.error) {
+        alert(res.error.message || "Failed to sign in.");
+        return;
+      }
+
+      setAuthMessage("");
+      setAuthOpen(false);
+    } catch (err) {
+      console.error(err);
+      alert("Something went wrong. Please try again.");
+    } finally {
+      setAuthBusy(false);
     }
-
-    const res = await signin(email, password);
-    if (res?.error) {
-      alert(res.error.message || "Failed to sign in.");
-      return;
-    }
-
-    setAuthMessage("");
-    setAuthOpen(false);
-  } catch (err) {
-    console.error(err);
-    alert("Something went wrong. Please try again.");
-  } finally {
-    setAuthBusy(false);
   }
-}
 
   // NEW: sign out, then open the auth modal on top of the dashboard
   async function handleSignOut() {
@@ -167,7 +169,7 @@ async function signInExisting() {
 
   // groups + filter
   const [groups, setGroups] = useState([]); // { id, name }[]
-  const [filterGroupId, setFilterGroupId] = useState(""); // ""=all, "__none__"=no group
+  const [filterGroupId, setFilterGroupId] = useState(""); // ""=all, NO_GROUP="__none__"=no group
   // const [scoreSort, setScoreSort] = useState("asc"); // temporarily disabled UI
   const scoreSort = "asc"; // keep behavior: lowest scores first by default
 
@@ -207,7 +209,7 @@ async function signInExisting() {
 
     if (filterGroupId === "") {
       // all groups
-    } else if (filterGroupId === "__none__") {
+    } else if (filterGroupId === NO_GROUP) {
       q = q.is("group_id", null);
     } else {
       q = q.eq("group_id", filterGroupId);
@@ -253,14 +255,19 @@ async function signInExisting() {
 
   useEffect(() => {
     if (!user?.id) return;
+    let alive = true;
     (async () => {
       const { data } = await supabase
         .from("groups")
         .select("id, name")
         .eq("user_id", user.id)
         .order("name", { ascending: true });
+      if (!alive) return;
       setGroups(data ?? []);
     })();
+    return () => {
+      alive = false;
+    };
   }, [user?.id]);
 
   // compute “free quizzes left” for anonymous users (limit = 2)
@@ -273,7 +280,8 @@ async function signInExisting() {
       }
       const { count } = await supabase
         .from("quizzes")
-        .select("id", { count: "exact", head: true });
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id); // explicit scoping to this user
       setTrial({
         isAnon: true,
         remaining: Math.max(0, 2 - (count ?? 0)),
@@ -383,6 +391,10 @@ async function signInExisting() {
   async function createQuiz() {
     if (creating) return;
     try {
+      // Preflight: block instantly if at limit (explicit user-scope)
+      const allowed = await ensureCanCreate();
+      if (!allowed) return;
+
       setCreating(true);
       const { data, error } = await supabase
         .from("quizzes")
@@ -486,7 +498,8 @@ async function signInExisting() {
 
     const { count } = await supabase
       .from("quizzes")
-      .select("id", { count: "exact", head: true });
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", ures.user.id); // explicit scoping
 
     if ((count ?? 0) >= 2) {
       openSignupModal(
@@ -737,39 +750,18 @@ async function signInExisting() {
     }
   }
 
-  // Delete the currently filtered group (and its quizzes)
-  async function deleteCurrentGroupNow() {
-    if (!currentGroup?.id) return;
-    setDeletingGroup(true);
-    try {
-      // 1) delete quizzes in this group
-      const { error: qErr } = await supabase
-        .from("quizzes")
-        .delete()
-        .eq("user_id", user.id)
-        .eq("group_id", currentGroup.id);
-      if (qErr) throw qErr;
-
-      // 2) delete the group itself
-      const { error: gErr } = await supabase
-        .from("groups")
-        .delete()
-        .eq("user_id", user.id)
-        .eq("id", currentGroup.id);
-      if (gErr) throw gErr;
-
-      // 3) UI updates
-      setDeleteGroupOpen(false);
-      setGroups((gs) => gs.filter((g) => g.id !== currentGroup.id));
-      setFilterGroupId(""); // back to “All groups”
-      await load(); // refresh list
-    } catch (e) {
-      console.error(e);
-      alert("Failed to delete group. Please try again.");
-    } finally {
-      setDeletingGroup(false);
-    }
-  }
+  // ------- Memoized sorted list by score (no-score items at bottom) -------
+  const sortedQuizzes = useMemo(() => {
+    return [...quizzes].sort((a, b) => {
+      const av = scoresByQuiz[a.id];
+      const bv = scoresByQuiz[b.id];
+      const aVal =
+        av == null ? (scoreSort === "asc" ? Infinity : -Infinity) : av;
+      const bVal =
+        bv == null ? (scoreSort === "asc" ? Infinity : -Infinity) : bv;
+      return scoreSort === "asc" ? aVal - bVal : bVal - aVal;
+    });
+  }, [quizzes, scoresByQuiz]);
 
   // ---------- UI ----------
   return (
@@ -830,7 +822,7 @@ async function signInExisting() {
           <div className="flex items-center gap-3 shrink-0">
             <button
               onClick={async () => {
-                if (filterGroupId && filterGroupId !== "__none__")
+                if (filterGroupId && filterGroupId !== NO_GROUP)
                   setGGroupId(filterGroupId);
                 else setGGroupId("");
 
@@ -866,7 +858,7 @@ async function signInExisting() {
                 onChange={(e) => setFilterGroupId(e.target.value)}
               >
                 <option value="">All</option>
-                <option value="__none__">No group</option>
+                <option value={NO_GROUP}>No group</option>
                 {groups.map((g) => (
                   <option key={g.id} value={g.id}>
                     {g.name}
@@ -896,106 +888,87 @@ async function signInExisting() {
         </div>
 
         {/* LIST */}
-        {quizzes.length === 0 ? (
+        {sortedQuizzes.length === 0 ? (
           <div className="text-gray-400">
             No quizzes yet. Create one or generate with AI.
           </div>
         ) : (
           <ul className="space-y-3">
-            {[...quizzes]
-              .sort((a, b) => {
-                const av = scoresByQuiz[a.id];
-                const bv = scoresByQuiz[b.id];
-                // Put “no score” items at the bottom for both directions
-                const aVal =
-                  av == null
-                    ? scoreSort === "asc"
-                      ? Infinity
-                      : -Infinity
-                    : av;
-                const bVal =
-                  bv == null
-                    ? scoreSort === "asc"
-                      ? Infinity
-                      : -Infinity
-                    : bv;
-                return scoreSort === "asc" ? aVal - bVal : bVal - aVal;
-              })
-              .map((q) => (
-                <li
-                  key={q.id}
-                  className="bg-gray-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
-                >
-                  {/* LEFT: checkbox + title/meta */}
-                  <div className="flex items-start sm:items-center gap-3">
-                    <input
-                      type="checkbox"
-                      className="h-5 w-5 accent-emerald-500 mt-1 sm:mt-0"
-                      checked={selectedIds.has(q.id)}
-                      onChange={() => toggleSelected(q.id)}
-                      aria-label={`Select ${q.title || "Untitled Quiz"}`}
-                    />
-                    <div>
-                      <div className="text-lg font-semibold">
-                        {q.title || "Untitled Quiz"}
-                      </div>
-                      <div className="text-sm text-gray-400">
-                        {q.questions?.length ?? 0} questions
-                      </div>
-                      <div className="text-sm text-gray-400">
-                        Last score:{" "}
-                        {scoresByQuiz[q.id] != null ? (
-                          <span
-                            className={
-                              scoresByQuiz[q.id] >= 90
-                                ? "text-green-400 font-semibold"
-                                : ""
-                            }
-                          >
-                            {scoresByQuiz[q.id]}%
-                          </span>
-                        ) : (
-                          "—"
-                        )}
-                      </div>
+            {sortedQuizzes.map((q) => (
+              <li
+                key={q.id}
+                className="bg-gray-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+              >
+                {/* LEFT: checkbox + title/meta */}
+                <div className="flex items-start sm:items-center gap-3">
+                  <input
+                    type="checkbox"
+                    className="h-5 w-5 accent-emerald-500 mt-1 sm:mt-0"
+                    checked={selectedIds.has(q.id)}
+                    onChange={() => toggleSelected(q.id)}
+                    aria-label={`Select ${q.title || "Untitled Quiz"}`}
+                  />
+                  <div>
+                    <div className="text-lg font-semibold">
+                      {q.title || "Untitled Quiz"}
+                    </div>
+                    <div className="text-sm text-gray-400">
+                      {q.questions?.length ?? 0} questions
+                    </div>
+                    <div className="text-sm text-gray-400">
+                      Last score:{" "}
+                      {scoresByQuiz[q.id] != null ? (
+                        <span
+                          className={
+                            scoresByQuiz[q.id] >= 90
+                              ? "text-green-400 font-semibold"
+                              : ""
+                          }
+                        >
+                          {scoresByQuiz[q.id]}%
+                        </span>
+                      ) : (
+                        "—"
+                      )}
                     </div>
                   </div>
+                </div>
 
-                  {/* RIGHT: actions */}
-                  <div className="flex flex-wrap gap-2">
-                    <Link
-                      to={`/play/${q.id}`}
-                      className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600"
-                    >
-                      Play
-                    </Link>
-                    <Link
-                      to={`/edit/${q.id}`}
-                      className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600"
-                    >
-                      Edit
-                    </Link>
-                    <button
-                      onClick={() => {
-                        setTarget({
-                          id: q.id,
-                          title: q.title || "Untitled Quiz",
-                          group_id: q.group_id ?? null,
-                        });
-                        setConfirmOpen(true);
-                      }}
-                      className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </li>
-              ))}
+                {/* RIGHT: actions */}
+                <div className="flex flex-wrap gap-2">
+                  <Link
+                    to={`/play/${q.id}`}
+                    className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600"
+                  >
+                    Play
+                  </Link>
+                  <Link
+                    to={`/edit/${q.id}`}
+                    className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600"
+                  >
+                    Edit
+                  </Link>
+                  <button
+                    onClick={() => {
+                      setTarget({
+                        id: q.id,
+                        title: q.title || "Untitled Quiz",
+                        group_id: q.group_id ?? null,
+                      });
+                      setConfirmOpen(true);
+                    }}
+                    className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </li>
+            ))}
           </ul>
         )}
 
         {/* Delete-current-group button (only when a specific group is filtered) */}
-        {filterGroupId && filterGroupId !== "__none__" && currentGroup && (
+        {filterGroupId && filterGroupId !== NO_GROUP && currentGroup && (
           <div className="mt-6">
             <button
               onClick={() => setDeleteGroupOpen(true)}
@@ -1017,7 +990,7 @@ async function signInExisting() {
           onKeyDown={(e) => {
             if (deleting) return;
             if (e.key === "Escape") setConfirmOpen(false);
-            if (e.key === "Enter") handleDelete();
+            if (e.key === "Enter") setConfirmOpen(false); // safer default
           }}
           onClick={() => !deleting && setConfirmOpen(false)}
         >
@@ -1480,7 +1453,7 @@ async function signInExisting() {
                   onChange={(e) => setMoveGroupId(e.target.value)}
                 >
                   <option value="">Choose group…</option>
-                  <option value="__none__">No group</option>
+                  <option value={NO_GROUP}>No group</option>
                   {groups.map((g) => (
                     <option key={g.id} value={g.id}>
                       {g.name}
