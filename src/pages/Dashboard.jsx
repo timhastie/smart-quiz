@@ -15,6 +15,16 @@ export default function Dashboard() {
   // auth
   const { user, ready, signout, signupOrLink, signin } = useAuth();
 
+  // --- UI button helpers (consistent across the app) ---
+  const pressAnim = "transition-transform duration-100 active:scale-95";
+  const btnBase =
+    "px-3 py-2 rounded disabled:opacity-60 disabled:cursor-not-allowed";
+  const btnGray = `bg-gray-700 hover:bg-gray-600 ${pressAnim}`;
+  const btnGreen = `bg-emerald-500 hover:bg-emerald-600 font-semibold ${pressAnim}`;
+  const btnRed = `bg-red-600 hover:bg-red-700 ${pressAnim}`;
+  const btnRedSoft = `bg-red-500 hover:bg-red-600 ${pressAnim}`;
+  const actionH = "h-12"; // ensures equal height on mobile where needed
+
   // Robust anonymous detector that covers multiple SDK shapes
   function computeIsAnon(u) {
     if (!u) return false;
@@ -25,20 +35,18 @@ export default function Dashboard() {
       : [];
 
     return (
-      u.is_anonymous === true || // sometimes top-level
-      u.user_metadata?.is_anonymous === true || // sometimes in user_metadata
-      prov === "anonymous" || // single provider
-      provs.includes("anonymous") || // providers array
+      u.is_anonymous === true ||
+      u.user_metadata?.is_anonymous === true ||
+      prov === "anonymous" ||
+      provs.includes("anonymous") ||
       (Array.isArray(u.identities) &&
         u.identities.some((i) => i?.provider === "anonymous")) ||
-      // fallback: no email and no non-anon providers known
       (!u.email && (provs.length === 0 || provs.includes("anonymous")))
     );
   }
 
   const isAnon = computeIsAnon(user);
 
-  // (optional) temporary logger — dev-only
   useEffect(() => {
     if (!ready) return;
     if (!import.meta.env.DEV) return; // only log in dev
@@ -69,7 +77,6 @@ export default function Dashboard() {
   const [authMessage, setAuthMessage] = useState("");
 
   // Upgrade current anonymous user -> email/password (keeps same user.id & data)
-  // Create account (guest → email). Triggers the email that includes ?guest=<anonId>
   async function handleCreateAccount() {
     try {
       setAuthBusy(true);
@@ -80,9 +87,7 @@ export default function Dashboard() {
         return;
       }
 
-      await signupOrLink(email, password); // <-- THIS kicks off the adoption flow
-
-      // keep the modal open so the user sees this instruction
+      await signupOrLink(email, password); // <-- kicks off adoption flow
       setAuthMessage("Check your email to confirm your account, then return here.");
     } catch (err) {
       console.error(err);
@@ -93,7 +98,6 @@ export default function Dashboard() {
   }
 
   // (Optional) Sign in to existing account (replaces the guest session)
-  // NOTE: This will NOT merge guest data. Prefer upgradeToEmailPassword above.
   async function signInExisting() {
     try {
       setAuthBusy(true);
@@ -137,7 +141,6 @@ export default function Dashboard() {
     loading: true,
   });
 
-  // Open our nice modal with a friendly message (only used when trial cap is hit)
   function openSignupModal(msg) {
     setAuthMessage(
       msg || "Free trial limit reached. Create an account to make more quizzes."
@@ -156,11 +159,12 @@ export default function Dashboard() {
   // leave these empty so the UI shows placeholders instead of hard text
   const [gTitle, setGTitle] = useState("");
   const [gTopic, setGTopic] = useState("");
-  const [gCount, setGCount] = useState(10); // keep 10 prefilled as requested
+  const [gCount, setGCount] = useState(10); // keep 10 prefilled
   const [generating, setGenerating] = useState(false);
   const [creating, setCreating] = useState(false);
   const [gGroupId, setGGroupId] = useState(""); // "" => No group
   const [gFile, setGFile] = useState(null);
+  const [gNoRepeat, setGNoRepeat] = useState(true);
 
   // create group inside AI modal
   const [gNewOpen, setGNewOpen] = useState(false);
@@ -170,8 +174,13 @@ export default function Dashboard() {
   // groups + filter
   const [groups, setGroups] = useState([]); // { id, name }[]
   const [filterGroupId, setFilterGroupId] = useState(""); // ""=all, NO_GROUP="__none__"=no group
-  // const [scoreSort, setScoreSort] = useState("asc"); // temporarily disabled UI
   const scoreSort = "asc"; // keep behavior: lowest scores first by default
+  const currentGroup = groups.find((g) => g.id === filterGroupId) || null;
+
+  // Edit group name modal
+  const [editGroupOpen, setEditGroupOpen] = useState(false);
+  const [editGroupName, setEditGroupName] = useState("");
+  const [savingGroupName, setSavingGroupName] = useState(false);
 
   // cleanup queue for empty groups (supports multiple prompts)
   const [cleanupQueue, setCleanupQueue] = useState([]); // string[] of group ids
@@ -196,7 +205,6 @@ export default function Dashboard() {
   // --- delete-current-group (when a specific group is filtered)
   const [deleteGroupOpen, setDeleteGroupOpen] = useState(false);
   const [deletingGroup, setDeletingGroup] = useState(false);
-  const currentGroup = groups.find((g) => g.id === filterGroupId) || null;
 
   // ---------- data loading ----------
   async function load() {
@@ -281,14 +289,14 @@ export default function Dashboard() {
       const { count } = await supabase
         .from("quizzes")
         .select("id", { count: "exact", head: true })
-        .eq("user_id", user.id); // explicit scoping to this user
+        .eq("user_id", user.id);
       setTrial({
         isAnon: true,
         remaining: Math.max(0, 2 - (count ?? 0)),
         loading: false,
       });
     })();
-  }, [isAnon, user?.id, quizzes.length]); // re-check after list changes
+  }, [isAnon, user?.id, quizzes.length]);
 
   // ---------- helpers: selection ----------
   function toggleSelected(quizId) {
@@ -343,18 +351,14 @@ export default function Dashboard() {
       setCleanupGroup({ id: g.id, name: g.name });
       setCleanupOpen(true);
     } else {
-      // drop this id and try next
       setCleanupQueue((q) => q.slice(1));
     }
   }
 
-  // Ensure the queue gets processed whenever it changes / modal closes
   useEffect(() => {
     if (!cleanupOpen) {
-      // let state settle then try
       setTimeout(runNextCleanupIfIdle, 0);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cleanupQueue.length, cleanupOpen]);
 
   function keepEmptyGroupNow() {
@@ -391,7 +395,6 @@ export default function Dashboard() {
   async function createQuiz() {
     if (creating) return;
     try {
-      // Preflight: block instantly if at limit (explicit user-scope)
       const allowed = await ensureCanCreate();
       if (!allowed) return;
 
@@ -403,7 +406,6 @@ export default function Dashboard() {
         .single();
 
       if (error) {
-        // RLS block when guest over the trial cap
         if (error.code === "42501") {
           openSignupModal(
             "Free trial limit reached. Create an account to make more quizzes."
@@ -440,7 +442,6 @@ export default function Dashboard() {
       setConfirmOpen(false);
       setTarget(null);
 
-      // also clear from multi-select
       setSelectedIds((prev) => {
         if (!prev.has(thisId)) return prev;
         const next = new Set(prev);
@@ -448,9 +449,7 @@ export default function Dashboard() {
         return next;
       });
 
-      if (thisGroupId) {
-        enqueueEmptyGroups([thisGroupId]);
-      }
+      if (thisGroupId) enqueueEmptyGroups([thisGroupId]);
     } else {
       alert("Failed to delete. Please try again.");
     }
@@ -458,7 +457,6 @@ export default function Dashboard() {
 
   // Extract text from user file (PDF/TXT/MD)
   async function extractTextFromFile(file) {
-    // Plain text / Markdown path
     if (
       file.type?.startsWith("text/") ||
       file.name.toLowerCase().endsWith(".txt") ||
@@ -468,7 +466,6 @@ export default function Dashboard() {
       return asText;
     }
 
-    // PDF path
     if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
       const buf = await file.arrayBuffer();
       const pdf = await getDocument({ data: buf }).promise;
@@ -481,13 +478,11 @@ export default function Dashboard() {
       return out;
     }
 
-    // Fallback: try as text
     return await file.text();
   }
 
   // Quick preflight: block guests at/over the limit before doing any work
   async function ensureCanCreate() {
-    // Re-check anon status + count right now (fresh)
     const { data: ures } = await supabase.auth.getUser();
     const anon =
       !!ures?.user &&
@@ -499,7 +494,7 @@ export default function Dashboard() {
     const { count } = await supabase
       .from("quizzes")
       .select("id", { count: "exact", head: true })
-      .eq("user_id", ures.user.id); // explicit scoping
+      .eq("user_id", ures.user.id);
 
     if ((count ?? 0) >= 2) {
       openSignupModal(
@@ -511,7 +506,6 @@ export default function Dashboard() {
   }
 
   // ---------- AI generate ----------
-  // Replace your existing generateQuiz() with this version
   async function generateQuiz() {
     try {
       if (generating) return;
@@ -526,16 +520,21 @@ export default function Dashboard() {
       const jwt = sessionRes?.session?.access_token;
       const count = Math.max(1, Math.min(Number(gCount) || 10, 30));
 
+      // Which group should we consider for no-repeat?
+      const targetGroupIdForNoRepeat =
+        (gGroupId && gGroupId !== "") ||
+        (filterGroupId && filterGroupId !== NO_GROUP)
+          ? (gGroupId || (filterGroupId !== NO_GROUP ? filterGroupId : ""))
+          : "";
+
       // 1) Optional: index uploaded file (RAG)
-      let file_id = null; // <-- fixed: no TypeScript type here
+      let file_id = null;
       if (gFile) {
         let rawDoc = "";
         try {
           rawDoc = await extractTextFromFile(gFile);
         } catch (e) {
-          alert(
-            `Couldn't read file "${gFile.name}". Please try a different file.\n\n${e}`
-          );
+          alert(`Couldn't read file "${gFile.name}". Please try a different file.\n\n${e}`);
           setGenerating(false);
           return;
         }
@@ -564,6 +563,7 @@ export default function Dashboard() {
           setGenerating(false);
           return;
         }
+
         let idxOut = {};
         try {
           idxOut = idxText ? JSON.parse(idxText) : {};
@@ -576,7 +576,38 @@ export default function Dashboard() {
         }
       }
 
-      // 2) Generate quiz (works even when file_id is null)
+      // 2) Build an avoid list from this group's existing questions (if enabled)
+      let avoid_prompts = [];
+      if (gNoRepeat && targetGroupIdForNoRepeat) {
+        const { data: prior, error: priorErr } = await supabase
+          .from("quizzes")
+          .select("questions")
+          .eq("user_id", user.id)
+          .eq("group_id", targetGroupIdForNoRepeat);
+
+        if (!priorErr && Array.isArray(prior)) {
+          const all = [];
+          for (const row of prior) {
+            const qs = Array.isArray(row?.questions) ? row.questions : [];
+            for (const q of qs) {
+              const p = (q?.prompt || "").toString().trim();
+              if (p) all.push(p);
+            }
+          }
+          // de-dup and cap to keep payload small
+          const seen = new Set();
+          for (const p of all) {
+            const key = p.toLowerCase();
+            if (!seen.has(key)) {
+              seen.add(key);
+              avoid_prompts.push(p);
+            }
+            if (avoid_prompts.length >= 300) break;
+          }
+        }
+      }
+
+      // 3) Generate quiz (works even when file_id is null)
       const res = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-quiz`,
         {
@@ -586,7 +617,6 @@ export default function Dashboard() {
             ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
           },
           body: JSON.stringify({
-            // Use sensible defaults if fields are left blank
             title: (gTitle || "").trim() || "Bash Top 10",
             topic:
               (gTopic || "").trim() ||
@@ -594,6 +624,9 @@ export default function Dashboard() {
             count,
             group_id: gGroupId || null,
             file_id,
+            // NEW: no-repeat hints for the Edge Function
+            no_repeat: !!gNoRepeat,
+            avoid_prompts, // array of prior prompts in this group
           }),
         }
       );
@@ -680,7 +713,6 @@ export default function Dashboard() {
       setBulkConfirmOpen(false);
       await load();
 
-      // Prompt for each group that became empty (queue; shows one-by-one)
       if (affectedGroupIds.length) enqueueEmptyGroups(affectedGroupIds);
     } catch {
       alert("Failed to delete selected quizzes. Please try again.");
@@ -738,7 +770,6 @@ export default function Dashboard() {
       clearSelection();
       await load();
 
-      // Previous groups that might now be empty (exclude the new one)
       const toCheck = prevGroupIds.filter(
         (gid) => gid !== (targetGroupId || null)
       );
@@ -747,6 +778,73 @@ export default function Dashboard() {
       alert("Failed to move selected quizzes. Please try again.");
     } finally {
       setMoving(false);
+    }
+  }
+
+  // Delete the currently filtered group (and its quizzes)
+  async function deleteCurrentGroupNow() {
+    if (!currentGroup?.id) return;
+    try {
+      setDeletingGroup(true);
+
+      // delete quizzes in the group first
+      const { error: qErr } = await supabase
+        .from("quizzes")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("group_id", currentGroup.id);
+      if (qErr) throw qErr;
+
+      // then delete the group
+      const { error: gErr } = await supabase
+        .from("groups")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("id", currentGroup.id);
+      if (gErr) throw gErr;
+
+      setDeleteGroupOpen(false);
+      setDeletingGroup(false);
+      setFilterGroupId("");
+      await load();
+      setGroups((gs) => gs.filter((g) => g.id !== currentGroup.id));
+    } catch (e) {
+      console.error(e);
+      alert("Failed to delete group. Please try again.");
+      setDeletingGroup(false);
+    }
+  }
+
+  // Edit / save current group's name
+  function openEditGroup() {
+    if (!currentGroup) return;
+    setEditGroupName(currentGroup.name || "");
+    setEditGroupOpen(true);
+  }
+  async function saveGroupName() {
+    if (!currentGroup?.id || !editGroupName.trim()) return;
+    try {
+      setSavingGroupName(true);
+      const { data, error } = await supabase
+        .from("groups")
+        .update({ name: editGroupName.trim() })
+        .eq("user_id", user.id)
+        .eq("id", currentGroup.id)
+        .select("id, name")
+        .single();
+      if (error) throw error;
+      // update local state
+      setGroups((gs) =>
+        gs
+          .map((g) => (g.id === currentGroup.id ? { ...g, name: data.name } : g))
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+      setEditGroupOpen(false);
+    } catch (e) {
+      console.error(e);
+      alert("Failed to rename group. Please try again.");
+    } finally {
+      setSavingGroupName(false);
     }
   }
 
@@ -763,6 +861,16 @@ export default function Dashboard() {
     });
   }, [quizzes, scoresByQuiz]);
 
+  const selectedTitles = useMemo(() => {
+  if (!selectedIds.size) return [];
+  const byId = new Map(quizzes.map(q => [q.id, q]));
+  return Array.from(selectedIds).map(id => {
+    const t = byId.get(id)?.title;
+    return (t && t.trim()) ? t : "Untitled Quiz";
+  });
+}, [selectedIds, quizzes]);
+
+
   // ---------- UI ----------
   return (
     <div className="min-h-screen bg-gray-900 text-white">
@@ -775,13 +883,12 @@ export default function Dashboard() {
           ) : isAnon ? (
             <>
               <span className="text-gray-300">Guest</span>
-              {/* Guest button: open clean modal (no trial text) */}
               <button
                 onClick={() => {
                   setAuthMessage("");
                   setAuthOpen(true);
                 }}
-                className="px-3 py-1 rounded bg-emerald-500 hover:bg-emerald-600 font-semibold"
+                className={`${btnBase} ${btnGreen}`}
               >
                 Sign Up / Sign In
               </button>
@@ -791,23 +898,17 @@ export default function Dashboard() {
               <span className="text-gray-300 hidden sm:inline">
                 {user.email}
               </span>
-              <button
-                onClick={
-                  handleSignOut /* this should setAuthMessage(...) and setAuthOpen(true) as we added earlier */
-                }
-                className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600"
-              >
+              <button onClick={handleSignOut} className={`${btnBase} ${btnGray}`}>
                 Sign out
               </button>
             </>
           ) : (
-            // Fallback when there's no user yet: open clean modal (no trial text)
             <button
               onClick={() => {
                 setAuthMessage("");
                 setAuthOpen(true);
               }}
-              className="px-3 py-1 rounded bg-emerald-500 hover:bg-emerald-600 font-semibold"
+              className={`${btnBase} ${btnGreen}`}
             >
               Sign Up / Sign In
             </button>
@@ -818,27 +919,26 @@ export default function Dashboard() {
       <main className="max-w-3xl mx-auto p-6">
         {/* TOOLBAR (responsive: stacks on mobile) */}
         <div className="mb-6 flex flex-col sm:flex-row sm:flex-nowrap items-stretch sm:items-center gap-3">
-          {/* Left: primary actions */}
-          <div className="flex items-center gap-3 shrink-0">
+          {/* Left: primary actions (equal height on mobile) */}
+          <div className="flex items-stretch gap-3 shrink-0 w-full sm:w-auto">
             <button
               onClick={async () => {
                 if (filterGroupId && filterGroupId !== NO_GROUP)
                   setGGroupId(filterGroupId);
                 else setGGroupId("");
 
-                // Preflight: block instantly if at limit
                 const allowed = await ensureCanCreate();
                 if (!allowed) return;
 
                 setGenOpen(true);
               }}
-              className="w-full sm:w-auto px-4 py-2 rounded bg-emerald-500 hover:bg-emerald-600 font-semibold disabled:opacity-60"
+              className={`w-full sm:w-auto ${btnBase} ${btnGreen} ${actionH}`}
             >
               + Generate Quiz with AI
             </button>
             <button
               onClick={createQuiz}
-              className="w-full sm:w-auto px-4 py-2 rounded bg-gray-700 hover:bg-gray-600"
+              className={`w-full sm:w-auto ${btnBase} ${btnGray} ${actionH}`}
               disabled={creating}
             >
               {creating ? "Creating…" : "New empty quiz"}
@@ -872,13 +972,13 @@ export default function Dashboard() {
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
                 <button
                   onClick={() => setMoveOpen(true)}
-                  className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600"
+                  className={`${btnBase} ${btnGray}`}
                 >
                   Move to group
                 </button>
                 <button
                   onClick={() => setBulkConfirmOpen(true)}
-                  className="w-full sm:w-auto px-3 py-2 rounded bg-red-600 hover:bg-red-700"
+                  className={`${btnBase} ${btnRed}`}
                 >
                   Delete selected
                 </button>
@@ -938,13 +1038,13 @@ export default function Dashboard() {
                 <div className="flex flex-wrap gap-2">
                   <Link
                     to={`/play/${q.id}`}
-                    className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600"
+                    className={`${btnBase} ${btnGray}`}
                   >
                     Play
                   </Link>
                   <Link
                     to={`/edit/${q.id}`}
-                    className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600"
+                    className={`${btnBase} ${btnGray}`}
                   >
                     Edit
                   </Link>
@@ -957,7 +1057,7 @@ export default function Dashboard() {
                       });
                       setConfirmOpen(true);
                     }}
-                    className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600"
+                    className={`${btnBase} ${btnGray}`}
                   >
                     Delete
                   </button>
@@ -967,12 +1067,18 @@ export default function Dashboard() {
           </ul>
         )}
 
-        {/* Delete-current-group button (only when a specific group is filtered) */}
+        {/* Group actions under the list (only when a specific group is filtered) */}
         {filterGroupId && filterGroupId !== NO_GROUP && currentGroup && (
-          <div className="mt-6">
+          <div className="mt-6 flex items-center gap-3">
+            <button
+              onClick={openEditGroup}
+              className={`${btnBase} ${btnGray}`}
+            >
+              Edit Group Name
+            </button>
             <button
               onClick={() => setDeleteGroupOpen(true)}
-              className="px-4 py-2 rounded bg-gray-700 hover:bg-red-700"
+              className={`${btnBase} ${btnRed}`}
             >
               Delete “{currentGroup.name}” group
             </button>
@@ -990,7 +1096,7 @@ export default function Dashboard() {
           onKeyDown={(e) => {
             if (deleting) return;
             if (e.key === "Escape") setConfirmOpen(false);
-            if (e.key === "Enter") setConfirmOpen(false); // safer default
+            if (e.key === "Enter") setConfirmOpen(false);
           }}
           onClick={() => !deleting && setConfirmOpen(false)}
         >
@@ -1001,19 +1107,18 @@ export default function Dashboard() {
             <h2 className="text-xl font-bold mb-2">Delete quiz?</h2>
             <p className="text-gray-300 mb-6">
               Are you sure you want to delete{" "}
-              <span className="font-semibold">{target?.title}</span>? This cannot
-              be undone.
+              <span className="font-semibold">{target?.title}</span>? 
             </p>
             <div className="flex flex-col sm:flex-row justify-end gap-2">
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-50"
+                className={`${btnBase} ${btnGray}`}
                 onClick={() => setConfirmOpen(false)}
                 disabled={deleting}
               >
                 Cancel
               </button>
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-50"
+                className={`${btnBase} ${btnGray}`}
                 onClick={handleDelete}
                 disabled={deleting}
               >
@@ -1030,7 +1135,7 @@ export default function Dashboard() {
           className="fixed inset-0 bg-black/60 grid place-items-center z-[95]"
           onClick={() => {
             if (!authBusy) {
-              setAuthMessage(""); // clear any banner text when closing
+              setAuthMessage("");
               setAuthOpen(false);
             }
           }}
@@ -1043,7 +1148,6 @@ export default function Dashboard() {
           >
             <h2 className="text-xl font-bold mb-2">Create account or sign in</h2>
 
-            {/* Banner ONLY when there's a message (e.g., trial-limit hit). Otherwise show nothing. */}
             {authMessage && (
               <div className="mb-4 rounded-lg bg-emerald-900/30 border border-emerald-800 p-3 text-sm">
                 {authMessage}
@@ -1088,10 +1192,10 @@ export default function Dashboard() {
 
             <div className="flex flex-col sm:flex-row justify-end gap-2">
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-60"
+                className={`${btnBase} ${btnGray}`}
                 onClick={() => {
                   if (!authBusy) {
-                    setAuthMessage(""); // ensure clean next open
+                    setAuthMessage("");
                     setAuthOpen(false);
                   }
                 }}
@@ -1100,9 +1204,8 @@ export default function Dashboard() {
                 Not now
               </button>
 
-              {/* Primary: upgrade guest to email/password (preserves data) */}
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60"
+                className={`${btnBase} ${btnGreen}`}
                 onClick={handleCreateAccount}
                 disabled={authBusy}
                 title="Upgrade this guest to an email/password account"
@@ -1110,9 +1213,8 @@ export default function Dashboard() {
                 {authBusy ? "Working…" : "Create account"}
               </button>
 
-              {/* Secondary: sign in to existing account (replaces guest session) */}
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-60"
+                className={`${btnBase} ${btnGray}`}
                 onClick={async () => {
                   const ok = confirm(
                     "Signing in to an existing account will replace your guest session. Continue?"
@@ -1176,13 +1278,26 @@ export default function Dashboard() {
                 />
               </div>
 
+              {/* NEW: Do not repeat previous questions */}
+              <div className="sm:col-span-2">
+                <label className="inline-flex items-center gap-2 text-sm text-gray-200">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={gNoRepeat}
+                    onChange={(e) => setGNoRepeat(e.target.checked)}
+                  />
+                  <span>Do not repeat previous questions</span>
+                </label>
+              </div>
+
               {/* Optional source file (PDF/TXT/MD) */}
               <div className="sm:col-span-2">
                 <label
                   className="block text-sm text-gray-300 mb-1"
                   htmlFor="gen-file"
                 >
-                  Optional document (PDF / TXT / MD)
+                  Optional document to use as source (PDF / TXT / MD)
                 </label>
                 <input
                   id="gen-file"
@@ -1210,7 +1325,7 @@ export default function Dashboard() {
                   className="block text-sm text-gray-300 mb-1"
                   htmlFor="gen-group"
                 >
-                  Group
+                  Add to Group
                 </label>
                 <div className="flex flex-col sm:flex-row gap-2">
                   <select
@@ -1228,7 +1343,7 @@ export default function Dashboard() {
                   </select>
                   <button
                     type="button"
-                    className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 whitespace-nowrap"
+                    className={`${btnBase} ${btnGray}`}
                     onClick={() => {
                       setGNewName("");
                       setGNewOpen(true);
@@ -1260,14 +1375,14 @@ export default function Dashboard() {
 
             <div className="flex flex-col sm:flex-row justify-end gap-2 mt-6">
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600"
+                className={`${btnBase} ${btnGray}`}
                 onClick={() => setGenOpen(false)}
                 disabled={generating}
               >
                 Cancel
               </button>
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60"
+                className={`${btnBase} ${btnGreen}`}
                 onClick={generateQuiz}
                 disabled={generating}
               >
@@ -1278,105 +1393,149 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* New group (AI modal) */}
-      {gNewOpen && (
-        <div
-          className="fixed inset-0 bg-black/70 grid place-items-center z-[65]"
-          onClick={() => setGNewOpen(false)}
-        >
-          <div
-            className="w-full max-w-sm bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-lg font-bold mb-3">Create new group</h3>
-            <input
-              className="w-full p-3 rounded bg-gray-900 text-white border border-gray-700 mb-4"
-              placeholder="Group name"
-              value={gNewName}
-              onChange={(e) => setGNewName(e.target.value)}
-              autoFocus
-            />
-            <div className="flex flex-col sm:flex-row justify-end gap-2">
-              <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600"
-                onClick={() => setGNewOpen(false)}
-                disabled={gCreatingGroup}
-              >
-                Cancel
-              </button>
-              <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60"
-                onClick={createGroupForModal}
-                disabled={gCreatingGroup || !gNewName.trim()}
-              >
-                {gCreatingGroup ? "Creating…" : "Create"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* --- NEW: Bulk Delete modal (restored) --- */}
+{bulkConfirmOpen && (
+  <div
+    className="fixed inset-0 bg-black/60 grid place-items-center z-50"
+    aria-modal="true"
+    role="dialog"
+    onClick={() => !bulkDeleting && setBulkConfirmOpen(false)}
+  >
+    <div
+      className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <h2 className="text-xl font-bold mb-2">Delete selected quizzes?</h2>
 
-      {/* cleanup modal (queue-driven) */}
-      {cleanupOpen && cleanupGroup && (
+      <p className="text-gray-300 mb-4">
+        You have selected:
+        <span className="block mt-1 font-semibold break-words">
+          {selectedTitles.join(", ")}
+        </span>
+      </p>
+
+      <div className="flex flex-col sm:flex-row justify-end gap-2">
+        <button
+          className={`${btnBase} ${btnGray}`}
+          onClick={() => setBulkConfirmOpen(false)}
+          disabled={bulkDeleting}
+        >
+          Cancel
+        </button>
+        <button
+          className={`${btnBase} ${btnRedSoft}`}
+          onClick={doBulkDelete}
+          disabled={bulkDeleting}
+        >
+          {bulkDeleting ? "Deleting…" : "Delete selected"}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+      {/* --- NEW: Move to Group modal (restored) --- */}
+      {moveOpen && (
         <div
-          className="fixed inset-0 bg-black/60 grid place-items-center z-[70]"
-          onClick={() => !cleaning && keepEmptyGroupNow()}
+          className="fixed inset-0 bg-black/60 grid place-items-center z-50"
+          aria-modal="true"
+          role="dialog"
+          onClick={() => !moving && setMoveOpen(false)}
         >
           <div
             className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-xl font-bold mb-2">Delete empty group?</h2>
-            <p className="text-gray-300 mb-6">
-              The group <span className="font-semibold">{cleanupGroup.name}</span> no
-              longer has any quizzes. Would you like to delete this group?
+            <h2 className="text-xl font-bold mb-4">Move selected to group</h2>
+            <p className="text-gray-300 mb-4">
+              Selected: <span className="font-semibold">{selectedIds.size}</span>{" "}
+              {selectedIds.size === 1 ? "quiz" : "quizzes"}
             </p>
-            <div className="flex flex-col sm:flex-row justify-end gap-2">
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">
+                  Choose existing group (or leave blank for “No group”)
+                </label>
+                <select
+                  className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700"
+                  value={moveGroupId}
+                  onChange={(e) => setMoveGroupId(e.target.value)}
+                >
+                  <option value="">No group</option>
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">
+                  Or create a new group
+                </label>
+                <input
+                  className="w-full p-3 bg-white rounded bg-gray-800 text-white border border-gray-700"
+                  placeholder="New group name (optional)"
+                  value={moveNewName}
+                  onChange={(e) => setMoveNewName(e.target.value)}
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  If you enter a name here, a new group will be created and used.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row justify-end gap-2 mt-6">
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600"
-                onClick={keepEmptyGroupNow}
-                disabled={cleaning}
+                className={`${btnBase} ${btnGray}`}
+                onClick={() => setMoveOpen(false)}
+                disabled={moving}
               >
-                Keep group
+                Cancel
               </button>
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-red-500 hover:bg-red-600 disabled:opacity-60"
-                onClick={deleteEmptyGroupNow}
-                disabled={cleaning}
+                className={`${btnBase} ${btnGreen}`}
+                onClick={doBulkMove}
+                disabled={moving || selectedIds.size === 0}
+                title={selectedIds.size === 0 ? "No quizzes selected" : ""}
               >
-                {cleaning ? "Deleting…" : "Delete group"}
+                {moving ? "Moving…" : "Move"}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Delete current group (confirm) */}
+      {/* Delete current group modal */}
       {deleteGroupOpen && currentGroup && (
         <div
-          className="fixed inset-0 bg-black/60 grid place-items-center z-[85]"
+          className="fixed inset-0 bg-black/60 grid place-items-center z-50"
+          aria-modal="true"
+          role="dialog"
           onClick={() => !deletingGroup && setDeleteGroupOpen(false)}
         >
           <div
             className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-xl font-bold mb-2">Delete this group?</h2>
+            <h2 className="text-xl font-bold mb-2">Delete group?</h2>
             <p className="text-gray-300 mb-6">
-              You’re about to delete the group{" "}
-              <span className="font-semibold">“{currentGroup.name}”</span>. All quizzes
-              in this group will also be deleted. Continue?
+              This deletes the group <span className="font-semibold">
+                {currentGroup.name}
+              </span>{" "}
+              and all quizzes inside it.
             </p>
             <div className="flex flex-col sm:flex-row justify-end gap-2">
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600"
+                className={`${btnBase} ${btnGray}`}
                 onClick={() => setDeleteGroupOpen(false)}
                 disabled={deletingGroup}
               >
                 Cancel
               </button>
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-red-600 hover:bg-red-700 disabled:opacity-60"
+                className={`${btnBase} ${btnRed}`}
                 onClick={deleteCurrentGroupNow}
                 disabled={deletingGroup}
               >
@@ -1387,119 +1546,76 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* bulk delete confirm */}
-      {bulkConfirmOpen && (
+      {/* Edit group name modal */}
+      {editGroupOpen && currentGroup && (
         <div
-          className="fixed inset-0 bg-black/60 grid place-items-center z-[75]"
-          onClick={() => !bulkDeleting && setBulkConfirmOpen(false)}
+          className="fixed inset-0 bg-black/60 grid place-items-center z-50"
+          aria-modal="true"
+          role="dialog"
+          onClick={() => !savingGroupName && setEditGroupOpen(false)}
         >
           <div
             className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-xl font-bold mb-2">Delete selected quizzes?</h2>
-            <p className="text-gray-300 mb-6">
-              You’re about to delete{" "}
-              <span className="font-semibold">{selectedIds.size}</span>{" "}
-              {selectedIds.size === 1 ? "quiz" : "quizzes"}. This can’t be undone.
-            </p>
-            <div className="flex flex-col sm:flex-row justify-end gap-2">
+            <h2 className="text-xl font-bold mb-4">Rename group</h2>
+            <input
+              className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700"
+              value={editGroupName}
+              onChange={(e) => setEditGroupName(e.target.value)}
+              placeholder="Group name"
+            />
+            <div className="flex flex-col sm:flex-row justify-end gap-2 mt-6">
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600"
-                onClick={() => setBulkConfirmOpen(false)}
-                disabled={bulkDeleting}
+                className={`${btnBase} ${btnGray}`}
+                onClick={() => setEditGroupOpen(false)}
+                disabled={savingGroupName}
               >
                 Cancel
               </button>
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-red-600 hover:bg-red-700 disabled:opacity-60"
-                onClick={doBulkDelete}
-                disabled={bulkDeleting}
+                className={`${btnBase} ${btnGreen}`}
+                onClick={saveGroupName}
+                disabled={savingGroupName || !editGroupName.trim()}
               >
-                {bulkDeleting ? "Deleting…" : "Delete"}
+                {savingGroupName ? "Saving…" : "Save"}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* bulk move */}
-      {moveOpen && (
+      {/* Empty group cleanup modal */}
+      {cleanupOpen && cleanupGroup && (
         <div
-          className="fixed inset-0 bg-black/70 grid place-items-center z-[80]"
-          onClick={() => !moving && setMoveOpen(false)}
+          className="fixed inset-0 bg-black/60 grid place-items-center z-50"
+          aria-modal="true"
+          role="dialog"
+          onClick={() => !cleaning && setCleanupOpen(false)}
         >
           <div
             className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-xl font-bold mb-4">Move selected quizzes</h2>
-            <p className="text-gray-300 mb-4">
-              Selected: <span className="font-semibold">{selectedIds.size}</span>
+            <h2 className="text-xl font-bold mb-2">Delete empty group?</h2>
+            <p className="text-gray-300 mb-6">
+              The group <span className="font-semibold">{cleanupGroup.name}</span>{" "}
+              is now empty. Would you like to delete it?
             </p>
-
-            <div className="space-y-4">
-              <div>
-                <label
-                  className="block text-sm text-gray-300 mb-1"
-                  htmlFor="move-existing"
-                >
-                  Move to existing group
-                </label>
-                <select
-                  id="move-existing"
-                  className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700"
-                  value={moveGroupId}
-                  onChange={(e) => setMoveGroupId(e.target.value)}
-                >
-                  <option value="">Choose group…</option>
-                  <option value={NO_GROUP}>No group</option>
-                  {groups.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label
-                  className="block text-sm text-gray-300 mb-1"
-                  htmlFor="move-new"
-                >
-                  Or create & move to new group
-                </label>
-                <input
-                  id="move-new"
-                  className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700"
-                  placeholder="New group name"
-                  value={moveNewName}
-                  onChange={(e) => setMoveNewName(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row justify-end gap-2 mt-6">
+            <div className="flex flex-col sm:flex-row justify-end gap-2">
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600"
-                onClick={() => setMoveOpen(false)}
-                disabled={moving}
+                className={`${btnBase} ${btnGray}`}
+                onClick={keepEmptyGroupNow}
+                disabled={cleaning}
               >
-                Cancel
+                Keep group
               </button>
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60"
-                onClick={doBulkMove}
-                disabled={moving || (!moveNewName.trim() && moveGroupId === "")}
-                title={
-                  moveNewName.trim()
-                    ? "Create new group and move"
-                    : moveGroupId
-                    ? "Move to selected group"
-                    : "Select a target or enter a new group name"
-                }
+                className={`${btnBase} ${btnRed}`}
+                onClick={deleteEmptyGroupNow}
+                disabled={cleaning}
               >
-                {moving ? "Moving…" : "Move"}
+                {cleaning ? "Deleting…" : "Delete group"}
               </button>
             </div>
           </div>

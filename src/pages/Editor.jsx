@@ -12,9 +12,12 @@ export default function Editor() {
   const [questions, setQuestions] = useState([]);
   const [msg, setMsg] = useState("");
 
+  // NEW: store original AI prompt (nullable if the quiz wasn't AI-generated)
+  const [sourcePrompt, setSourcePrompt] = useState("");
+
   // Groups
-  const [groups, setGroups] = useState([]);     // [{id, name}]
-  const [groupId, setGroupId] = useState("");   // "" = No group in the UI
+  const [groups, setGroups] = useState([]); // [{id, name}]
+  const [groupId, setGroupId] = useState(""); // "" = No group in the UI
   const [savingGroup, setSavingGroup] = useState(false);
 
   // Track previous group id to know which to check after change
@@ -30,6 +33,10 @@ export default function Editor() {
   const [cleanupGroup, setCleanupGroup] = useState(null); // { id, name }
   const [cleaning, setCleaning] = useState(false);
 
+  // NEW: regenerate confirm modal
+  const [regenOpen, setRegenOpen] = useState(false);
+  const [regenBusy, setRegenBusy] = useState(false);
+
   async function loadGroups() {
     const { data, error } = await supabase
       .from("groups")
@@ -39,24 +46,28 @@ export default function Editor() {
     if (!error) setGroups(data ?? []);
   }
 
+  async function loadQuiz() {
+    const { data, error } = await supabase
+      .from("quizzes")
+      .select("title, questions, group_id, source_prompt")
+      .eq("id", quizId)
+      .eq("user_id", user.id)
+      .single();
+
+    if (!error && data) {
+      setTitle(data.title || "");
+      setQuestions(data.questions || []);
+      const gid = data.group_id || "";
+      setGroupId(gid);
+      prevGroupRef.current = gid || null;
+      setSourcePrompt(data.source_prompt || ""); // may be null if older quiz
+    }
+  }
+
   useEffect(() => {
     (async () => {
       await loadGroups();
-
-      const { data, error } = await supabase
-        .from("quizzes")
-        .select("title, questions, group_id")
-        .eq("id", quizId)
-        .eq("user_id", user.id)
-        .single();
-
-      if (!error && data) {
-        setTitle(data.title || "");
-        setQuestions(data.questions || []);
-        const gid = data.group_id || "";
-        setGroupId(gid);
-        prevGroupRef.current = gid || null;
-      }
+      await loadQuiz();
     })();
   }, [quizId, user.id]);
 
@@ -79,6 +90,7 @@ export default function Editor() {
         title,
         questions,
         group_id: groupId || null,
+        source_prompt: sourcePrompt || null, // NEW: persist prompt
         updated_at: new Date().toISOString(),
       })
       .eq("id", quizId)
@@ -158,9 +170,7 @@ export default function Editor() {
       if (!error) {
         setMsg("Saved!");
         setTimeout(() => setMsg(""), 1200);
-        // after saving, if previous group exists and is different, check emptiness
         if (prev && prev !== (next || null)) {
-          // tiny delay so DB finishes the write
           setTimeout(() => {
             maybePromptDeleteEmptyGroup(prev);
           }, 0);
@@ -193,7 +203,6 @@ export default function Editor() {
 
       setGroups((gs) => [...gs, data].sort((a, b) => a.name.localeCompare(b.name)));
 
-      // Save new group selection + check previous group emptiness
       const prev = prevGroupRef.current;
       setGroupId(data.id);
 
@@ -218,6 +227,57 @@ export default function Editor() {
       setTimeout(() => setMsg(""), 1200);
     } finally {
       setCreatingGroup(false);
+    }
+  }
+
+  // ---------- Regenerate ----------
+  async function doRegenerate() {
+    try {
+      setRegenBusy(true);
+
+      const { data: sessionRes } = await supabase.auth.getSession();
+      const jwt = sessionRes?.session?.access_token;
+
+      // Use current question count as default size
+      const count = Math.max(1, Math.min((questions?.length || 10), 30));
+
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-quiz`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+          },
+          body: JSON.stringify({
+            title: title?.trim() || "Untitled Quiz",
+            topic: sourcePrompt?.trim() || "Create a short quiz.",
+            count,
+            group_id: groupId || null,
+            file_id: null,
+            // Ask the Edge Function to REPLACE this quiz (not create a new one)
+            replace_quiz_id: quizId,
+          }),
+        }
+      );
+
+      const raw = await res.text();
+      if (!res.ok) {
+        alert(`Failed to regenerate (${res.status}):\n${raw || "Unknown error"}`);
+        setRegenBusy(false);
+        return;
+      }
+
+      // Reload quiz from DB so UI shows updated questions
+      await loadQuiz();
+      setMsg("Quiz regenerated.");
+      setTimeout(() => setMsg(""), 1500);
+      setRegenOpen(false);
+    } catch (e) {
+      console.error(e);
+      alert("Failed to regenerate quiz. Please try again.");
+    } finally {
+      setRegenBusy(false);
     }
   }
 
@@ -250,8 +310,9 @@ export default function Editor() {
         )}
 
         {/* Title + Group row */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
-          <div className="md:col-span-2">
+        {/* On md+, use a 2-col grid with a narrower Title column so Group has room */}
+        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1.4fr)_minmax(260px,1fr)] gap-3 items-start">
+          <div>
             <label className="block text-xs sm:text-sm text-gray-300 mb-1">Title</label>
             <input
               className="w-full p-3 rounded bg-white text-gray-900 border border-gray-300 placeholder:text-gray-500 text-base sm:text-lg"
@@ -285,6 +346,28 @@ export default function Editor() {
                 New group +
               </button>
             </div>
+          </div>
+        </div>
+
+        {/* NEW: Original prompt + Regenerate */}
+        <div className="space-y-2">
+          <label className="block text-xs sm:text-sm text-gray-300">
+            Original prompt (used for AI generation)
+          </label>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <textarea
+              className="w-full p-3 rounded bg-white text-gray-900 border border-gray-300 placeholder:text-gray-500 text-base sm:text-lg min-h-[6rem]"
+              placeholder="(Optional) The prompt used to generate this quiz."
+              value={sourcePrompt}
+              onChange={(e) => setSourcePrompt(e.target.value)}
+            />
+            <button
+              className="sm:self-start px-3 py-2 rounded bg-emerald-500 hover:bg-emerald-600 font-semibold"
+              onClick={() => setRegenOpen(true)}
+              title="Generate a new set of questions from this prompt and replace the current questions"
+            >
+              Regenerate
+            </button>
           </div>
         </div>
 
@@ -414,6 +497,41 @@ export default function Editor() {
                 disabled={cleaning}
               >
                 {cleaning ? "Deleting…" : "Delete group"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Regenerate confirm */}
+      {regenOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 flex items-center justify-center p-3 sm:p-4 z-[62]"
+          onClick={() => !regenBusy && setRegenOpen(false)}
+        >
+          <div
+            className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-5 sm:p-6 shadow-xl max-h-[85vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-xl font-bold mb-2">Regenerate this quiz?</h2>
+            <p className="text-gray-300 mb-6">
+              This will replace all current questions with new ones generated from the prompt
+              above. This action can’t be undone.
+            </p>
+            <div className="flex flex-col sm:flex-row justify-end gap-2">
+              <button
+                className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600"
+                onClick={() => setRegenOpen(false)}
+                disabled={regenBusy}
+              >
+                Cancel
+              </button>
+              <button
+                className="w-full sm:w-auto px-3 py-2 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60"
+                onClick={doRegenerate}
+                disabled={regenBusy}
+              >
+                {regenBusy ? "Working…" : "Regenerate"}
               </button>
             </div>
           </div>
