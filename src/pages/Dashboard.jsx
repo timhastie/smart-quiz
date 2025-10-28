@@ -873,23 +873,30 @@ export default function Dashboard() {
 }, [selectedIds, quizzes]);
 
 
-  // ---------- UI ----------
-  return (
-    <div className="min-h-screen bg-gray-900 text-white">
-      <header className="flex items-center justify-between p-3 sm:p-4 border-b border-gray-800">
-        <h1 className="text-xl font-bold">Your Quizzes</h1>
+ // ---------- UI ----------
+return (
+  <div className="min-h-screen bg-gray-900 text-white">
+    <header className="border-b border-gray-800 px-6 sm:px-8 lg:px-12 py-3 sm:py-4">
+      <div className="grid grid-cols-3 items-center">
+        <h1 className="text-xl font-bold justify-self-start">Your Quizzes</h1>
 
-        <div className="flex items-center gap-3 text-sm">
+        <div className="flex items-center justify-center">
+          <img
+            src="/smartquizlogo.png"
+            alt="Smart-Quiz logo"
+            className="h-12 sm:h-10 md:h-16 w-auto my-2 sm:my-3 object-contain select-none pointer-events-none"
+            draggable="false"
+          />
+        </div>
+
+        <div className="flex items-center gap-3 text-sm justify-self-end min-w-0">
           {!ready ? (
             <span className="text-gray-400">Loading…</span>
           ) : isAnon ? (
             <>
-              <span className="text-gray-300">Guest</span>
+              <span className="text-gray-300 hidden sm:inline">Guest</span>
               <button
-                onClick={() => {
-                  setAuthMessage("");
-                  setAuthOpen(true);
-                }}
+                onClick={() => { setAuthMessage(""); setAuthOpen(true); }}
                 className={`${btnBase} ${btnGreen}`}
               >
                 Sign Up / Sign In
@@ -897,7 +904,7 @@ export default function Dashboard() {
             </>
           ) : user ? (
             <>
-              <span className="text-gray-300 hidden sm:inline">
+              <span className="text-gray-300 hidden md:inline max-w-[28ch] truncate">
                 {user.email}
               </span>
               <button onClick={handleSignOut} className={`${btnBase} ${btnGray}`}>
@@ -906,18 +913,17 @@ export default function Dashboard() {
             </>
           ) : (
             <button
-              onClick={() => {
-                setAuthMessage("");
-                setAuthOpen(true);
-              }}
+              onClick={() => { setAuthMessage(""); setAuthOpen(true); }}
               className={`${btnBase} ${btnGreen}`}
             >
               Sign Up / Sign In
             </button>
           )}
         </div>
-      </header>
+      </div>
+    </header>
 
+      
       <main className="max-w-3xl mx-auto p-6">
         {/* TOOLBAR (responsive: stacks on mobile) */}
         <div className="mb-6 flex flex-col sm:flex-row sm:flex-nowrap items-stretch sm:items-center gap-3">

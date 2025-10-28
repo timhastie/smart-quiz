@@ -401,14 +401,32 @@ export default function Play() {
       onKeyDown={onKey}
       tabIndex={0}
     >
-      <header className="flex items-center justify-between p-3 sm:p-4 border-b border-gray-800">
-        <h1 className="text-lg sm:text-xl font-bold truncate pr-3">
-          {quiz.title || "Quiz"}
-        </h1>
-        <Link to="/" className={`${btnBase} ${btnGray}`}>
-          Back
-        </Link>
-      </header>
+      <header className="border-b border-gray-800 px-6 sm:px-8 lg:px-12 py-3 sm:py-4">
+  <div className="grid grid-cols-3 items-center">
+    {/* Left: quiz title (unchanged) */}
+    <h1 className="text-lg sm:text-xl font-bold truncate pr-3">
+      {quiz.title || "Quiz"}
+    </h1>
+
+    {/* Center: logo */}
+    <div className="flex items-center justify-center">
+      <img
+        src="/smartquizlogo.png"
+        alt="Smart-Quiz logo"
+        className="h-12 sm:h-10 md:h-16 w-auto my-2 sm:my-3 object-contain select-none pointer-events-none"
+        draggable="false"
+      />
+    </div>
+
+    {/* Right: Back button (unchanged) */}
+    <div className="justify-self-end">
+      <Link to="/" className={`${btnBase} ${btnGray}`}>
+        Back
+      </Link>
+    </div>
+  </div>
+</header>
+
 
       <main className="max-w-2xl mx-auto p-4 sm:p-6 text-base sm:text-2xl">
         {current ? (

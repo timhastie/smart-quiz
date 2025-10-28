@@ -1,6 +1,6 @@
 // supabase/functions/generate-quiz/index.ts
-// CORS-enabled generate-quiz with novelty controls, optional in-place regeneration,
-// and RAG retrieval from file_chunks via RPC `match_file_chunks`
+// CORS-enabled generate-quiz with novelty controls (semantic de-dup),
+// optional in-place regeneration, and RAG retrieval from file_chunks via RPC `match_file_chunks`
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import OpenAI from "npm:openai@4.56.0";
@@ -35,7 +35,7 @@ function text(body: string, status = 200) {
 
 type QA = { prompt: string; answer: string };
 
-// ---------- helpers ----------
+// ---------- light exact/lexical helpers (kept for cheap first-pass) ----------
 function normalize(s: string) {
   return s
     .toLowerCase()
@@ -60,8 +60,90 @@ function jaccard(a: string, b: string) {
   const uni = A.size + B.size - inter;
   return uni === 0 ? 0 : inter / uni;
 }
-function isNearDuplicate(a: string, b: string, threshold = 0.9) {
-  return jaccard(a, b) >= threshold;
+
+// ---------- SEMANTIC de-dup (embeddings) ----------
+async function embedBatch(texts: string[]): Promise<number[][]> {
+  if (texts.length === 0) return [];
+  const res = await getOpenAI().embeddings.create({
+    model: "text-embedding-3-small",
+    input: texts,
+  });
+  return res.data.map((d) => d.embedding as unknown as number[]);
+}
+function cosine(a: number[], b: number[]) {
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) { dot += a[i]*b[i]; na += a[i]*a[i]; nb += b[i]*b[i]; }
+  return dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-12);
+}
+
+/**
+ * Filters out paraphrases vs prior content and enforces diversity within the batch.
+ *  - SIM_TO_AVOID: reject if too similar to any prior/avoid prompt
+ *  - SIM_WITHIN_BATCH: keep batch varied
+ * Also runs a fast exact/lexical pass first.
+ */
+async function filterSemanticallyNovel(
+  candidates: QA[],
+  avoid_prompts: string[],
+  SIM_TO_AVOID = 0.86,
+  SIM_WITHIN_BATCH = 0.80
+): Promise<QA[]> {
+  if (candidates.length === 0) return [];
+
+  // 0) Normalize & cap avoid list to keep costs small
+  const seen = new Set<string>();
+  const cleanedAvoid: string[] = [];
+  for (const p of avoid_prompts || []) {
+    const t = (p || "").trim();
+    if (!t) continue;
+    const k = t.toLowerCase();
+    if (!seen.has(k)) { seen.add(k); cleanedAvoid.push(t); }
+    if (cleanedAvoid.length >= 500) break;
+  }
+
+  // 1) Quick exact/lexical pass against avoid list
+  const avoidExact = new Set(cleanedAvoid.map((p) => normalize(p)));
+  let firstPass = candidates.filter((qa) => {
+    const nm = normalize(qa.prompt);
+    if (avoidExact.has(nm)) return false;                 // exact/near-exact
+    for (const p of cleanedAvoid) {
+      if (jaccard(qa.prompt, p) >= 0.90) return false;    // high lexical overlap
+    }
+    return true;
+  });
+  if (firstPass.length === 0) return [];
+
+  // 2) Semantic pass vs avoid list
+  const [avoidEmb, candEmb] = await Promise.all([
+    embedBatch(cleanedAvoid),
+    embedBatch(firstPass.map((c) => c.prompt)),
+  ]);
+  const keepIndexes: number[] = [];
+  candEmb.forEach((emb, idx) => {
+    if (!emb) return;
+    let clash = false;
+    for (const aEmb of avoidEmb) {
+      if (cosine(emb, aEmb) >= SIM_TO_AVOID) { clash = true; break; }
+    }
+    if (!clash) keepIndexes.push(idx);
+  });
+  if (keepIndexes.length === 0) return [];
+
+  // 3) Enforce diversity inside the kept batch (greedy)
+  const filtered: QA[] = [];
+  const chosenEmb: number[][] = [];
+  for (const i of keepIndexes) {
+    const e = candEmb[i];
+    let ok = true;
+    for (const ce of chosenEmb) {
+      if (cosine(e, ce) >= SIM_WITHIN_BATCH) { ok = false; break; }
+    }
+    if (ok) {
+      filtered.push(firstPass[i]);
+      chosenEmb.push(e);
+    }
+  }
+  return filtered;
 }
 
 // --- RAG: fetch top-k chunks via RPC (safe fallback to empty on error) ---
@@ -124,12 +206,13 @@ async function llmGenerate(
 ): Promise<QA[]> {
   const sys = `You generate quiz questions.
 Return ONLY a JSON array of objects with keys "prompt" and "answer".
-No markdown, no code fences, no commentary.`;
+No markdown, no code fences, no commentary.
+Avoid paraphrasing prior items; prefer NEW subtopics, different entities/times/angles.`;
 
   const priorSlice = priorPromptsForContext.slice(0, 200);
   const priorText =
     priorSlice.length > 0
-      ? `Here are prior prompts for context (avoid repeating them verbatim; prefer new angles and extended coverage):\n${JSON.stringify(
+      ? `Here are prior prompts (do NOT ask about the same fact/entity even if reworded):\n${JSON.stringify(
           priorSlice
         )}`
       : "";
@@ -140,8 +223,7 @@ No markdown, no code fences, no commentary.`;
 
   const userMsg =
     `Create ${n} question/answer pairs about: ${prompt}\n` +
-    `Make questions varied and pedagogically useful (from fundamentals to extensions).\n` +
-    `Answers must be exact strings a learner can type (no prose).\n` +
+    `Vary difficulty and subtopics. Answers must be concise exact strings.\n` +
     `Example element: { "prompt": "Print dog", "answer": "console.log('dog')" }\n\n` +
     priorText +
     docText;
@@ -301,47 +383,44 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Generate
-    let generated = await llmGenerate(n, prompt, priorPrompts, docContext);
+    // --- Generate initial candidates
+    let candidates = await llmGenerate(n, prompt, priorPrompts, docContext);
 
-    if (wantNoRepeat && priorPrompts.length > 0) {
-      // exact
-      const priorSeen = new Set(priorPrompts.map(normalize));
-      let unique = generated.filter((qa) => !priorSeen.has(normalize(qa.prompt)));
-      // near
-      unique = unique.filter((qa) => {
-        for (const p of priorPrompts) {
-          if (isNearDuplicate(qa.prompt, p, 0.9)) return false;
-        }
-        return true;
-      });
+    // --- Novelty enforcement
+    if (wantNoRepeat) {
+      // semantic de-dup vs prior + batch-diversity
+      let novel = await filterSemanticallyNovel(
+        candidates,
+        priorPrompts,
+        0.86, // SIM_TO_AVOID
+        0.80  // SIM_WITHIN_BATCH
+      );
 
       // Refill once if short
-      if (unique.length < n) {
-        const need = n - unique.length;
-        const expandedAvoid = [...priorPrompts, ...unique.map((x) => x.prompt)];
+      if (novel.length < n) {
+        const need = n - novel.length;
+        const expandedAvoid = [...priorPrompts, ...novel.map((x) => x.prompt)];
         const refill = await llmGenerate(
           need,
           prompt + " (add new or extended questions that are not already covered above)",
           expandedAvoid,
           docContext
         );
-        const combinedSeen = new Set(expandedAvoid.map(normalize));
-        const refillFiltered = refill.filter((qa) => {
-          const nm = normalize(qa.prompt);
-          if (combinedSeen.has(nm)) return false;
-          for (const p of expandedAvoid) if (isNearDuplicate(qa.prompt, p, 0.9)) return false;
-          return true;
-        });
-        generated = [...unique, ...refillFiltered].slice(0, n);
+        const refillNovel = await filterSemanticallyNovel(
+          refill,
+          expandedAvoid,
+          0.86,
+          0.80
+        );
+        candidates = [...novel, ...refillNovel].slice(0, n);
       } else {
-        generated = unique.slice(0, n);
+        candidates = novel.slice(0, n);
       }
     } else {
-      generated = generated.slice(0, n);
+      candidates = candidates.slice(0, n);
     }
 
-    if (generated.length === 0) return text("No usable questions.", 400);
+    if (candidates.length === 0) return text("No usable questions.", 400);
 
     const now = new Date().toISOString();
     const nameToPersist = await resolveFileName(
@@ -367,7 +446,7 @@ Deno.serve(async (req) => {
         .from("quizzes")
         .update({
           title: safeTitle,
-          questions: generated,
+          questions: candidates,
           group_id: targetGroupId,
           file_id: file_id || null,
           source_prompt: promptToPersist,
@@ -393,7 +472,7 @@ Deno.serve(async (req) => {
       .insert({
         user_id: user.id,
         title: safeTitle,
-        questions: generated,
+        questions: candidates,
         group_id: targetGroupId,
         file_id: file_id || null,
         source_prompt: promptToPersist,
