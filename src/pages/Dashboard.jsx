@@ -23,7 +23,9 @@ export default function Dashboard() {
   const btnGreen = `bg-emerald-500 hover:bg-emerald-600 font-semibold ${pressAnim}`;
   const btnRed = `bg-red-600 hover:bg-red-700 ${pressAnim}`;
   const btnRedSoft = `bg-red-500 hover:bg-red-600 ${pressAnim}`;
-  const actionH = "h-12"; // ensures equal height on mobile where needed
+  // Was: h-12
+  // Now: allow wrap/grow on mobile, keep 48px fixed on ≥sm
+  const actionH = "min-h-[3rem] h-auto sm:h-12";
 
   // Robust anonymous detector that covers multiple SDK shapes
   function computeIsAnon(u) {
@@ -932,13 +934,13 @@ export default function Dashboard() {
 
                 setGenOpen(true);
               }}
-              className={`w-full sm:w-auto ${btnBase} ${btnGreen} ${actionH}`}
+              className={`w-full sm:w-auto whitespace-normal text-left leading-tight ${btnBase} ${btnGreen} ${actionH}`}
             >
               + Generate Quiz with AI
             </button>
             <button
               onClick={createQuiz}
-              className={`w-full sm:w-auto ${btnBase} ${btnGray} ${actionH}`}
+              className={`w-full sm:w-auto whitespace-normal text-left leading-tight ${btnBase} ${btnGray} ${actionH}`}
               disabled={creating}
             >
               {creating ? "Creating…" : "New empty quiz"}

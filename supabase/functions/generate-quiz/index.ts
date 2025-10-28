@@ -1,7 +1,10 @@
+// supabase/functions/generate-quiz/index.ts
 // CORS-enabled generate-quiz with novelty controls, optional in-place regeneration,
-// RAG retrieval from file_chunks via RPC `match_file_chunks`
-import OpenAI from "npm:openai";
-import { createClient } from "npm:@supabase/supabase-js";
+// and RAG retrieval from file_chunks via RPC `match_file_chunks`
+
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import OpenAI from "npm:openai@4.56.0";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 // ---- Lazy OpenAI so module load never crashes if secret is missing ----
 let _openai: OpenAI | null = null;
@@ -32,6 +35,7 @@ function text(body: string, status = 200) {
 
 type QA = { prompt: string; answer: string };
 
+// ---------- helpers ----------
 function normalize(s: string) {
   return s
     .toLowerCase()
@@ -39,17 +43,14 @@ function normalize(s: string) {
     .replace(/[^\p{L}\p{N}\s]/gu, "")
     .trim();
 }
-
 const STOP = new Set([
   "the","a","an","to","of","in","on","at","for","with","and","or","is","are","be","this","that","these","those","as","by","from","into","over","under","up","down","all",
 ]);
-
 function tokenize(s: string) {
   return normalize(s)
     .split(" ")
     .filter((w) => w && !STOP.has(w));
 }
-
 function jaccard(a: string, b: string) {
   const A = new Set(tokenize(a));
   const B = new Set(tokenize(b));
@@ -59,7 +60,6 @@ function jaccard(a: string, b: string) {
   const uni = A.size + B.size - inter;
   return uni === 0 ? 0 : inter / uni;
 }
-
 function isNearDuplicate(a: string, b: string, threshold = 0.9) {
   return jaccard(a, b) >= threshold;
 }
@@ -95,6 +95,25 @@ async function fetchTopChunks(opts: {
   } catch {
     return [];
   }
+}
+
+// Try to resolve a human-readable file name from file_chunks when client didn't pass one
+async function resolveFileName(
+  supa: ReturnType<typeof createClient>,
+  userId: string,
+  fileId: string | null | undefined,
+  providedName?: string | null
+): Promise<string | null> {
+  if (providedName && providedName.trim()) return providedName.trim();
+  if (!fileId) return null;
+  const { data } = await supa
+    .from("file_chunks")
+    .select("file_name")
+    .eq("user_id", userId)
+    .eq("file_id", fileId)
+    .limit(1)
+    .maybeSingle();
+  return (data?.file_name && String(data.file_name)) || null;
 }
 
 async function llmGenerate(
@@ -183,9 +202,11 @@ Deno.serve(async (req) => {
       count,
       group_id,
       file_id,
-      replace_quiz_id, // NEW: update existing quiz instead of inserting
-      no_repeat,        // NEW: optional toggle from client (default true)
-      avoid_prompts,    // NEW: optional extra prior prompts from client
+      replace_quiz_id,       // update existing quiz instead of inserting
+      no_repeat,             // optional toggle (default true)
+      avoid_prompts,         // extra prior prompts from client
+      source_prompt,         // optional: prompt to persist (usually equals topic)
+      source_file_name,      // optional: human-readable file name to persist
     } = await req.json();
 
     const n = Math.max(1, Math.min(Number(count) || 10, 30));
@@ -204,7 +225,8 @@ Deno.serve(async (req) => {
       if (isAnon) {
         const { count: quizCount, error: cErr } = await supa
           .from("quizzes")
-          .select("id", { count: "exact", head: true });
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", user.id);
         if (!cErr && (quizCount ?? 0) >= 2) {
           return text(
             "Free trial limit reached. Create an account to make more quizzes.",
@@ -306,8 +328,8 @@ Deno.serve(async (req) => {
         );
         const combinedSeen = new Set(expandedAvoid.map(normalize));
         const refillFiltered = refill.filter((qa) => {
-          const norm = normalize(qa.prompt);
-          if (combinedSeen.has(norm)) return false;
+          const nm = normalize(qa.prompt);
+          if (combinedSeen.has(nm)) return false;
           for (const p of expandedAvoid) if (isNearDuplicate(qa.prompt, p, 0.9)) return false;
           return true;
         });
@@ -322,6 +344,13 @@ Deno.serve(async (req) => {
     if (generated.length === 0) return text("No usable questions.", 400);
 
     const now = new Date().toISOString();
+    const nameToPersist = await resolveFileName(
+      supa,
+      user.id,
+      file_id || null,
+      source_file_name ?? null
+    );
+    const promptToPersist = (source_prompt ?? prompt) as string;
 
     // UPDATE (regenerate in place)
     if (replace_quiz_id) {
@@ -341,7 +370,8 @@ Deno.serve(async (req) => {
           questions: generated,
           group_id: targetGroupId,
           file_id: file_id || null,
-          source_prompt: prompt,        // <-- save prompt
+          source_prompt: promptToPersist,
+          source_file_name: nameToPersist,
           updated_at: now,
         })
         .eq("id", replace_quiz_id)
@@ -351,7 +381,10 @@ Deno.serve(async (req) => {
         console.error("DB update failed:", upErr);
         return text(`Failed to update quiz: ${upErr.message}`, 500);
       }
-      return json({ id: replace_quiz_id, group_id: targetGroupId }, 200);
+      return json(
+        { id: replace_quiz_id, group_id: targetGroupId, file_id, source_file_name: nameToPersist },
+        200
+      );
     }
 
     // INSERT (new quiz)
@@ -363,11 +396,12 @@ Deno.serve(async (req) => {
         questions: generated,
         group_id: targetGroupId,
         file_id: file_id || null,
-        source_prompt: prompt,          // <-- save prompt
+        source_prompt: promptToPersist,
+        source_file_name: nameToPersist,
         created_at: now,
         updated_at: now,
       })
-      .select("id, group_id, file_id")
+      .select("id, group_id, file_id, source_file_name")
       .single();
 
     if (error) {
@@ -378,7 +412,10 @@ Deno.serve(async (req) => {
       return text(`Failed to insert quiz: ${error.message}`, 500);
     }
 
-    return json({ id: data.id, group_id: data.group_id }, 200);
+    return json(
+      { id: data.id, group_id: data.group_id, file_id: data.file_id, source_file_name: data.source_file_name },
+      200
+    );
   } catch (e: any) {
     console.error("Unhandled:", e);
     return text(`Server error: ${e?.message ?? e}`, 500);

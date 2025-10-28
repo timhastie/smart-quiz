@@ -1,26 +1,32 @@
 // src/pages/Editor.jsx
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
 
+// For PDF extraction (same as Dashboard)
+import { GlobalWorkerOptions, getDocument } from "pdfjs-dist/build/pdf.mjs";
+import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+GlobalWorkerOptions.workerSrc = workerSrc;
+
 export default function Editor() {
-  const { user } = useAuth();
+  const { user, ready } = useAuth();
   const { quizId } = useParams();
 
+  // Quiz fields
   const [title, setTitle] = useState("");
   const [questions, setQuestions] = useState([]);
+  const [groupId, setGroupId] = useState(""); // "" => No group
   const [msg, setMsg] = useState("");
 
-  // NEW: store original AI prompt (nullable if the quiz wasn't AI-generated)
+  // Persisted meta (prompt & prior file info, if present)
   const [sourcePrompt, setSourcePrompt] = useState("");
+  const [savedFileId, setSavedFileId] = useState(null);       // nullable
+  const [savedFileName, setSavedFileName] = useState(null);   // nullable
 
   // Groups
   const [groups, setGroups] = useState([]); // [{id, name}]
-  const [groupId, setGroupId] = useState(""); // "" = No group in the UI
   const [savingGroup, setSavingGroup] = useState(false);
-
-  // Track previous group id to know which to check after change
   const prevGroupRef = useRef(null);
 
   // New group modal
@@ -28,15 +34,35 @@ export default function Editor() {
   const [newName, setNewName] = useState("");
   const [creatingGroup, setCreatingGroup] = useState(false);
 
-  // Empty-group cleanup modal (after moving out of a group)
+  // Empty-group cleanup modal (after moving out)
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [cleanupGroup, setCleanupGroup] = useState(null); // { id, name }
   const [cleaning, setCleaning] = useState(false);
 
-  // NEW: regenerate confirm modal
-  const [regenOpen, setRegenOpen] = useState(false);
-  const [regenBusy, setRegenBusy] = useState(false);
+  // --- Generate-with-AI (Regenerate) modal ---
+  const [genOpen, setGenOpen] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
+  // Modal fields (prefilled from quiz on open)
+  const [gTitle, setGTitle] = useState("");
+  const [gTopic, setGTopic] = useState("");
+  const [gCount, setGCount] = useState(10);
+  const [gGroupId, setGGroupId] = useState(""); // "" => No group
+  const [gFile, setGFile] = useState(null);     // newly uploaded file (optional)
+  const [gKeepSavedFile, setGKeepSavedFile] = useState(true); // keep previous file if present
+  const [gNoRepeat, setGNoRepeat] = useState(true); // consistent with Dashboard
+
+  // Ref to clear the <input type="file"> when toggling checkbox on
+  const fileInputRef = useRef(null);
+
+  // ----- UI button helpers (match Dashboard look) -----
+  const pressAnim = "transition-transform duration-100 active:scale-95";
+  const btnBase = "px-3 py-2 rounded disabled:opacity-60 disabled:cursor-not-allowed";
+  const btnGray = `bg-gray-700 hover:bg-gray-600 ${pressAnim}`;
+  const btnGreen = `bg-emerald-500 hover:bg-emerald-600 font-semibold ${pressAnim}`;
+  const btnRed = `bg-red-500 hover:bg-red-600 ${pressAnim}`;
+
+  // ---------- load data ----------
   async function loadGroups() {
     const { data, error } = await supabase
       .from("groups")
@@ -49,28 +75,37 @@ export default function Editor() {
   async function loadQuiz() {
     const { data, error } = await supabase
       .from("quizzes")
-      .select("title, questions, group_id, source_prompt")
+      .select("*")
       .eq("id", quizId)
       .eq("user_id", user.id)
       .single();
 
     if (!error && data) {
       setTitle(data.title || "");
-      setQuestions(data.questions || []);
+      setQuestions(Array.isArray(data.questions) ? data.questions : []);
       const gid = data.group_id || "";
       setGroupId(gid);
       prevGroupRef.current = gid || null;
-      setSourcePrompt(data.source_prompt || ""); // may be null if older quiz
+
+      setSourcePrompt(data.source_prompt || "");
+      setSavedFileId(data.file_id ?? null);
+      setSavedFileName(data.source_file_name ?? null);
+    } else {
+      setTitle((t) => t || "");
+      setQuestions((q) => q || []);
     }
   }
 
   useEffect(() => {
+    if (!ready || !user?.id) return;
     (async () => {
       await loadGroups();
       await loadQuiz();
     })();
-  }, [quizId, user.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, user?.id, quizId]);
 
+  // ---------- basic editing ----------
   function addRow() {
     setQuestions((q) => [...q, { prompt: "", answer: "" }]);
   }
@@ -90,7 +125,7 @@ export default function Editor() {
         title,
         questions,
         group_id: groupId || null,
-        source_prompt: sourcePrompt || null, // NEW: persist prompt
+        source_prompt: sourcePrompt || null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", quizId)
@@ -102,16 +137,14 @@ export default function Editor() {
     }
   }
 
-  // Check if a group is now empty; if yes → prompt to delete it
+  // ---------- group helpers ----------
   async function maybePromptDeleteEmptyGroup(groupIdToCheck) {
     if (!groupIdToCheck) return;
-
     const { count, error } = await supabase
       .from("quizzes")
       .select("id", { count: "exact", head: true })
       .eq("user_id", user.id)
       .eq("group_id", groupIdToCheck);
-
     if (error) return;
     if ((count ?? 0) === 0) {
       const { data: g, error: gErr } = await supabase
@@ -136,7 +169,6 @@ export default function Editor() {
         .delete()
         .eq("id", cleanupGroup.id)
         .eq("user_id", user.id);
-
       if (!error) {
         setGroups((gs) => gs.filter((g) => g.id !== cleanupGroup.id));
         setCleanupOpen(false);
@@ -149,13 +181,10 @@ export default function Editor() {
     }
   }
 
-  // Auto-save when group selection changes; then check if the old group is empty
   async function handleGroupChange(e) {
-    const next = e.target.value; // "" or a real group id
-    const prev = prevGroupRef.current; // might be null or string
-
+    const next = e.target.value; // "" or group id
+    const prev = prevGroupRef.current;
     setGroupId(next);
-
     try {
       setSavingGroup(true);
       const { error } = await supabase
@@ -166,14 +195,11 @@ export default function Editor() {
         })
         .eq("id", quizId)
         .eq("user_id", user.id);
-
       if (!error) {
         setMsg("Saved!");
         setTimeout(() => setMsg(""), 1200);
         if (prev && prev !== (next || null)) {
-          setTimeout(() => {
-            maybePromptDeleteEmptyGroup(prev);
-          }, 0);
+          setTimeout(() => maybePromptDeleteEmptyGroup(prev), 0);
         }
         prevGroupRef.current = next || null;
       } else {
@@ -184,43 +210,31 @@ export default function Editor() {
     }
   }
 
-  // Create a new group and immediately assign this quiz to it
   async function createGroup() {
     if (!newName.trim() || creatingGroup) return;
     try {
       setCreatingGroup(true);
-
       const { data, error } = await supabase
         .from("groups")
         .insert({ user_id: user.id, name: newName.trim() })
         .select("id, name")
         .single();
-
       if (error || !data) {
         console.error("createGroup error:", error);
         return;
       }
-
       setGroups((gs) => [...gs, data].sort((a, b) => a.name.localeCompare(b.name)));
-
       const prev = prevGroupRef.current;
       setGroupId(data.id);
-
       const { error: linkErr } = await supabase
         .from("quizzes")
         .update({ group_id: data.id, updated_at: new Date().toISOString() })
         .eq("id", quizId)
         .eq("user_id", user.id);
-
       if (!linkErr) {
-        if (prev && prev !== data.id) {
-          setTimeout(() => {
-            maybePromptDeleteEmptyGroup(prev);
-          }, 0);
-        }
+        if (prev && prev !== data.id) setTimeout(() => maybePromptDeleteEmptyGroup(prev), 0);
         prevGroupRef.current = data.id;
       }
-
       setNewOpen(false);
       setNewName("");
       setMsg("Saved!");
@@ -230,16 +244,111 @@ export default function Editor() {
     }
   }
 
-  // ---------- Regenerate ----------
-  async function doRegenerate() {
+  // ---------- file helpers ----------
+  async function extractTextFromFile(file) {
+    if (
+      file.type?.startsWith("text/") ||
+      file.name.toLowerCase().endsWith(".txt") ||
+      file.name.toLowerCase().endsWith(".md")
+    ) {
+      return await file.text();
+    }
+    if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+      const buf = await file.arrayBuffer();
+      const pdf = await getDocument({ data: buf }).promise;
+      let out = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        out += content.items.map((it) => it.str).join(" ") + "\n";
+      }
+      return out;
+    }
+    return await file.text();
+  }
+
+  // ---------- open the Generate-with-AI modal prefilled ----------
+  function openRegenerateModalPrefilled() {
+    setGTitle(title || "");
+    setGTopic(sourcePrompt || "");
+    setGCount(Math.max(1, Math.min(questions?.length || 10, 30)));
+    setGGroupId(groupId || "");
+    setGNoRepeat(true);
+    setGFile(null);
+    setGKeepSavedFile(!!savedFileId);
+    setGenOpen(true);
+  }
+
+  // ---------- call Edge Function to replace this quiz ----------
+  async function regenerateFromModal() {
     try {
-      setRegenBusy(true);
+      if (generating) return;
+      setGenerating(true);
 
       const { data: sessionRes } = await supabase.auth.getSession();
       const jwt = sessionRes?.session?.access_token;
 
-      // Use current question count as default size
-      const count = Math.max(1, Math.min((questions?.length || 10), 30));
+      // Optional: index newly uploaded file
+      let file_id = null;
+      if (gFile) {
+        let rawDoc = "";
+        try {
+          rawDoc = await extractTextFromFile(gFile);
+        } catch (e) {
+          alert(`Couldn't read file "${gFile.name}". Please try a different file.\n\n${e}`);
+          setGenerating(false);
+          return;
+        }
+        const LIMIT = 500_000;
+        if (rawDoc.length > LIMIT) rawDoc = rawDoc.slice(0, LIMIT);
+
+        const idxRes = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/index-source`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+            },
+            body: JSON.stringify({
+              text: rawDoc,
+              file_name: gFile.name,
+            }),
+          }
+        );
+        const idxText = await idxRes.text();
+        if (!idxRes.ok) {
+          alert(`Failed to index document (${idxRes.status}):\n${idxText}`);
+          setGenerating(false);
+          return;
+        }
+        let idxOut = {};
+        try { idxOut = idxText ? JSON.parse(idxText) : {}; } catch {}
+        file_id = idxOut?.file_id ?? null;
+        if (!file_id) {
+          alert("Indexing returned no file_id.");
+          setGenerating(false);
+          return;
+        }
+      } else if (gKeepSavedFile && savedFileId) {
+        file_id = savedFileId;
+      } else {
+        file_id = null;
+      }
+
+      const count = Math.max(1, Math.min(Number(gCount) || 10, 30));
+      const body = {
+        title: (gTitle || "").trim() || "Untitled Quiz",
+        topic: (gTopic || "").trim() || "Create a short quiz.",
+        count,
+        group_id: gGroupId || null,
+        file_id,
+        no_repeat: !!gNoRepeat,
+        avoid_prompts: [],
+        replace_quiz_id: quizId,
+        source_prompt: (gTopic || "").trim() || null,
+        source_file_name: gFile ? gFile.name : (gKeepSavedFile ? savedFileName : null),
+      };
 
       const res = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-quiz`,
@@ -249,35 +358,53 @@ export default function Editor() {
             "Content-Type": "application/json",
             ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
           },
-          body: JSON.stringify({
-            title: title?.trim() || "Untitled Quiz",
-            topic: sourcePrompt?.trim() || "Create a short quiz.",
-            count,
-            group_id: groupId || null,
-            file_id: null,
-            // Ask the Edge Function to REPLACE this quiz (not create a new one)
-            replace_quiz_id: quizId,
-          }),
+          body: JSON.stringify(body),
         }
       );
 
       const raw = await res.text();
       if (!res.ok) {
         alert(`Failed to regenerate (${res.status}):\n${raw || "Unknown error"}`);
-        setRegenBusy(false);
+        setGenerating(false);
         return;
       }
 
-      // Reload quiz from DB so UI shows updated questions
       await loadQuiz();
       setMsg("Quiz regenerated.");
       setTimeout(() => setMsg(""), 1500);
-      setRegenOpen(false);
+      setGenOpen(false);
     } catch (e) {
       console.error(e);
       alert("Failed to regenerate quiz. Please try again.");
     } finally {
-      setRegenBusy(false);
+      setGenerating(false);
+    }
+  }
+
+  // ---------- mutual exclusivity helpers ----------
+  function handleChooseFileChange(e) {
+    const file = e.target.files?.[0] ?? null;
+    setGFile(file);
+    if (file) {
+      // Selecting a new file disables the "keep saved" toggle
+      if (gKeepSavedFile) setGKeepSavedFile(false);
+    }
+  }
+  function handleKeepSavedToggle(e) {
+    const checked = e.target.checked;
+    setGKeepSavedFile(checked);
+    if (checked) {
+      // Re-using saved file clears any newly chosen file and resets the input
+      setGFile(null);
+      if (fileInputRef.current) {
+        try { fileInputRef.current.value = ""; } catch {}
+      }
+    }
+  }
+  function clearChosenFile() {
+    setGFile(null);
+    if (fileInputRef.current) {
+      try { fileInputRef.current.value = ""; } catch {}
     }
   }
 
@@ -310,7 +437,6 @@ export default function Editor() {
         )}
 
         {/* Title + Group row */}
-        {/* On md+, use a 2-col grid with a narrower Title column so Group has room */}
         <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1.4fr)_minmax(260px,1fr)] gap-3 items-start">
           <div>
             <label className="block text-xs sm:text-sm text-gray-300 mb-1">Title</label>
@@ -320,6 +446,15 @@ export default function Editor() {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
             />
+            <div className="mt-2">
+              <button
+                onClick={openRegenerateModalPrefilled}
+                className={`${btnBase} ${btnGreen}`}
+                title="Open Generate with AI to replace this quiz"
+              >
+                Edit Prompt and Regnerate with AI +
+              </button>
+            </div>
           </div>
 
           <div>
@@ -346,28 +481,6 @@ export default function Editor() {
                 New group +
               </button>
             </div>
-          </div>
-        </div>
-
-        {/* NEW: Original prompt + Regenerate */}
-        <div className="space-y-2">
-          <label className="block text-xs sm:text-sm text-gray-300">
-            Original prompt (used for AI generation)
-          </label>
-          <div className="flex flex-col sm:flex-row gap-2">
-            <textarea
-              className="w-full p-3 rounded bg-white text-gray-900 border border-gray-300 placeholder:text-gray-500 text-base sm:text-lg min-h-[6rem]"
-              placeholder="(Optional) The prompt used to generate this quiz."
-              value={sourcePrompt}
-              onChange={(e) => setSourcePrompt(e.target.value)}
-            />
-            <button
-              className="sm:self-start px-3 py-2 rounded bg-emerald-500 hover:bg-emerald-600 font-semibold"
-              onClick={() => setRegenOpen(true)}
-              title="Generate a new set of questions from this prompt and replace the current questions"
-            >
-              Regenerate
-            </button>
           </div>
         </div>
 
@@ -503,35 +616,168 @@ export default function Editor() {
         </div>
       )}
 
-      {/* Regenerate confirm */}
-      {regenOpen && (
+      {/* Generate with AI (Regenerate) modal */}
+      {genOpen && (
         <div
-          className="fixed inset-0 bg-black/60 flex items-center justify-center p-3 sm:p-4 z-[62]"
-          onClick={() => !regenBusy && setRegenOpen(false)}
+          className="fixed inset-0 bg-black/60 grid place-items-center z-[62]"
+          aria-modal="true"
+          role="dialog"
+          onClick={() => !generating && setGenOpen(false)}
         >
           <div
-            className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-5 sm:p-6 shadow-xl max-h-[85vh] overflow-y-auto"
+            className="w-full max-w-xl bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-xl font-bold mb-2">Regenerate this quiz?</h2>
-            <p className="text-gray-300 mb-6">
-              This will replace all current questions with new ones generated from the prompt
-              above. This action can’t be undone.
-            </p>
-            <div className="flex flex-col sm:flex-row justify-end gap-2">
+            <h2 className="text-xl font-bold mb-4">Generate with AI</h2>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="sm:col-span-2">
+                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-title">
+                  Name
+                </label>
+                <input
+                  id="gen-title"
+                  className="w-full p-3 rounded bg-white text-gray-900 border border-gray-300 placeholder:text-gray-500"
+                  placeholder="Quiz name"
+                  value={gTitle}
+                  onChange={(e) => setGTitle(e.target.value)}
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-topic">
+                  Prompt
+                </label>
+                <textarea
+                  id="gen-topic"
+                  className="w-full min-h-[8rem] p-3 rounded bg-white text-gray-900 border border-gray-300 placeholder:text-gray-500 resize-y"
+                  placeholder="Describe what to generate…"
+                  value={gTopic}
+                  onChange={(e) => setGTopic(e.target.value)}
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="inline-flex items-center gap-2 text-sm text-gray-2 00">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={gNoRepeat}
+                    onChange={(e) => setGNoRepeat(e.target.checked)}
+                  />
+                  <span>Do not repeat previous questions</span>
+                </label>
+              </div>
+
+              {/* Optional source file */}
+              <div className="sm:col-span-2">
+                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-file">
+                  Optional document to use as source (PDF / TXT / MD)
+                </label>
+
+                {/* Previously used file (if known) */}
+                {savedFileId && (
+                  <div className="mb-2 text-sm text-gray-300">
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={gKeepSavedFile}
+                        onChange={handleKeepSavedToggle}
+                      />
+                      <span>
+                        Keep previously used file
+                        {savedFileName ? (
+                          <>: <span className="font-semibold">{savedFileName}</span></>
+                        ) : null}
+                      </span>
+                    </label>
+                    {!savedFileName && (
+                      <div className="mt-1 text-xs text-gray-400">
+                        (previous file id: {String(savedFileId).slice(0, 8)}…)
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <input
+                  id="gen-file"
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+                  className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700"
+                  onChange={handleChooseFileChange}
+                />
+
+                {gFile && (
+                  <div className="mt-1 text-xs text-gray-300">
+                    Selected: {gFile.name}{" "}
+                    <button
+                      type="button"
+                      className="underline"
+                      onClick={clearChosenFile}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                )}
+
+                {gFile && gKeepSavedFile && savedFileId && (
+                  <p className="mt-1 text-xs text-amber-300">
+                    A new file is selected; the previously used file will be ignored.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-group">
+                  Add to Group
+                </label>
+                <select
+                  id="gen-group"
+                  className="w-full p-3 rounded bg-gray-900 text-white border border-gray-700"
+                  value={gGroupId}
+                  onChange={(e) => setGGroupId(e.target.value)}
+                >
+                  <option value="">No group</option>
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-count">
+                  # of questions
+                </label>
+                <input
+                  id="gen-count"
+                  type="number"
+                  min={1}
+                  max={30}
+                  className="w-full p-3 rounded bg-gray-900 text-white border border-gray-700"
+                  value={gCount}
+                  onChange={(e) => setGCount(Number(e.target.value))}
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row justify-end gap-2 mt-6">
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600"
-                onClick={() => setRegenOpen(false)}
-                disabled={regenBusy}
+                className={`${btnBase} ${btnGray}`}
+                onClick={() => setGenOpen(false)}
+                disabled={generating}
               >
                 Cancel
               </button>
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60"
-                onClick={doRegenerate}
-                disabled={regenBusy}
+                className={`${btnBase} ${btnGreen}`}
+                onClick={regenerateFromModal}
+                disabled={generating}
               >
-                {regenBusy ? "Working…" : "Regenerate"}
+                {generating ? "Working…" : "Regenerate"}
               </button>
             </div>
           </div>

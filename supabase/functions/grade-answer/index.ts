@@ -1,15 +1,26 @@
-// supabase/functions/grade-answer/index.ts
+// supabase/functions/generate-quiz/index.ts
+// CORS-enabled generate-quiz with novelty controls, optional in-place regeneration,
+// RAG retrieval from file_chunks via RPC `match_file_chunks`
 import OpenAI from "npm:openai";
 import { createClient } from "npm:@supabase/supabase-js";
 
-const openai = new OpenAI({ apiKey: Deno.env.get("OPENAI_API_KEY")! });
+/* ---- Lazy OpenAI so module load never crashes if secret is missing ---- */
+let _openai: OpenAI | null = null;
+function getOpenAI() {
+  if (_openai) return _openai;
+  const key = Deno.env.get("OPENAI_API_KEY");
+  if (!key) throw new Error("Missing OPENAI_API_KEY");
+  _openai = new OpenAI({ apiKey: key });
+  return _openai;
+}
 
+/* ----------------------- HTTP helpers / CORS ----------------------- */
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": "*", // tighten for prod
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
 };
-
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -18,223 +29,361 @@ const json = (body: unknown, status = 200) =>
 const text = (body: string, status = 200) =>
   new Response(body, { status, headers: { ...corsHeaders } });
 
-/* ================== Tunables ================== */
-const USE_EMBEDDINGS = false;           // keep false for speed
-const JUDGE_TIMEOUT_MS = 2500;          // LLM judge max time
+/* ------------------------------ Types ------------------------------ */
+type QA = { prompt: string; answer: string };
 
-/* ================== Helpers ================== */
+/* ---------------------------- Novelty utils ---------------------------- */
+function normalize(s: string) {
+  return s
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, "")
+    .trim();
+}
 const STOP = new Set([
-  "the","a","an","to","of","in","on","at","for","with","and","or","is","are","be",
-  "this","that","these","those","as","by","from","into","over","under","up","down","all"
+  "the","a","an","to","of","in","on","at","for","with","and","or","is","are","be","this","that","these","those","as","by","from","into","over","under","up","down","all",
 ]);
-
-const DESCRIPTORS = new Set([
-  "dynamic","performance","live","studio","digital","analog","hybrid","virtual","hardware",
-  "software","multi","mono","poly","polyphonic","stereo","portable","modular","advanced",
-  "basic","external","internal","integrated","classic","modern","compact"
-]);
-
-const norm = (s: string) =>
-  s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
-
-const toks = (s: string) => norm(s).split(" ").filter(w => w && !STOP.has(w));
-
-const numTokens = (s: string) => (s.match(/-?\d+(\.\d+)?/g) || []).map(x => x.trim());
-const yearTokens = (s: string) => (s.match(/\b(1[6-9]\d{2}|20\d{2})\b/g) || []).map(Number); // 1600–2099
-
-/** remove generic adjectives; keep meaningful nouns */
-function stripDescriptors(s: string) {
-  return toks(s).filter(w => !DESCRIPTORS.has(w)).join(" ");
+function tokenize(s: string) {
+  return normalize(s).split(" ").filter((w) => w && !STOP.has(w));
 }
-/** last noun-ish token */
-function headNounish(s: string) {
-  const arr = stripDescriptors(s).split(" ").filter(Boolean);
-  return arr.length ? arr[arr.length - 1] : "";
+function jaccard(a: string, b: string) {
+  const A = new Set(tokenize(a));
+  const B = new Set(tokenize(b));
+  if (A.size === 0 && B.size === 0) return 1;
+  let inter = 0;
+  for (const t of A) if (B.has(t)) inter++;
+  const uni = A.size + B.size - inter;
+  return uni === 0 ? 0 : inter / uni;
 }
-/** allow “sampler” ≈ “dynamic performance sampler” etc. */
-function generousTypeMatch(userAns: string, expected: string) {
-  const u = stripDescriptors(userAns);
-  const e = stripDescriptors(expected);
-  if (!u || !e) return false;
-  if (u === e) return true;
-  if (u.length >= 3 && (e.includes(u) || u.includes(e))) return true;
-  const hu = headNounish(userAns);
-  const he = headNounish(expected);
-  if (hu && he && hu === he) return true;
-  const uT = new Set(u.split(" ").filter(w => w.length >= 3));
-  const eT = new Set(e.split(" ").filter(w => w.length >= 3));
-  if (uT.size === 1 && eT.has([...uT][0])) return true;
-  return false;
+function isNearDuplicate(a: string, b: string, threshold = 0.9) {
+  return jaccard(a, b) >= threshold;
 }
 
-function hexDecEqual(a: string, b: string) {
-  const hexRe = /^(?:\$|0x)?[0-9a-f]+$/i;
-  const toNum = (s: string) => {
-    const t = s.trim();
-    if (hexRe.test(t)) return parseInt(t.replace(/^\$|0x/i, ""), 16);
-    if (/^\d+$/.test(t)) return parseInt(t, 10);
-    return NaN;
-  };
-  const va = toNum(a), vb = toNum(b);
-  return Number.isFinite(va) && va === vb;
-}
+/* ------------------------------- RAG -------------------------------- */
+async function fetchTopChunks(opts: {
+  supa: ReturnType<typeof createClient>;
+  userId: string;
+  fileId: string;
+  topic: string;
+  title: string;
+  n: number;
+  k?: number;
+}): Promise<string[]> {
+  const { supa, userId, fileId, topic, title, n, k = 15 } = opts;
+  const queryText = `Generate ${n} quiz questions about: ${topic || title || "the uploaded document"}`;
 
-/** classify: should this be STRICT fact? */
-function isStrictFact(question: string, expected: string) {
-  const q = norm(question);
-  const hasYear = yearTokens(expected).length > 0;
-  const hasAnyNumber = numTokens(expected).length > 0;
-
-  // Prompts that imply numeric/date exactness
-  const qHints = /(when|what year|which year|date|how many|how much|what number|tempo|bpm|cc|control change|port|channel|track|bank|pattern|page|step)\b/;
-
-  // Very short canonical answers (<= 3 tokens) that are numeric or code-like => strict
-  const shortCanon = toks(expected).length <= 3;
-  const codeLike = /0x|\$|\bcc\b|\bctl\b|\bbpm\b|\bhz\b|\bkhz\b|\bdb\b|\bms\b|\bs\b|\d/.test(expected.toLowerCase());
-
-  return hasYear || (hasAnyNumber && (qHints.test(q) || shortCanon || codeLike));
-}
-
-/** strict compare for facts:
- * - if expected has one year -> require exact same year
- * - if expected has numbers -> require same set (order-free)
- * - if expected looks code-ish -> require exact (or hex/dec equiv)
- */
-function strictFactCorrect(userAns: string, expected: string) {
-  // exact or hex/decimal equivalence
-  if (norm(userAns) === norm(expected) || hexDecEqual(userAns, expected)) return true;
-
-  const expYears = yearTokens(expected);
-  const usrYears = yearTokens(userAns);
-  if (expYears.length === 1) return usrYears.length === 1 && usrYears[0] === expYears[0];
-
-  const expNums = numTokens(expected);
-  if (expNums.length > 0) {
-    const usrNums = numTokens(userAns);
-    if (usrNums.length !== expNums.length) return false;
-    const a = [...expNums].sort().join(",");
-    const b = [...usrNums].sort().join(",");
-    return a === b;
-  }
-  return false;
-}
-
-/* Optional embeddings (disabled) */
-async function cosineSim(a: string, b: string) {
-  const res = await openai.embeddings.create({
+  const emb = await getOpenAI().embeddings.create({
     model: "text-embedding-3-small",
-    input: [a.slice(0, 2000), b.slice(0, 2000)],
+    input: queryText,
   });
-  const v1 = res.data[0].embedding as number[];
-  const v2 = res.data[1].embedding as number[];
-  const dot = (x:number[],y:number[]) => x.reduce((s,xi,i)=>s+xi*y[i],0);
-  const mag = (x:number[]) => Math.sqrt(x.reduce((s,xi)=>s+xi*xi,0));
-  return dot(v1,v2)/(mag(v1)*mag(v2));
-}
+  const vec = emb.data[0].embedding as unknown as number[];
 
-/* Single, short LLM judge */
-async function judgeWithTimeout(question: string, expected: string, userAns: string) {
-  const sys = `You are a fair grader. Rules:
-- If the question asks for a *fact* (year, count, date, number, code), require exact correctness.
-- If the reference has a year or clear number, the student must supply the same number.
-- Otherwise, accept reasonable paraphrases or super/subclass matches (e.g., "sampler" ≈ "dynamic performance sampler").
-Return ONLY JSON: {"correct": boolean, "reasons": string}.`;
-  const user = `Q: ${question || "(no question provided)"}\nREFERENCE: ${expected}\nSTUDENT: ${userAns}`;
-  const p = openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    temperature: 0,
-    messages: [{ role: "system", content: sys }, { role: "user", content: user }],
-    response_format: { type: "json_object" as const },
-  });
-  const timeout = new Promise<{correct:boolean;reasons:string}>(resolve =>
-    setTimeout(() => resolve({ correct: false, reasons: "judge timeout" }), JUDGE_TIMEOUT_MS)
-  );
-  const resp = await Promise.race([p, timeout]) as any;
-  if (resp?.choices) {
-    const raw = resp.choices[0].message?.content?.trim() ?? `{"correct":false,"reasons":"no output"}`;
-    try { return JSON.parse(raw); } catch {}
+  try {
+    const { data, error } = await supa.rpc("match_file_chunks", {
+      p_user_id: userId,
+      p_file_id: fileId,
+      p_query_embedding: vec,
+      p_match_count: k,
+    });
+    if (error || !data?.length) return [];
+    return data.map((r: any) => String(r.content || "")).filter(Boolean);
+  } catch {
+    return [];
   }
-  return resp;
 }
 
-/* ================== Handler ================== */
+/* ---------------------------- LLM generate ---------------------------- */
+async function llmGenerate(
+  n: number,
+  prompt: string,
+  priorPromptsForContext: string[],
+  docContext: string
+): Promise<QA[]> {
+  const sys = `You generate quiz questions.
+Return ONLY a JSON array of objects with keys "prompt" and "answer".
+No markdown, no code fences, no commentary.`;
+
+  const priorSlice = priorPromptsForContext.slice(0, 200);
+  const priorText =
+    priorSlice.length > 0
+      ? `Here are prior prompts for context (avoid repeating them verbatim; prefer new angles and extended coverage):\n${JSON.stringify(
+          priorSlice
+        )}`
+      : "";
+
+  const docText = docContext
+    ? `\nUse ONLY the following document excerpts as your source material.\n---DOC CONTEXT START---\n${docContext}\n---DOC CONTEXT END---\n`
+    : "";
+
+  const userMsg =
+    `Create ${n} question/answer pairs about: ${prompt}\n` +
+    `Make questions varied and pedagogically useful (from fundamentals to extensions).\n` +
+    `Answers must be exact strings a learner can type (no prose).\n` +
+    `Example element: { "prompt": "Print dog", "answer": "console.log('dog')" }\n\n` +
+    priorText +
+    docText;
+
+  const resp = await getOpenAI().chat.completions.create({
+    model: "gpt-4o-mini",
+    temperature: 0.2,
+    messages: [
+      { role: "system", content: sys },
+      { role: "user", content: userMsg },
+    ],
+  });
+
+  const raw = resp.choices[0].message?.content?.trim() ?? "[]";
+  const jsonText = raw.replace(/^```json\s*|\s*```$/g, "");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch {
+    throw new Error("Model did not return valid JSON.");
+  }
+  if (!Array.isArray(parsed)) throw new Error("Invalid JSON shape.");
+
+  const cleaned = (parsed as any[])
+    .slice(0, n)
+    .map((q) => ({
+      prompt: String(q?.prompt ?? "").slice(0, 500),
+      answer: String(q?.answer ?? "").slice(0, 500),
+    }))
+    .filter((q) => q.prompt && q.answer);
+
+  return cleaned;
+}
+
+/* ------------------------------ Handler ------------------------------ */
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
   try {
     if (req.method !== "POST") return text("Method not allowed", 405);
 
-    // Auth (RLS-safe)
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseAnon = Deno.env.get("SUPABASE_ANON_KEY")!;
     const supa = createClient(supabaseUrl, supabaseAnon, {
       global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
     });
-    const { data: userRes } = await supa.auth.getUser();
-    if (!userRes?.user) return text("Unauthorized", 401);
 
-    // Body (support old/new keys)
-    const body = await req.json().catch(() => ({} as any));
-    const question: string = String(body?.question ?? body?.prompt ?? "");
-    const expected: string = String(body?.expected ?? body?.answer ?? "");
-    const user_answer: string = String(body?.user_answer ?? body?.user ?? "");
+    // Auth
+    const { data: userRes, error: userErr } = await supa.auth.getUser();
+    if (userErr || !userRes?.user) return text("Unauthorized", 401);
+    const user = userRes.user;
 
-    const dbg = {
-      question,
-      expected,
-      user_answer,
-      expYears: (expected.match(/\b(1[6-9]\d{2}|20\d{2})\b/g) || []),
-      usrYears: (user_answer.match(/\b(1[6-9]\d{2}|20\d{2})\b/g) || []),
-      expNums: (expected.match(/-?\d+(\.\d+)?/g) || []),
-      usrNums: (user_answer.match(/-?\d+(\.\d+)?/g) || []),
-      isStrict: isStrictFact(question, expected),
-    };
+    // Body
+    const {
+      title,
+      topic,
+      count,
+      group_id,
+      file_id,
+      replace_quiz_id,     // update instead of insert
+      no_repeat,           // default true
+      avoid_prompts,       // optional novelty avoid list
+      source_file_name,    // <-- NEW: human-readable file name to persist
+    } = await req.json();
 
-    if (!user_answer) return json({ correct: false, score: 0, feedback: "No answer provided.", debug: dbg }, 200);
-    if (!expected && !question) return json({ correct: false, score: 0, feedback: "Reference missing.", debug: dbg }, 200);
+    const n = Math.max(1, Math.min(Number(count) || 10, 30));
+    const safeTitle = String(title || "Generated Quiz").slice(0, 120);
+    const prompt = String(topic || "Create programming quiz questions.").slice(0, 2000);
+    const wantNoRepeat = no_repeat !== false; // default true
 
-    // Fast exact / numeric equivalence
-    if (norm(user_answer) === norm(expected) || hexDecEqual(user_answer, expected)) {
-      return json({ correct: true, score: 1, reasons: "exact/equivalent", feedback: "Correct!", debug: dbg }, 200);
-    }
+    // Fast trial-cap precheck only if inserting new quiz
+    if (!replace_quiz_id) {
+      const isAnon =
+        user?.app_metadata?.provider === "anonymous" ||
+        user?.user_metadata?.is_anonymous === true ||
+        (Array.isArray(user?.identities) &&
+          user.identities.some((i: any) => i?.provider === "anonymous"));
 
-    // STRICT FACTS: years / numbers / counts / codes
-    if (dbg.isStrict) {
-      const ok = strictFactCorrect(user_answer, expected);
-      return json({
-        correct: ok,
-        score: ok ? 1 : 0,
-        reasons: ok ? "strict fact match" : "strict fact mismatch",
-        feedback: ok ? "Correct!" : "Incorrect — this requires the exact value.",
-        debug: dbg,
-      }, 200);
-    }
-
-    // NON-FACT: type/definition/description → be generous
-    if (generousTypeMatch(user_answer, expected)) {
-      return json({ correct: true, score: 1, reasons: "head-noun/substring", feedback: "Correct!", debug: dbg }, 200);
-    }
-
-    if (USE_EMBEDDINGS) {
-      try {
-        const sim = await cosineSim(user_answer, expected);
-        if (sim >= 0.78) {
-          return json({ correct: true, score: 1, reasons: `sim=${sim.toFixed(2)}`, feedback: "Correct!", debug: dbg }, 200);
+      if (isAnon) {
+        const { count: quizCount, error: cErr } = await supa
+          .from("quizzes")
+          .select("id", { count: "exact", head: true });
+        if (!cErr && (quizCount ?? 0) >= 2) {
+          return text(
+            "Free trial limit reached. Create an account to make more quizzes.",
+            403
+          );
         }
-      } catch { /* ignore */ }
+      }
     }
 
-    // One short judge call (still obeys strict facts rule in its prompt)
-    const judge = await judgeWithTimeout(question, expected, user_answer);
-    const correct = !!judge?.correct;
-    return json({
-      correct,
-      score: correct ? 1 : 0,
-      reasons: judge?.reasons || "n/a",
-      feedback: correct ? "Correct!" : "Incorrect.",
-      debug: dbg,
-    }, 200);
+    // Validate/resolve target group
+    let targetGroupId: string | null = null;
+    if (group_id) {
+      const { data: g, error: gErr } = await supa
+        .from("groups")
+        .select("id")
+        .eq("id", group_id)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (!gErr && g?.id) targetGroupId = g.id;
+    }
+
+    // Gather prior prompts for novelty (server-side)
+    let priorPrompts: string[] = [];
+    if (wantNoRepeat && targetGroupId) {
+      const { data: priorQs } = await supa
+        .from("quizzes")
+        .select("questions")
+        .eq("user_id", user.id)
+        .eq("group_id", targetGroupId);
+
+      const allQA = (priorQs ?? []).flatMap((r: any) =>
+        Array.isArray(r?.questions) ? r.questions : []
+      );
+      priorPrompts = allQA
+        .map((qa: any) => String(qa?.prompt ?? "").trim())
+        .filter(Boolean);
+    }
+
+    // Merge any client-provided avoid list
+    if (Array.isArray(avoid_prompts) && avoid_prompts.length) {
+      priorPrompts = [
+        ...priorPrompts,
+        ...avoid_prompts.map((p: any) => String(p || "").trim()).filter(Boolean),
+      ];
+      // de-dup
+      const seen = new Set<string>();
+      priorPrompts = priorPrompts.filter((p) => {
+        const k = p.toLowerCase();
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+    }
+
+    // RAG (optional)
+    let docContext = "";
+    if (file_id) {
+      try {
+        const chunks = await fetchTopChunks({
+          supa,
+          userId: user.id,
+          fileId: String(file_id),
+          topic: prompt,
+          title: safeTitle,
+          n,
+          k: 15,
+        });
+        const joined = chunks.join("\n\n");
+        docContext = joined.length > 12000 ? joined.slice(0, 12000) : joined;
+      } catch {
+        docContext = "";
+      }
+    }
+
+    // Generate
+    let generated = await llmGenerate(n, prompt, priorPrompts, docContext);
+
+    if (wantNoRepeat && priorPrompts.length > 0) {
+      // exact
+      const priorSeen = new Set(priorPrompts.map(normalize));
+      let unique = generated.filter((qa) => !priorSeen.has(normalize(qa.prompt)));
+      // near
+      unique = unique.filter((qa) => {
+        for (const p of priorPrompts) {
+          if (isNearDuplicate(qa.prompt, p, 0.9)) return false;
+        }
+        return true;
+      });
+
+      // Refill once if short
+      if (unique.length < n) {
+        const need = n - unique.length;
+        const expandedAvoid = [...priorPrompts, ...unique.map((x) => x.prompt)];
+        const refill = await llmGenerate(
+          need,
+          prompt + " (add new or extended questions that are not already covered above)",
+          expandedAvoid,
+          docContext
+        );
+        const combinedSeen = new Set(expandedAvoid.map(normalize));
+        const refillFiltered = refill.filter((qa) => {
+          const norm = normalize(qa.prompt);
+          if (combinedSeen.has(norm)) return false;
+          for (const p of expandedAvoid) if (isNearDuplicate(qa.prompt, p, 0.9)) return false;
+          return true;
+        });
+        generated = [...unique, ...refillFiltered].slice(0, n);
+      } else {
+        generated = unique.slice(0, n);
+      }
+    } else {
+      generated = generated.slice(0, n);
+    }
+
+    if (generated.length === 0) return text("No usable questions.", 400);
+
+    const now = new Date().toISOString();
+
+    // UPDATE (regenerate in place)
+    if (replace_quiz_id) {
+      // ensure ownership
+      const { data: owned, error: ownErr } = await supa
+        .from("quizzes")
+        .select("id")
+        .eq("id", replace_quiz_id)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (ownErr || !owned?.id) return text("Not found", 404);
+
+      const { error: upErr } = await supa
+        .from("quizzes")
+        .update({
+          title: safeTitle,
+          questions: generated,
+          group_id: targetGroupId,
+          file_id: file_id || null,
+          source_file_name: source_file_name || null, // <-- NEW
+          source_prompt: prompt,
+          updated_at: now,
+        })
+        .eq("id", replace_quiz_id)
+        .eq("user_id", user.id);
+
+      if (upErr) {
+        console.error("DB update failed:", upErr);
+        return text(`Failed to update quiz: ${upErr.message}`, 500);
+      }
+      return json(
+        { id: replace_quiz_id, group_id: targetGroupId, file_id, source_file_name },
+        200
+      );
+    }
+
+    // INSERT (new quiz)
+    const { data, error } = await supa
+      .from("quizzes")
+      .insert({
+        user_id: user.id,
+        title: safeTitle,
+        questions: generated,
+        group_id: targetGroupId,
+        file_id: file_id || null,
+        source_file_name: source_file_name || null, // <-- NEW
+        source_prompt: prompt,
+        created_at: now,
+        updated_at: now,
+      })
+      .select("id, group_id, file_id, source_file_name")
+      .single();
+
+    if (error) {
+      if ((error as any).code === "42501") {
+        return text("Free trial limit reached. Create an account to make more quizzes.", 403);
+      }
+      console.error("DB insert failed:", error);
+      return text(`Failed to insert quiz: ${error.message}`, 500);
+    }
+
+    return json({ id: data.id, group_id: data.group_id, file_id: data.file_id, source_file_name: data.source_file_name }, 200);
   } catch (e: any) {
-    console.error("grade-answer error:", e);
-    return text(`Server error: ${e?.message ?? String(e)}`, 500);
+    console.error("Unhandled:", e);
+    return text(`Server error: ${e?.message ?? e}`, 500);
   }
 });
