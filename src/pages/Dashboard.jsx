@@ -1,21 +1,20 @@
 // src/pages/Dashboard.jsx
-import { useEffect, useMemo, useState } from "react";
+import { Play, History, SquarePen, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { supabase } from "../lib/supabase";
 
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist/build/pdf.mjs";
-import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url"; // <-- Vite will emit an asset URL
+import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 GlobalWorkerOptions.workerSrc = workerSrc;
 
-// Sentinel used to represent "No group" in selects/filters
 const NO_GROUP = "__none__";
 
 export default function Dashboard() {
-  // auth
   const { user, ready, signout, signupOrLink, signin } = useAuth();
 
-  // --- UI button helpers (consistent across the app) ---
+  // --- UI helpers (unchanged palette) ---
   const pressAnim = "transition-transform duration-100 active:scale-95";
   const btnBase =
     "px-3 py-2 rounded disabled:opacity-60 disabled:cursor-not-allowed";
@@ -23,19 +22,14 @@ export default function Dashboard() {
   const btnGreen = `bg-emerald-500 hover:bg-emerald-600 font-semibold ${pressAnim}`;
   const btnRed = `bg-red-600 hover:bg-red-700 ${pressAnim}`;
   const btnRedSoft = `bg-red-500 hover:bg-red-600 ${pressAnim}`;
-  // Was: h-12
-  // Now: allow wrap/grow on mobile, keep 48px fixed on ≥sm
   const actionH = "min-h-[3rem] h-auto sm:h-12";
 
-  // Robust anonymous detector that covers multiple SDK shapes
   function computeIsAnon(u) {
     if (!u) return false;
-
     const prov = u.app_metadata?.provider || null;
     const provs = Array.isArray(u.app_metadata?.providers)
       ? u.app_metadata.providers
       : [];
-
     return (
       u.is_anonymous === true ||
       u.user_metadata?.is_anonymous === true ||
@@ -46,12 +40,11 @@ export default function Dashboard() {
       (!u.email && (provs.length === 0 || provs.includes("anonymous")))
     );
   }
-
   const isAnon = computeIsAnon(user);
 
   useEffect(() => {
     if (!ready) return;
-    if (!import.meta.env.DEV) return; // only log in dev
+    if (!import.meta.env.DEV) return;
     const snapshot = {
       isAnon,
       email: user?.email ?? null,
@@ -69,7 +62,7 @@ export default function Dashboard() {
   const nav = useNavigate();
 
   const [quizzes, setQuizzes] = useState([]);
-  const [scoresByQuiz, setScoresByQuiz] = useState({}); // { [quizId]: percent }
+  const [scoresByQuiz, setScoresByQuiz] = useState({});
 
   // auth modal
   const [authOpen, setAuthOpen] = useState(false);
@@ -78,7 +71,6 @@ export default function Dashboard() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authMessage, setAuthMessage] = useState("");
 
-  // Upgrade current anonymous user -> email/password (keeps same user.id & data)
   async function handleCreateAccount() {
     try {
       setAuthBusy(true);
@@ -88,8 +80,7 @@ export default function Dashboard() {
         alert("Please enter email and password.");
         return;
       }
-
-      await signupOrLink(email, password); // <-- kicks off adoption flow
+      await signupOrLink(email, password);
       setAuthMessage("Check your email to confirm your account, then return here.");
     } catch (err) {
       console.error(err);
@@ -99,24 +90,20 @@ export default function Dashboard() {
     }
   }
 
-  // (Optional) Sign in to existing account (replaces the guest session)
   async function signInExisting() {
     try {
       setAuthBusy(true);
-
       const email = (authEmail || "").trim();
       const password = authPass || "";
       if (!email || !password) {
         alert("Please enter email and password.");
         return;
       }
-
       const res = await signin(email, password);
       if (res?.error) {
         alert(res.error.message || "Failed to sign in.");
         return;
       }
-
       setAuthMessage("");
       setAuthOpen(false);
     } catch (err) {
@@ -127,7 +114,6 @@ export default function Dashboard() {
     }
   }
 
-  // NEW: sign out, then open the auth modal on top of the dashboard
   async function handleSignOut() {
     await signout();
     setAuthMessage(
@@ -136,13 +122,8 @@ export default function Dashboard() {
     setAuthOpen(true);
   }
 
-  // guest trial state (limit = 2)
-  const [trial, setTrial] = useState({
-    isAnon: false,
-    remaining: Infinity,
-    loading: true,
-  });
-
+  // guest trial
+  const [trial, setTrial] = useState({ isAnon: false, remaining: Infinity, loading: true });
   function openSignupModal(msg) {
     setAuthMessage(
       msg || "Free trial limit reached. Create an account to make more quizzes."
@@ -152,73 +133,71 @@ export default function Dashboard() {
 
   // single delete
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [target, setTarget] = useState(null); // { id, title, group_id }
+  const [target, setTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
   // AI generate
   const [genOpen, setGenOpen] = useState(false);
-
-  // leave these empty so the UI shows placeholders instead of hard text
   const [gTitle, setGTitle] = useState("");
   const [gTopic, setGTopic] = useState("");
-  const [gCount, setGCount] = useState(10); // keep 10 prefilled
+  const [gCount, setGCount] = useState(10);
   const [generating, setGenerating] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [gGroupId, setGGroupId] = useState(""); // "" => No group
+  const [gGroupId, setGGroupId] = useState("");
   const [gFile, setGFile] = useState(null);
   const [gNoRepeat, setGNoRepeat] = useState(true);
 
-  // create group inside AI modal
+  // create group in modal
   const [gNewOpen, setGNewOpen] = useState(false);
   const [gNewName, setGNewName] = useState("");
   const [gCreatingGroup, setGCreatingGroup] = useState(false);
 
-  // groups + filter
-  const [groups, setGroups] = useState([]); // { id, name }[]
-  const [filterGroupId, setFilterGroupId] = useState(""); // ""=all, NO_GROUP="__none__"=no group
-  const scoreSort = "asc"; // keep behavior: lowest scores first by default
+  // groups/filter
+  const [groups, setGroups] = useState([]);
+  const [filterGroupId, setFilterGroupId] = useState("");
+  const scoreSort = "asc";
   const currentGroup = groups.find((g) => g.id === filterGroupId) || null;
 
-  // Edit group name modal
+  // edit/delete group
   const [editGroupOpen, setEditGroupOpen] = useState(false);
   const [editGroupName, setEditGroupName] = useState("");
   const [savingGroupName, setSavingGroupName] = useState(false);
 
-  // cleanup queue for empty groups (supports multiple prompts)
-  const [cleanupQueue, setCleanupQueue] = useState([]); // string[] of group ids
+  // empty-group cleanup
+  const [cleanupQueue, setCleanupQueue] = useState([]);
   const [cleanupOpen, setCleanupOpen] = useState(false);
-  const [cleanupGroup, setCleanupGroup] = useState(null); // { id, name }
+  const [cleanupGroup, setCleanupGroup] = useState(null);
   const [cleaning, setCleaning] = useState(false);
 
   // multi-select
   const [selectedIds, setSelectedIds] = useState(new Set());
   const hasSelected = selectedIds.size > 0;
 
-  // bulk delete
+  // bulk modals
   const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
-
-  // bulk move
   const [moveOpen, setMoveOpen] = useState(false);
-  const [moveGroupId, setMoveGroupId] = useState(""); // target existing group id
-  const [moveNewName, setMoveNewName] = useState(""); // create new group name
+  const [moveGroupId, setMoveGroupId] = useState("");
+  const [moveNewName, setMoveNewName] = useState("");
   const [moving, setMoving] = useState(false);
 
-  // --- delete-current-group (when a specific group is filtered)
+  // delete-current-group
   const [deleteGroupOpen, setDeleteGroupOpen] = useState(false);
   const [deletingGroup, setDeletingGroup] = useState(false);
 
-  // ---------- data loading ----------
+  // NEW: client search
+  const [query, setQuery] = useState("");
+
+  // ---------- data ----------
   async function load() {
-    // 1) Load quizzes (like before)
     let q = supabase
       .from("quizzes")
-      .select("id, title, questions, updated_at, group_id")
+      .select("id, title, questions, review_questions, updated_at, group_id")
       .eq("user_id", user.id)
       .order("updated_at", { ascending: false });
 
     if (filterGroupId === "") {
-      // all groups
+      // all
     } else if (filterGroupId === NO_GROUP) {
       q = q.is("group_id", null);
     } else {
@@ -231,33 +210,31 @@ export default function Dashboard() {
       setScoresByQuiz({});
       return;
     }
-
     const list = data ?? [];
     setQuizzes(list);
 
-    // 2) Pull last scores for just these quizzes
     const ids = list.map((x) => x.id);
-    if (ids.length === 0) {
+    if (!ids.length) {
       setScoresByQuiz({});
       return;
     }
-
     const { data: scores, error: sErr } = await supabase
-      .from("quiz_scores")
-      .select("quiz_id, last_score")
-      .in("quiz_id", ids)
-      .eq("user_id", user.id);
-
-    if (sErr || !scores) {
-      setScoresByQuiz({});
-      return;
-    }
-
-    const map = {};
-    for (const row of scores) {
-      map[row.quiz_id] = row.last_score; // integer 0-100
-    }
-    setScoresByQuiz(map);
+  .from("quiz_scores")
+  .select("quiz_id, last_score, last_review_score")
+  .in("quiz_id", ids)
+  .eq("user_id", user.id);
+if (sErr || !scores) {
+  setScoresByQuiz({});
+  return;
+}
+const map = {};
+for (const row of scores) {
+  map[row.quiz_id] = {
+    last: row.last_score ?? null,
+    review: row.last_review_score ?? null,
+  };
+}
+setScoresByQuiz(map);
   }
   useEffect(() => {
     if (ready && user) load();
@@ -275,12 +252,9 @@ export default function Dashboard() {
       if (!alive) return;
       setGroups(data ?? []);
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [user?.id]);
 
-  // compute “free quizzes left” for anonymous users (limit = 2)
   useEffect(() => {
     if (!user?.id) return;
     (async () => {
@@ -292,15 +266,11 @@ export default function Dashboard() {
         .from("quizzes")
         .select("id", { count: "exact", head: true })
         .eq("user_id", user.id);
-      setTrial({
-        isAnon: true,
-        remaining: Math.max(0, 2 - (count ?? 0)),
-        loading: false,
-      });
+      setTrial({ isAnon: true, remaining: Math.max(0, 2 - (count ?? 0)), loading: false });
     })();
   }, [isAnon, user?.id, quizzes.length]);
 
-  // ---------- helpers: selection ----------
+  // ---------- helpers ----------
   function toggleSelected(quizId) {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -309,11 +279,8 @@ export default function Dashboard() {
       return next;
     });
   }
-  function clearSelection() {
-    setSelectedIds(new Set());
-  }
+  function clearSelection() { setSelectedIds(new Set()); }
 
-  // ---------- helpers: empty-group queue ----------
   function enqueueEmptyGroups(ids) {
     if (!ids?.length) return;
     setCleanupQueue((prev) => {
@@ -322,7 +289,6 @@ export default function Dashboard() {
       return Array.from(set);
     });
   }
-
   async function checkEmptyGroup(groupId) {
     if (!groupId) return null;
     const { count, error } = await supabase
@@ -332,7 +298,6 @@ export default function Dashboard() {
       .eq("group_id", groupId);
     if (error) return null;
     if ((count ?? 0) > 0) return null;
-
     const { data: g, error: gErr } = await supabase
       .from("groups")
       .select("id, name")
@@ -340,14 +305,12 @@ export default function Dashboard() {
       .eq("user_id", user.id)
       .maybeSingle();
     if (gErr || !g?.id) return null;
-    return g; // { id, name }
+    return g;
   }
-
   async function runNextCleanupIfIdle() {
-    if (cleanupOpen) return; // modal already showing
+    if (cleanupOpen) return;
     const nextId = cleanupQueue[0] ?? null;
     if (!nextId) return;
-
     const g = await checkEmptyGroup(nextId);
     if (g) {
       setCleanupGroup({ id: g.id, name: g.name });
@@ -356,11 +319,8 @@ export default function Dashboard() {
       setCleanupQueue((q) => q.slice(1));
     }
   }
-
   useEffect(() => {
-    if (!cleanupOpen) {
-      setTimeout(runNextCleanupIfIdle, 0);
-    }
+    if (!cleanupOpen) setTimeout(runNextCleanupIfIdle, 0);
   }, [cleanupQueue.length, cleanupOpen]);
 
   function keepEmptyGroupNow() {
@@ -368,7 +328,6 @@ export default function Dashboard() {
     setCleanupGroup(null);
     setCleanupQueue((q) => q.slice(1));
   }
-
   async function deleteEmptyGroupNow() {
     if (!cleanupGroup?.id) return;
     try {
@@ -378,7 +337,6 @@ export default function Dashboard() {
         .delete()
         .eq("id", cleanupGroup.id)
         .eq("user_id", user.id);
-
       if (!error) {
         setGroups((gs) => gs.filter((g) => g.id !== cleanupGroup.id));
         setFilterGroupId((cur) => (cur === cleanupGroup.id ? "" : cur));
@@ -393,20 +351,17 @@ export default function Dashboard() {
     }
   }
 
-  // ---------- create / delete (single) ----------
   async function createQuiz() {
     if (creating) return;
     try {
       const allowed = await ensureCanCreate();
       if (!allowed) return;
-
       setCreating(true);
       const { data, error } = await supabase
         .from("quizzes")
         .insert({ user_id: user.id, title: "Untitled Quiz", questions: [] })
         .select("id")
         .single();
-
       if (error) {
         if (error.code === "42501") {
           openSignupModal(
@@ -417,57 +372,45 @@ export default function Dashboard() {
         alert(error.message || "Failed to create quiz.");
         return;
       }
-
       nav(`/edit/${data.id}`);
-    } finally {
-      setCreating(false);
-    }
+    } finally { setCreating(false); }
   }
 
   async function handleDelete() {
     if (!target) return;
     setDeleting(true);
-
     const thisGroupId = target.group_id ?? null;
     const thisId = target.id;
-
     const { error } = await supabase
       .from("quizzes")
       .delete()
       .eq("id", thisId)
       .eq("user_id", user.id);
-
     setDeleting(false);
-
     if (!error) {
       setQuizzes((qs) => qs.filter((x) => x.id !== thisId));
       setConfirmOpen(false);
       setTarget(null);
-
       setSelectedIds((prev) => {
         if (!prev.has(thisId)) return prev;
         const next = new Set(prev);
         next.delete(thisId);
         return next;
       });
-
       if (thisGroupId) enqueueEmptyGroups([thisGroupId]);
     } else {
       alert("Failed to delete. Please try again.");
     }
   }
 
-  // Extract text from user file (PDF/TXT/MD)
   async function extractTextFromFile(file) {
     if (
       file.type?.startsWith("text/") ||
       file.name.toLowerCase().endsWith(".txt") ||
       file.name.toLowerCase().endsWith(".md")
     ) {
-      const asText = await file.text();
-      return asText;
+      return await file.text();
     }
-
     if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
       const buf = await file.arrayBuffer();
       const pdf = await getDocument({ data: buf }).promise;
@@ -479,69 +422,54 @@ export default function Dashboard() {
       }
       return out;
     }
-
     return await file.text();
   }
 
-  // Quick preflight: block guests at/over the limit before doing any work
   async function ensureCanCreate() {
     const { data: ures } = await supabase.auth.getUser();
     const anon =
       !!ures?.user &&
       Array.isArray(ures.user.identities) &&
       ures.user.identities.some((i) => i?.provider === "anonymous");
-
     if (!anon) return true;
-
     const { count } = await supabase
       .from("quizzes")
       .select("id", { count: "exact", head: true })
       .eq("user_id", ures.user.id);
-
     if ((count ?? 0) >= 2) {
-      openSignupModal(
-        "Free trial limit reached. Create an account to make more quizzes."
-      );
+      openSignupModal("Free trial limit reached. Create an account to make more quizzes.");
       return false;
     }
     return true;
   }
 
-  // ---------- AI generate ----------
   async function generateQuiz() {
     try {
       if (generating) return;
-
-      // Preflight: block instantly if at limit
       const allowed = await ensureCanCreate();
       if (!allowed) return;
-
       setGenerating(true);
 
       const { data: sessionRes } = await supabase.auth.getSession();
       const jwt = sessionRes?.session?.access_token;
       const count = Math.max(1, Math.min(Number(gCount) || 10, 30));
 
-      // Which group should we consider for no-repeat?
       const targetGroupIdForNoRepeat =
         (gGroupId && gGroupId !== "") ||
         (filterGroupId && filterGroupId !== NO_GROUP)
           ? (gGroupId || (filterGroupId !== NO_GROUP ? filterGroupId : ""))
           : "";
 
-      // 1) Optional: index uploaded file (RAG)
+      // Optional RAG
       let file_id = null;
       if (gFile) {
         let rawDoc = "";
-        try {
-          rawDoc = await extractTextFromFile(gFile);
-        } catch (e) {
-          alert(`Couldn't read file "${gFile.name}". Please try a different file.\n\n${e}`);
+        try { rawDoc = await extractTextFromFile(gFile); } catch (e) {
+          alert(`Couldn't read file "${gFile.name}".\n\n${e}`);
           setGenerating(false);
           return;
         }
-
-        const LIMIT = 500_000; // ~500k chars
+        const LIMIT = 500_000;
         if (rawDoc.length > LIMIT) rawDoc = rawDoc.slice(0, LIMIT);
 
         const idxRes = await fetch(
@@ -552,24 +480,17 @@ export default function Dashboard() {
               "Content-Type": "application/json",
               ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
             },
-            body: JSON.stringify({
-              text: rawDoc,
-              file_name: gFile.name,
-            }),
+            body: JSON.stringify({ text: rawDoc, file_name: gFile.name }),
           }
         );
-
         const idxText = await idxRes.text();
         if (!idxRes.ok) {
           alert(`Failed to index document (${idxRes.status}):\n${idxText}`);
           setGenerating(false);
           return;
         }
-
         let idxOut = {};
-        try {
-          idxOut = idxText ? JSON.parse(idxText) : {};
-        } catch {}
+        try { idxOut = idxText ? JSON.parse(idxText) : {}; } catch {}
         file_id = idxOut?.file_id ?? null;
         if (!file_id) {
           alert("Indexing returned no file_id.");
@@ -578,7 +499,7 @@ export default function Dashboard() {
         }
       }
 
-      // 2) Build an avoid list from this group's existing questions (if enabled)
+      // Avoid prompts
       let avoid_prompts = [];
       if (gNoRepeat && targetGroupIdForNoRepeat) {
         const { data: prior, error: priorErr } = await supabase
@@ -586,7 +507,6 @@ export default function Dashboard() {
           .select("questions")
           .eq("user_id", user.id)
           .eq("group_id", targetGroupIdForNoRepeat);
-
         if (!priorErr && Array.isArray(prior)) {
           const all = [];
           for (const row of prior) {
@@ -596,7 +516,6 @@ export default function Dashboard() {
               if (p) all.push(p);
             }
           }
-          // de-dup and cap to keep payload small
           const seen = new Set();
           for (const p of all) {
             const key = p.toLowerCase();
@@ -609,7 +528,6 @@ export default function Dashboard() {
         }
       }
 
-      // 3) Generate quiz (works even when file_id is null)
       const res = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-quiz`,
         {
@@ -626,31 +544,22 @@ export default function Dashboard() {
             count,
             group_id: gGroupId || null,
             file_id,
-            // NEW: no-repeat hints for the Edge Function
             no_repeat: !!gNoRepeat,
-            avoid_prompts, // array of prior prompts in this group
+            avoid_prompts,
           }),
         }
       );
 
       let raw = "";
-      try {
-        raw = await res.text();
-      } catch {}
+      try { raw = await res.text(); } catch {}
 
       if (!res.ok) {
-        if (res.status === 403) {
-          openSignupModal(
-            "Free trial limit reached. Create an account to make more quizzes."
-          );
-        } else {
-          alert(`Failed to generate quiz (${res.status}):\n${raw || "Unknown error"}`);
-        }
+        if (res.status === 403) openSignupModal("Free trial limit reached. Create an account to make more quizzes.");
+        else alert(`Failed to generate quiz (${res.status}):\n${raw || "Unknown error"}`);
         setGenerating(false);
         return;
       }
 
-      // Success — close modal, reset file, refresh list
       setGenOpen(false);
       if (gFile) setGFile(null);
       setGenerating(false);
@@ -672,37 +581,28 @@ export default function Dashboard() {
         .select("id, name")
         .single();
       if (!error && data) {
-        setGroups((gs) =>
-          [...gs, data].sort((a, b) => a.name.localeCompare(b.name))
-        );
+        setGroups((gs) => [...gs, data].sort((a, b) => a.name.localeCompare(b.name)));
         setGGroupId(data.id);
         setGNewOpen(false);
         setGNewName("");
       } else {
         alert("Failed to create group. Please try again.");
       }
-    } finally {
-      setGCreatingGroup(false);
-    }
+    } finally { setGCreatingGroup(false); }
   }
 
-  // ---------- BULK: delete ----------
   async function doBulkDelete() {
-    if (selectedIds.size === 0) return;
+    if (!selectedIds.size) return;
     setBulkDeleting(true);
     try {
       const ids = Array.from(selectedIds);
-
-      // Which groups might become empty after delete?
       const { data: rows, error: readErr } = await supabase
         .from("quizzes")
         .select("id, group_id")
         .in("id", ids)
         .eq("user_id", user.id);
       if (readErr) throw readErr;
-      const affectedGroupIds = Array.from(
-        new Set((rows || []).map((r) => r.group_id).filter(Boolean))
-      );
+      const affectedGroupIds = Array.from(new Set((rows || []).map((r) => r.group_id).filter(Boolean)));
 
       const { error } = await supabase
         .from("quizzes")
@@ -714,34 +614,25 @@ export default function Dashboard() {
       clearSelection();
       setBulkConfirmOpen(false);
       await load();
-
       if (affectedGroupIds.length) enqueueEmptyGroups(affectedGroupIds);
     } catch {
       alert("Failed to delete selected quizzes. Please try again.");
-    } finally {
-      setBulkDeleting(false);
-    }
+    } finally { setBulkDeleting(false); }
   }
 
-  // ---------- BULK: move ----------
   async function doBulkMove() {
-    if (selectedIds.size === 0) return;
+    if (!selectedIds.size) return;
     setMoving(true);
     try {
       const ids = Array.from(selectedIds);
-
-      // previous groups (for cleanup prompts later)
       const { data: beforeRows, error: beforeErr } = await supabase
         .from("quizzes")
         .select("id, group_id")
         .in("id", ids)
         .eq("user_id", user.id);
       if (beforeErr) throw beforeErr;
-      const prevGroupIds = Array.from(
-        new Set((beforeRows || []).map((r) => r.group_id).filter(Boolean))
-      );
+      const prevGroupIds = Array.from(new Set((beforeRows || []).map((r) => r.group_id).filter(Boolean)));
 
-      // target group
       let targetGroupId = moveGroupId || "";
       if (moveNewName.trim()) {
         const { data: g, error: gErr } = await supabase
@@ -750,18 +641,13 @@ export default function Dashboard() {
           .select("id, name")
           .single();
         if (gErr) throw gErr;
-        setGroups((gs) =>
-          [...gs, g].sort((a, b) => a.name.localeCompare(b.name))
-        );
+        setGroups((gs) => [...gs, g].sort((a, b) => a.name.localeCompare(b.name)));
         targetGroupId = g.id;
       }
 
       const { error } = await supabase
         .from("quizzes")
-        .update({
-          group_id: targetGroupId || null,
-          updated_at: new Date().toISOString(),
-        })
+        .update({ group_id: targetGroupId || null, updated_at: new Date().toISOString() })
         .in("id", ids)
         .eq("user_id", user.id);
       if (error) throw error;
@@ -772,32 +658,23 @@ export default function Dashboard() {
       clearSelection();
       await load();
 
-      const toCheck = prevGroupIds.filter(
-        (gid) => gid !== (targetGroupId || null)
-      );
+      const toCheck = prevGroupIds.filter((gid) => gid !== (targetGroupId || null));
       if (toCheck.length) enqueueEmptyGroups(toCheck);
     } catch {
       alert("Failed to move selected quizzes. Please try again.");
-    } finally {
-      setMoving(false);
-    }
+    } finally { setMoving(false); }
   }
 
-  // Delete the currently filtered group (and its quizzes)
   async function deleteCurrentGroupNow() {
     if (!currentGroup?.id) return;
     try {
       setDeletingGroup(true);
-
-      // delete quizzes in the group first
       const { error: qErr } = await supabase
         .from("quizzes")
         .delete()
         .eq("user_id", user.id)
         .eq("group_id", currentGroup.id);
       if (qErr) throw qErr;
-
-      // then delete the group
       const { error: gErr } = await supabase
         .from("groups")
         .delete()
@@ -816,8 +693,6 @@ export default function Dashboard() {
       setDeletingGroup(false);
     }
   }
-
-  // Edit / save current group's name
   function openEditGroup() {
     if (!currentGroup) return;
     setEditGroupName(currentGroup.name || "");
@@ -835,266 +710,324 @@ export default function Dashboard() {
         .select("id, name")
         .single();
       if (error) throw error;
-      // update local state
       setGroups((gs) =>
-        gs
-          .map((g) => (g.id === currentGroup.id ? { ...g, name: data.name } : g))
+        gs.map((g) => (g.id === currentGroup.id ? { ...g, name: data.name } : g))
           .sort((a, b) => a.name.localeCompare(b.name))
       );
       setEditGroupOpen(false);
     } catch (e) {
       console.error(e);
       alert("Failed to rename group. Please try again.");
-    } finally {
-      setSavingGroupName(false);
-    }
+    } finally { setSavingGroupName(false); }
   }
 
-  // ------- Memoized sorted list by score (no-score items at bottom) -------
+  // ------- sorting + searching -------
   const sortedQuizzes = useMemo(() => {
-    return [...quizzes].sort((a, b) => {
-      const av = scoresByQuiz[a.id];
-      const bv = scoresByQuiz[b.id];
-      const aVal =
-        av == null ? (scoreSort === "asc" ? Infinity : -Infinity) : av;
-      const bVal =
-        bv == null ? (scoreSort === "asc" ? Infinity : -Infinity) : bv;
-      return scoreSort === "asc" ? aVal - bVal : bVal - aVal;
-    });
-  }, [quizzes, scoresByQuiz]);
+  return [...quizzes].sort((a, b) => {
+    const av = scoresByQuiz[a.id]?.last;
+    const bv = scoresByQuiz[b.id]?.last;
+    const aVal = av == null ? (scoreSort === "asc" ? Infinity : -Infinity) : av;
+    const bVal = bv == null ? (scoreSort === "asc" ? Infinity : -Infinity) : bv;
+    return scoreSort === "asc" ? aVal - bVal : bVal - aVal;
+  });
+}, [quizzes, scoresByQuiz]);
+
+  // NEW: client-side title filter (case-insensitive includes)
+  const visibleQuizzes = useMemo(() => {
+    const q = (query || "").toLowerCase();
+    if (!q) return sortedQuizzes;
+    return sortedQuizzes.filter((x) => (x.title || "").toLowerCase().includes(q));
+  }, [sortedQuizzes, query]);
 
   const selectedTitles = useMemo(() => {
-  if (!selectedIds.size) return [];
-  const byId = new Map(quizzes.map(q => [q.id, q]));
-  return Array.from(selectedIds).map(id => {
-    const t = byId.get(id)?.title;
-    return (t && t.trim()) ? t : "Untitled Quiz";
-  });
-}, [selectedIds, quizzes]);
+    if (!selectedIds.size) return [];
+    const byId = new Map(quizzes.map((q) => [q.id, q]));
+    return Array.from(selectedIds).map((id) => {
+      const t = byId.get(id)?.title;
+      return (t && t.trim()) ? t : "Untitled Quiz";
+    });
+  }, [selectedIds, quizzes]);
 
+  // --- Carousel refs / helpers ---
+  const railRef = useRef(null);
+  const CARD_W = 480; // wider cards for smoother page-width scroll steps
+  function scrollLeft() {
+    const rail = railRef.current;
+    if (!rail) return;
+    rail.scrollBy({ left: -(rail.clientWidth || CARD_W), behavior: "smooth" });
+  }
+  function scrollRight() {
+    const rail = railRef.current;
+    if (!rail) return;
+    rail.scrollBy({ left: (rail.clientWidth || CARD_W), behavior: "smooth" });
+  }
 
- // ---------- UI ----------
-return (
-  <div className="min-h-screen bg-gray-900 text-white">
-    <header className="border-b border-gray-800 px-6 sm:px-8 lg:px-12 py-3 sm:py-4">
-      <div className="grid grid-cols-3 items-center">
-        <h1 className="text-xl font-bold justify-self-start">Your Quizzes</h1>
+  // ---------- UI ----------
+  return (
+    <div className="min-h-screen bg-gray-900 text-white">
+      <header className="border-b border-gray-800 px-6 sm:px-8 lg:px-12 py-3 sm:py-4">
+        <div className="grid grid-cols-3 items-center">
+          <h1 className="text-xl font-bold justify-self-start">Your Quizzes</h1>
 
-        <div className="flex items-center justify-center">
-          <img
-            src="/smartquizlogo.png"
-            alt="Smart-Quiz logo"
-            className="h-12 sm:h-10 md:h-16 w-auto my-2 sm:my-3 object-contain select-none pointer-events-none"
-            draggable="false"
-          />
-        </div>
+          <div className="flex items-center justify-center">
+            <img
+              src="/smartquizlogo.png"
+              alt="Smart-Quiz logo"
+              className="h-12 sm:h-10 md:h-16 w-auto my-2 sm:my-3 object-contain select-none pointer-events-none"
+              draggable="false"
+            />
+          </div>
 
-        <div className="flex items-center gap-3 text-sm justify-self-end min-w-0">
-          {!ready ? (
-            <span className="text-gray-400">Loading…</span>
-          ) : isAnon ? (
-            <>
-              <span className="text-gray-300 hidden sm:inline">Guest</span>
+          <div className="flex items-center gap-3 text-sm justify-self-end min-w-0">
+            {!ready ? (
+              <span className="text-gray-400">Loading…</span>
+            ) : isAnon ? (
+              <>
+                <span className="text-gray-300 hidden sm:inline">Guest</span>
+                <button
+                  onClick={() => { setAuthMessage(""); setAuthOpen(true); }}
+                  className={`${btnBase} ${btnGreen}`}
+                >
+                  Sign Up / Sign In
+                </button>
+              </>
+            ) : user ? (
+              <>
+                <span className="text-gray-300 hidden md:inline max-w-[28ch] truncate">
+                  {user.email}
+                </span>
+                <button onClick={handleSignOut} className={`${btnBase} ${btnGray}`}>
+                  Sign out
+                </button>
+              </>
+            ) : (
               <button
                 onClick={() => { setAuthMessage(""); setAuthOpen(true); }}
                 className={`${btnBase} ${btnGreen}`}
               >
                 Sign Up / Sign In
               </button>
-            </>
-          ) : user ? (
-            <>
-              <span className="text-gray-300 hidden md:inline max-w-[28ch] truncate">
-                {user.email}
-              </span>
-              <button onClick={handleSignOut} className={`${btnBase} ${btnGray}`}>
-                Sign out
-              </button>
-            </>
-          ) : (
-            <button
-              onClick={() => { setAuthMessage(""); setAuthOpen(true); }}
-              className={`${btnBase} ${btnGreen}`}
-            >
-              Sign Up / Sign In
-            </button>
-          )}
-        </div>
-      </div>
-    </header>
-
-      
-      <main className="max-w-3xl mx-auto p-6">
-        {/* TOOLBAR (responsive: stacks on mobile) */}
-        <div className="mb-6 flex flex-col sm:flex-row sm:flex-nowrap items-stretch sm:items-center gap-3">
-          {/* Left: primary actions (equal height on mobile) */}
-          <div className="flex items-stretch gap-3 shrink-0 w-full sm:w-auto">
-            <button
-              onClick={async () => {
-                if (filterGroupId && filterGroupId !== NO_GROUP)
-                  setGGroupId(filterGroupId);
-                else setGGroupId("");
-
-                const allowed = await ensureCanCreate();
-                if (!allowed) return;
-
-                setGenOpen(true);
-              }}
-              className={`w-full sm:w-auto whitespace-normal text-left leading-tight ${btnBase} ${btnGreen} ${actionH}`}
-            >
-              + Generate Quiz with AI
-            </button>
-            <button
-              onClick={createQuiz}
-              className={`w-full sm:w-auto whitespace-normal text-left leading-tight ${btnBase} ${btnGray} ${actionH}`}
-              disabled={creating}
-            >
-              {creating ? "Creating…" : "New empty quiz"}
-            </button>
-          </div>
-
-          {/* Right: filters stacked, with bulk actions underneath */}
-          <div className="sm:ml-auto w-full sm:w-auto flex flex-col items-stretch sm:items-end gap-3 min-w-0">
-            {/* Filter by group */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-              <label className="text-sm text-gray-300 shrink-0">
-                Filter by group:
-              </label>
-              <select
-                className="w-full sm:w-48 shrink-0 p-2 rounded bg-gray-800 text-white border border-gray-700"
-                value={filterGroupId}
-                onChange={(e) => setFilterGroupId(e.target.value)}
-              >
-                <option value="">All</option>
-                <option value={NO_GROUP}>No group</option>
-                {groups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Bulk actions appear neatly UNDER the filters */}
-            {hasSelected && (
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
-                <button
-                  onClick={() => setMoveOpen(true)}
-                  className={`${btnBase} ${btnGray}`}
-                >
-                  Move to group
-                </button>
-                <button
-                  onClick={() => setBulkConfirmOpen(true)}
-                  className={`${btnBase} ${btnRed}`}
-                >
-                  Delete selected
-                </button>
-              </div>
             )}
           </div>
         </div>
+      </header>
 
-        {/* LIST */}
-        {sortedQuizzes.length === 0 ? (
-          <div className="text-gray-400">
-            No quizzes yet. Create one or generate with AI.
+     <main className="max-w-6xl mx-auto p-6">
+  {/* ONE ROW: create buttons + filter + search (+ bulk actions on the far right) */}
+  <div className="mb-6 flex flex-wrap items-stretch gap-3">
+    <button
+      onClick={async () => {
+        if (filterGroupId && filterGroupId !== NO_GROUP) setGGroupId(filterGroupId);
+        else setGGroupId("");
+        const allowed = await ensureCanCreate();
+        if (!allowed) return;
+        setGenOpen(true);
+      }}
+      className={`whitespace-normal text-left leading-tight ${btnBase} ${btnGreen} ${actionH}`}
+    >
+      + Generate Quiz with AI
+    </button>
+
+    <button
+      onClick={createQuiz}
+      className={`whitespace-normal text-left leading-tight ${btnBase} ${btnGray} ${actionH}`}
+      disabled={creating}
+    >
+      {creating ? "Creating…" : "New empty quiz"}
+    </button>
+
+    {/* Filter (same line) */}
+    <div className="flex items-center gap-2">
+      <label className="text-sm text-gray-300 shrink-0">Filter by group:</label>
+      <select
+        className="w-48 shrink-0 p-2 rounded bg-gray-800 text-white border border-gray-700"
+        value={filterGroupId}
+        onChange={(e) => setFilterGroupId(e.target.value)}
+      >
+        <option value="">All</option>
+        <option value={NO_GROUP}>No group</option>
+        {groups.map((g) => (
+          <option key={g.id} value={g.id}>{g.name}</option>
+        ))}
+      </select>
+    </div>
+
+    {/* Search (same line, narrower) */}
+    <div className="flex-none w-full sm:w-72 md:w-96">
+      <input
+        className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 placeholder:text-gray-400"
+        placeholder="Search quizzes… (e.g., ba)"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+    </div>
+
+    {/* Bulk actions on far right of the same row */}
+    {hasSelected && (
+      <div className="ml-auto flex items-center gap-2">
+        <button onClick={() => setMoveOpen(true)} className={`${btnBase} ${btnGray}`}>
+          Move to group
+        </button>
+        <button onClick={() => setBulkConfirmOpen(true)} className={`${btnBase} ${btnRed}`}>
+          Delete selected
+        </button>
+      </div>
+    )}
+  </div>
+
+  {/* HORIZONTAL CAROUSEL — bigger & taller cards */}
+  {visibleQuizzes.length === 0 ? (
+    <div className="text-gray-400">No quizzes yet. Create one or generate with AI.</div>
+  ) : (
+    <div className="relative">
+      {/* Scroll buttons */}
+      <button
+        type="button"
+        onClick={scrollLeft}
+        className="hidden sm:block absolute -left-4 top-1/2 -translate-y-1/2 z-10 bg-gray-800 hover:bg-gray-700 rounded-full p-3 shadow"
+        aria-label="Scroll left"
+        title="Scroll left"
+      >
+        ‹
+      </button>
+      <button
+        type="button"
+        onClick={scrollRight}
+        className="hidden sm:block absolute -right-4 top-1/2 -translate-y-1/2 z-10 bg-gray-800 hover:bg-gray-700 rounded-full p-3 shadow"
+        aria-label="Scroll right"
+        title="Scroll right"
+      >
+        ›
+      </button>
+
+      <div
+        ref={railRef}
+        className="overflow-x-auto no-scrollbar snap-x snap-mandatory scroll-px-4"
+      >
+        <ul className="flex gap-6 px-1 py-2 min-w-full">
+  {visibleQuizzes.map((q) => {
+    const score = scoresByQuiz[q.id];
+    const rvCount = q.review_questions?.length ?? 0;
+    const reviewDisabled = rvCount === 0;
+
+    return (
+      <li
+        key={q.id}
+        className="snap-start shrink-0 w-[520px] bg-gray-800 rounded-3xl p-8 shadow-sm border border-gray-800
+                   min-h-[320px] flex flex-col justify-between"
+      >
+        {/* Top: title/meta */}
+        <div className="flex items-start gap-4">
+          <input
+            type="checkbox"
+            className="h-6 w-6 accent-emerald-500 mt-1"
+            checked={selectedIds.has(q.id)}
+            onChange={() => toggleSelected(q.id)}
+            aria-label={`Select ${q.title || "Untitled Quiz"}`}
+          />
+          <div className="min-w-0">
+            <div className="text-2xl font-semibold truncate">
+              {q.title || "Untitled Quiz"}
+            </div>
+            <div className="mt-1 text-sm text-gray-400">
+              {q.questions?.length ?? 0} questions
+            </div>
+            <div className="text-sm text-gray-400">
+  Last score:{" "}
+  {scoresByQuiz[q.id]?.last != null ? (
+    <span className={scoresByQuiz[q.id].last >= 90 ? "text-green-400 font-semibold" : ""}>
+      {scoresByQuiz[q.id].last}%
+    </span>
+  ) : "—"}
+</div>
+<div className="text-sm text-gray-400">
+  Revisit score:{" "}
+  {scoresByQuiz[q.id]?.review != null ? (
+    <span className={scoresByQuiz[q.id].review >= 90 ? "text-green-400 font-semibold" : ""}>
+      {scoresByQuiz[q.id].review}%
+    </span>
+  ) : "—"}
+</div>
           </div>
-        ) : (
-          <ul className="space-y-3">
-            {sortedQuizzes.map((q) => (
-              <li
-                key={q.id}
-                className="bg-gray-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
-              >
-                {/* LEFT: checkbox + title/meta */}
-                <div className="flex items-start sm:items-center gap-3">
-                  <input
-                    type="checkbox"
-                    className="h-5 w-5 accent-emerald-500 mt-1 sm:mt-0"
-                    checked={selectedIds.has(q.id)}
-                    onChange={() => toggleSelected(q.id)}
-                    aria-label={`Select ${q.title || "Untitled Quiz"}`}
-                  />
-                  <div>
-                    <div className="text-lg font-semibold">
-                      {q.title || "Untitled Quiz"}
-                    </div>
-                    <div className="text-sm text-gray-400">
-                      {q.questions?.length ?? 0} questions
-                    </div>
-                    <div className="text-sm text-gray-400">
-                      Last score:{" "}
-                      {scoresByQuiz[q.id] != null ? (
-                        <span
-                          className={
-                            scoresByQuiz[q.id] >= 90
-                              ? "text-green-400 font-semibold"
-                              : ""
-                          }
-                        >
-                          {scoresByQuiz[q.id]}%
-                        </span>
-                      ) : (
-                        "—"
-                      )}
-                    </div>
-                  </div>
-                </div>
+        </div>
 
-                {/* RIGHT: actions */}
-                <div className="flex flex-wrap gap-2">
-                  <Link
-                    to={`/play/${q.id}`}
-                    className={`${btnBase} ${btnGray}`}
-                  >
-                    Play
-                  </Link>
-                  <Link
-                    to={`/edit/${q.id}`}
-                    className={`${btnBase} ${btnGray}`}
-                  >
-                    Edit
-                  </Link>
-                  <button
-                    onClick={() => {
-                      setTarget({
-                        id: q.id,
-                        title: q.title || "Untitled Quiz",
-                        group_id: q.group_id ?? null,
-                      });
-                      setConfirmOpen(true);
-                    }}
-                    className={`${btnBase} ${btnGray}`}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
+        {/* Bottom: actions pinned to bottom by flex layout */}
+<div className="mt-6 grid grid-cols-4 gap-3">
+  {/* Play */}
+  <Link
+    to={`/play/${q.id}`}
+    className={`${btnBase} ${btnGray} h-16 p-0 flex items-center justify-center`}
+    aria-label="Play quiz"
+    title="Play"
+  >
+    <Play className="h-6 w-6" />
+  </Link>
 
-        {/* Group actions under the list (only when a specific group is filtered) */}
-        {filterGroupId && filterGroupId !== NO_GROUP && currentGroup && (
-          <div className="mt-6 flex items-center gap-3">
-            <button
-              onClick={openEditGroup}
-              className={`${btnBase} ${btnGray}`}
-            >
-              Edit Group Name
-            </button>
-            <button
-              onClick={() => setDeleteGroupOpen(true)}
-              className={`${btnBase} ${btnRed}`}
-            >
-              Delete “{currentGroup.name}” group
-            </button>
-          </div>
-        )}
-      </main>
+  {/* Revisit (formerly Play Review) */}
+  <Link
+    to={reviewDisabled ? "#" : `/play/${q.id}?mode=review`}
+    onClick={(e) => {
+      if (reviewDisabled) e.preventDefault();
+    }}
+    className={`${btnBase} ${btnGray} h-16 p-0 flex items-center justify-center ${
+      reviewDisabled ? "opacity-50 cursor-not-allowed" : ""
+    }`}
+    aria-label={reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"}
+    title={reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"}
+  >
+    <History className="h-6 w-6" />
+  </Link>
 
-      {/* single delete */}
+  {/* Edit */}
+  <Link
+    to={`/edit/${q.id}`}
+    className={`${btnBase} ${btnGray} h-16 p-0 flex items-center justify-center`}
+    aria-label="Edit quiz"
+    title="Edit"
+  >
+    <SquarePen className="h-6 w-6" />
+  </Link>
+
+  {/* Delete */}
+  <button
+    onClick={() => {
+      setTarget({
+        id: q.id,
+        title: q.title || "Untitled Quiz",
+        group_id: q.group_id ?? null,
+      });
+      setConfirmOpen(true);
+    }}
+    className={`${btnBase} ${btnGray} h-16 p-0 flex items-center justify-center`}
+    aria-label="Delete quiz"
+    title="Delete"
+  >
+    <Trash2 className="h-6 w-6" />
+  </button>
+</div>
+      </li>
+    );
+  })}
+</ul>
+      </div>
+    </div>
+  )}
+
+  {/* Group actions */}
+  {filterGroupId && filterGroupId !== NO_GROUP && currentGroup && (
+    <div className="mt-6 flex items-center gap-3">
+      <button onClick={openEditGroup} className={`${btnBase} ${btnGray}`}>
+        Edit Group Name
+      </button>
+      <button onClick={() => setDeleteGroupOpen(true)} className={`${btnBase} ${btnRed}`}>
+        Delete “{currentGroup.name}” group
+      </button>
+    </div>
+  )}
+</main>
+
+
+      {/* --- single delete --- */}
       {confirmOpen && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-50"
@@ -1115,21 +1048,13 @@ return (
             <h2 className="text-xl font-bold mb-2">Delete quiz?</h2>
             <p className="text-gray-300 mb-6">
               Are you sure you want to delete{" "}
-              <span className="font-semibold">{target?.title}</span>? 
+              <span className="font-semibold">{target?.title}</span>?
             </p>
             <div className="flex flex-col sm:flex-row justify-end gap-2">
-              <button
-                className={`${btnBase} ${btnGray}`}
-                onClick={() => setConfirmOpen(false)}
-                disabled={deleting}
-              >
+              <button className={`${btnBase} ${btnGray}`} onClick={() => setConfirmOpen(false)} disabled={deleting}>
                 Cancel
               </button>
-              <button
-                className={`${btnBase} ${btnGray}`}
-                onClick={handleDelete}
-                disabled={deleting}
-              >
+              <button className={`${btnBase} ${btnGray}`} onClick={handleDelete} disabled={deleting}>
                 {deleting ? "Deleting..." : "Delete"}
               </button>
             </div>
@@ -1137,16 +1062,11 @@ return (
         </div>
       )}
 
-      {/* Auth modal: upgrade guest OR sign in */}
+      {/* --- Auth modal --- */}
       {authOpen && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-[95]"
-          onClick={() => {
-            if (!authBusy) {
-              setAuthMessage("");
-              setAuthOpen(false);
-            }
-          }}
+          onClick={() => { if (!authBusy) { setAuthMessage(""); setAuthOpen(false); } }}
           aria-modal="true"
           role="dialog"
         >
@@ -1163,14 +1083,10 @@ return (
             )}
 
             <p className="text-gray-300 mb-4 text-sm">
-              Creating an account upgrades your current guest session so your
-              quizzes stay with you.
+              Creating an account upgrades your current guest session so your quizzes stay with you.
             </p>
 
-            <label
-              className="block text-sm text-gray-300 mb-1"
-              htmlFor="auth-email"
-            >
+            <label className="block text-sm text-gray-300 mb-1" htmlFor="auth-email">
               Email
             </label>
             <input
@@ -1183,10 +1099,7 @@ return (
               autoFocus
             />
 
-            <label
-              className="block text-sm text-gray-300 mb-1"
-              htmlFor="auth-pass"
-            >
+            <label className="block text-sm text-gray-300 mb-1" htmlFor="auth-pass">
               Password
             </label>
             <input
@@ -1201,12 +1114,7 @@ return (
             <div className="flex flex-col sm:flex-row justify-end gap-2">
               <button
                 className={`${btnBase} ${btnGray}`}
-                onClick={() => {
-                  if (!authBusy) {
-                    setAuthMessage("");
-                    setAuthOpen(false);
-                  }
-                }}
+                onClick={() => { if (!authBusy) { setAuthMessage(""); setAuthOpen(false); } }}
                 disabled={authBusy}
               >
                 Not now
@@ -1224,9 +1132,7 @@ return (
               <button
                 className={`${btnBase} ${btnGray}`}
                 onClick={async () => {
-                  const ok = confirm(
-                    "Signing in to an existing account will replace your guest session. Continue?"
-                  );
+                  const ok = confirm("Signing in to an existing account will replace your guest session. Continue?");
                   if (ok) await signInExisting();
                 }}
                 disabled={authBusy}
@@ -1239,7 +1145,7 @@ return (
         </div>
       )}
 
-      {/* AI generate */}
+      {/* --- Generate modal (unchanged UI) --- */}
       {genOpen && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-50"
@@ -1255,12 +1161,7 @@ return (
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
-                <label
-                  className="block text-sm text-gray-300 mb-1"
-                  htmlFor="gen-title"
-                >
-                  Name
-                </label>
+                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-title">Name</label>
                 <input
                   id="gen-title"
                   className="field w-full placeholder:text-gray-400"
@@ -1271,12 +1172,7 @@ return (
               </div>
 
               <div className="sm:col-span-2">
-                <label
-                  className="block text-sm text-gray-300 mb-1"
-                  htmlFor="gen-topic"
-                >
-                  Prompt
-                </label>
+                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-topic">Prompt</label>
                 <textarea
                   id="gen-topic"
                   className="field-textarea w-full min-h-[8rem] resize-y placeholder:text-gray-400"
@@ -1286,7 +1182,6 @@ return (
                 />
               </div>
 
-              {/* NEW: Do not repeat previous questions */}
               <div className="sm:col-span-2">
                 <label className="inline-flex items-center gap-2 text-sm text-gray-200">
                   <input
@@ -1299,12 +1194,8 @@ return (
                 </label>
               </div>
 
-              {/* Optional source file (PDF/TXT/MD) */}
               <div className="sm:col-span-2">
-                <label
-                  className="block text-sm text-gray-300 mb-1"
-                  htmlFor="gen-file"
-                >
+                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-file">
                   Optional document to use as source (PDF / TXT / MD)
                 </label>
                 <input
@@ -1317,11 +1208,7 @@ return (
                 {gFile && (
                   <div className="mt-1 text-xs text-gray-300">
                     Selected: {gFile.name}{" "}
-                    <button
-                      type="button"
-                      className="underline"
-                      onClick={() => setGFile(null)}
-                    >
+                    <button type="button" className="underline" onClick={() => setGFile(null)}>
                       Clear
                     </button>
                   </div>
@@ -1329,10 +1216,7 @@ return (
               </div>
 
               <div className="sm:col-span-1">
-                <label
-                  className="block text-sm text-gray-300 mb-1"
-                  htmlFor="gen-group"
-                >
+                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-group">
                   Add to Group
                 </label>
                 <div className="flex flex-col sm:flex-row gap-2">
@@ -1344,18 +1228,13 @@ return (
                   >
                     <option value="">No group</option>
                     {groups.map((g) => (
-                      <option key={g.id} value={g.id}>
-                        {g.name}
-                      </option>
+                      <option key={g.id} value={g.id}>{g.name}</option>
                     ))}
                   </select>
                   <button
                     type="button"
                     className={`${btnBase} ${btnGray}`}
-                    onClick={() => {
-                      setGNewName("");
-                      setGNewOpen(true);
-                    }}
+                    onClick={() => { setGNewName(""); setGNewOpen(true); }}
                   >
                     New group +
                   </button>
@@ -1363,10 +1242,7 @@ return (
               </div>
 
               <div className="sm:col-span-1">
-                <label
-                  className="block text-sm text-gray-300 mb-1"
-                  htmlFor="gen-count"
-                >
+                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-count">
                   # of questions
                 </label>
                 <input
@@ -1382,18 +1258,10 @@ return (
             </div>
 
             <div className="flex flex-col sm:flex-row justify-end gap-2 mt-6">
-              <button
-                className={`${btnBase} ${btnGray}`}
-                onClick={() => setGenOpen(false)}
-                disabled={generating}
-              >
+              <button className={`${btnBase} ${btnGray}`} onClick={() => setGenOpen(false)} disabled={generating}>
                 Cancel
               </button>
-              <button
-                className={`${btnBase} ${btnGreen}`}
-                onClick={generateQuiz}
-                disabled={generating}
-              >
+              <button className={`${btnBase} ${btnGreen}`} onClick={generateQuiz} disabled={generating}>
                 {generating ? "Generating…" : "Generate"}
               </button>
             </div>
@@ -1401,47 +1269,69 @@ return (
         </div>
       )}
 
-      {/* --- NEW: Bulk Delete modal (restored) --- */}
-{bulkConfirmOpen && (
-  <div
-    className="fixed inset-0 bg-black/60 grid place-items-center z-50"
-    aria-modal="true"
-    role="dialog"
-    onClick={() => !bulkDeleting && setBulkConfirmOpen(false)}
-  >
-    <div
-      className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
-      onClick={(e) => e.stopPropagation()}
-    >
-      <h2 className="text-xl font-bold mb-2">Delete selected quizzes?</h2>
-
-      <p className="text-gray-300 mb-4">
-        You have selected:
-        <span className="block mt-1 font-semibold break-words">
-          {selectedTitles.join(", ")}
-        </span>
-      </p>
-
-      <div className="flex flex-col sm:flex-row justify-end gap-2">
-        <button
-          className={`${btnBase} ${btnGray}`}
-          onClick={() => setBulkConfirmOpen(false)}
-          disabled={bulkDeleting}
+      {/* --- New Group modal --- */}
+      {gNewOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 grid place-items-center z-50"
+          aria-modal="true"
+          role="dialog"
+          onClick={() => !gCreatingGroup && setGNewOpen(false)}
         >
-          Cancel
-        </button>
-        <button
-          className={`${btnBase} ${btnRedSoft}`}
-          onClick={doBulkDelete}
-          disabled={bulkDeleting}
+          <div
+            className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-xl font-bold mb-4">Create new group</h2>
+            <input
+              className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700"
+              placeholder="Group name"
+              value={gNewName}
+              onChange={(e) => setGNewName(e.target.value)}
+            />
+            <div className="flex justify-end gap-2 mt-6">
+              <button className={`${btnBase} ${btnGray}`} onClick={() => setGNewOpen(false)} disabled={gCreatingGroup}>
+                Cancel
+              </button>
+              <button className={`${btnBase} ${btnGreen}`} onClick={createGroupForModal} disabled={gCreatingGroup || !gNewName.trim()}>
+                {gCreatingGroup ? "Creating…" : "Create"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- Bulk Delete modal --- */}
+      {bulkConfirmOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 grid place-items-center z-50"
+          aria-modal="true"
+          role="dialog"
+          onClick={() => !bulkDeleting && setBulkConfirmOpen(false)}
         >
-          {bulkDeleting ? "Deleting…" : "Delete selected"}
-        </button>
-      </div>
-    </div>
-  </div>
-)}
-      {/* --- NEW: Move to Group modal (restored) --- */}
+          <div
+            className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-xl font-bold mb-2">Delete selected quizzes?</h2>
+            <p className="text-gray-300 mb-4">
+              You have selected:
+              <span className="block mt-1 font-semibold break-words">
+                {selectedTitles.join(", ")}
+              </span>
+            </p>
+            <div className="flex flex-col sm:flex-row justify-end gap-2">
+              <button className={`${btnBase} ${btnGray}`} onClick={() => setBulkConfirmOpen(false)} disabled={bulkDeleting}>
+                Cancel
+              </button>
+              <button className={`${btnBase} ${btnRedSoft}`} onClick={doBulkDelete} disabled={bulkDeleting}>
+                {bulkDeleting ? "Deleting…" : "Delete selected"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- Move to Group modal --- */}
       {moveOpen && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-50"
@@ -1471,9 +1361,7 @@ return (
                 >
                   <option value="">No group</option>
                   {groups.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.name}
-                    </option>
+                    <option key={g.id} value={g.id}>{g.name}</option>
                   ))}
                 </select>
               </div>
@@ -1495,11 +1383,7 @@ return (
             </div>
 
             <div className="flex flex-col sm:flex-row justify-end gap-2 mt-6">
-              <button
-                className={`${btnBase} ${btnGray}`}
-                onClick={() => setMoveOpen(false)}
-                disabled={moving}
-              >
+              <button className={`${btnBase} ${btnGray}`} onClick={() => setMoveOpen(false)} disabled={moving}>
                 Cancel
               </button>
               <button
@@ -1515,7 +1399,7 @@ return (
         </div>
       )}
 
-      {/* Delete current group modal */}
+      {/* --- Delete current group modal --- */}
       {deleteGroupOpen && currentGroup && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-50"
@@ -1529,24 +1413,13 @@ return (
           >
             <h2 className="text-xl font-bold mb-2">Delete group?</h2>
             <p className="text-gray-300 mb-6">
-              This deletes the group <span className="font-semibold">
-                {currentGroup.name}
-              </span>{" "}
-              and all quizzes inside it.
+              This deletes the group <span className="font-semibold">{currentGroup.name}</span> and all quizzes inside it.
             </p>
             <div className="flex flex-col sm:flex-row justify-end gap-2">
-              <button
-                className={`${btnBase} ${btnGray}`}
-                onClick={() => setDeleteGroupOpen(false)}
-                disabled={deletingGroup}
-              >
+              <button className={`${btnBase} ${btnGray}`} onClick={() => setDeleteGroupOpen(false)} disabled={deletingGroup}>
                 Cancel
               </button>
-              <button
-                className={`${btnBase} ${btnRed}`}
-                onClick={deleteCurrentGroupNow}
-                disabled={deletingGroup}
-              >
+              <button className={`${btnBase} ${btnRed}`} onClick={deleteCurrentGroupNow} disabled={deletingGroup}>
                 {deletingGroup ? "Deleting…" : "Delete group"}
               </button>
             </div>
@@ -1554,7 +1427,7 @@ return (
         </div>
       )}
 
-      {/* Edit group name modal */}
+      {/* --- Edit group name modal --- */}
       {editGroupOpen && currentGroup && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-50"
@@ -1574,18 +1447,10 @@ return (
               placeholder="Group name"
             />
             <div className="flex flex-col sm:flex-row justify-end gap-2 mt-6">
-              <button
-                className={`${btnBase} ${btnGray}`}
-                onClick={() => setEditGroupOpen(false)}
-                disabled={savingGroupName}
-              >
+              <button className={`${btnBase} ${btnGray}`} onClick={() => setEditGroupOpen(false)} disabled={savingGroupName}>
                 Cancel
               </button>
-              <button
-                className={`${btnBase} ${btnGreen}`}
-                onClick={saveGroupName}
-                disabled={savingGroupName || !editGroupName.trim()}
-              >
+              <button className={`${btnBase} ${btnGreen}`} onClick={saveGroupName} disabled={savingGroupName || !editGroupName.trim()}>
                 {savingGroupName ? "Saving…" : "Save"}
               </button>
             </div>
@@ -1593,7 +1458,7 @@ return (
         </div>
       )}
 
-      {/* Empty group cleanup modal */}
+      {/* --- Empty group cleanup modal --- */}
       {cleanupOpen && cleanupGroup && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-50"
@@ -1607,22 +1472,13 @@ return (
           >
             <h2 className="text-xl font-bold mb-2">Delete empty group?</h2>
             <p className="text-gray-300 mb-6">
-              The group <span className="font-semibold">{cleanupGroup.name}</span>{" "}
-              is now empty. Would you like to delete it?
+              The group <span className="font-semibold">{cleanupGroup.name}</span> is now empty. Would you like to delete it?
             </p>
             <div className="flex flex-col sm:flex-row justify-end gap-2">
-              <button
-                className={`${btnBase} ${btnGray}`}
-                onClick={keepEmptyGroupNow}
-                disabled={cleaning}
-              >
+              <button className={`${btnBase} ${btnGray}`} onClick={keepEmptyGroupNow} disabled={cleaning}>
                 Keep group
               </button>
-              <button
-                className={`${btnBase} ${btnRed}`}
-                onClick={deleteEmptyGroupNow}
-                disabled={cleaning}
-              >
+              <button className={`${btnBase} ${btnRed}`} onClick={deleteEmptyGroupNow} disabled={cleaning}>
                 {cleaning ? "Deleting…" : "Delete group"}
               </button>
             </div>
