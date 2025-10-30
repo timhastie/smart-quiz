@@ -750,7 +750,7 @@ setScoresByQuiz(map);
 
   // --- Carousel refs / helpers ---
   const railRef = useRef(null);
-  const CARD_W = 480; // wider cards for smoother page-width scroll steps
+  const CARD_W = 380; // wider cards for smoother page-width scroll steps
   function scrollLeft() {
     const rail = railRef.current;
     if (!rail) return;
@@ -911,101 +911,110 @@ setScoresByQuiz(map);
     const reviewDisabled = rvCount === 0;
 
     return (
-      <li
-        key={q.id}
-        className="snap-start shrink-0 w-[520px] bg-gray-800 rounded-3xl p-8 shadow-sm border border-gray-800
-                   min-h-[320px] flex flex-col justify-between"
-      >
-        {/* Top: title/meta */}
-        <div className="flex items-start gap-4">
-          <input
-            type="checkbox"
-            className="h-6 w-6 accent-emerald-500 mt-1"
-            checked={selectedIds.has(q.id)}
-            onChange={() => toggleSelected(q.id)}
-            aria-label={`Select ${q.title || "Untitled Quiz"}`}
-          />
-          <div className="min-w-0">
-            <div className="text-2xl font-semibold truncate">
-              {q.title || "Untitled Quiz"}
-            </div>
-            <div className="mt-1 text-sm text-gray-400">
-              {q.questions?.length ?? 0} questions
-            </div>
-            <div className="text-sm text-gray-400">
-  Last score:{" "}
-  {scoresByQuiz[q.id]?.last != null ? (
-    <span className={scoresByQuiz[q.id].last >= 90 ? "text-green-400 font-semibold" : ""}>
-      {scoresByQuiz[q.id].last}%
-    </span>
-  ) : "—"}
-</div>
-<div className="text-sm text-gray-400">
-  Revisit score:{" "}
-  {scoresByQuiz[q.id]?.review != null ? (
-    <span className={scoresByQuiz[q.id].review >= 90 ? "text-green-400 font-semibold" : ""}>
-      {scoresByQuiz[q.id].review}%
-    </span>
-  ) : "—"}
-</div>
-          </div>
+  <li
+  key={q.id}
+  className="snap-start shrink-0 w-[420px] bg-gray-800 rounded-3xl p-4 shadow-sm border border-gray-800
+             h-[220px] flex flex-col"
+>
+  {/* Header: fixed height (2-line title supported), meta pinned to bottom */}
+  <div className="flex items-start gap-4">
+    <input
+      type="checkbox"
+      className="h-6 w-6 accent-emerald-500 mt-1"
+      checked={selectedIds.has(q.id)}
+      onChange={() => toggleSelected(q.id)}
+      aria-label={`Select ${q.title || "Untitled Quiz"}`}
+    />
+    <div className="min-w-0 flex-1">
+      <div className="h-[136px] flex flex-col">
+        {/* Title (wrap to max 2 lines, no clipping) */}
+        <div
+          className="text-2xl font-semibold leading-tight"
+          style={{
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+          }}
+          title={q.title || "Untitled Quiz"}
+        >
+          {q.title || "Untitled Quiz"}
         </div>
 
-        {/* Bottom: actions pinned to bottom by flex layout */}
-<div className="mt-6 grid grid-cols-4 gap-3">
-  {/* Play */}
-  <Link
-    to={`/play/${q.id}`}
-    className={`${btnBase} ${btnGray} h-16 p-0 flex items-center justify-center`}
-    aria-label="Play quiz"
-    title="Play"
-  >
-    <Play className="h-6 w-6" />
-  </Link>
+        {/* Meta pinned to bottom, slightly more space above buttons */}
+        <div className="mt-auto pt-1 mb-4">
+          <div className="text-sm text-gray-400">
+            {q.questions?.length ?? 0} questions
+          </div>
+          <div className="text-sm text-gray-400">
+            Last score:{" "}
+            {scoresByQuiz[q.id]?.last != null ? (
+              <span className={scoresByQuiz[q.id].last >= 90 ? "text-green-400 font-semibold" : ""}>
+                {scoresByQuiz[q.id].last}%
+              </span>
+            ) : "—"}
+          </div>
+          <div className="text-sm text-gray-400">
+            Revisit score:{" "}
+            {scoresByQuiz[q.id]?.review != null ? (
+              <span className={scoresByQuiz[q.id].review >= 90 ? "text-green-400 font-semibold" : ""}>
+                {scoresByQuiz[q.id].review}%
+              </span>
+            ) : "—"}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
-  {/* Revisit (formerly Play Review) */}
-  <Link
-    to={reviewDisabled ? "#" : `/play/${q.id}?mode=review`}
-    onClick={(e) => {
-      if (reviewDisabled) e.preventDefault();
-    }}
-    className={`${btnBase} ${btnGray} h-16 p-0 flex items-center justify-center ${
-      reviewDisabled ? "opacity-50 cursor-not-allowed" : ""
-    }`}
-    aria-label={reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"}
-    title={reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"}
-  >
-    <History className="h-6 w-6" />
-  </Link>
+  {/* Bottom actions */}
+  <div className="mt-auto grid grid-cols-4 gap-2">
+    <Link
+      to={`/play/${q.id}`}
+      className={`${btnBase} ${btnGray} h-14 p-0 flex items-center justify-center`}
+      aria-label="Play quiz"
+      title="Play"
+    >
+      <Play className="h-6 w-6" />
+    </Link>
 
-  {/* Edit */}
-  <Link
-    to={`/edit/${q.id}`}
-    className={`${btnBase} ${btnGray} h-16 p-0 flex items-center justify-center`}
-    aria-label="Edit quiz"
-    title="Edit"
-  >
-    <SquarePen className="h-6 w-6" />
-  </Link>
+    <Link
+      to={reviewDisabled ? "#" : `/play/${q.id}?mode=review`}
+      onClick={(e) => { if (reviewDisabled) e.preventDefault(); }}
+      className={`${btnBase} ${btnGray} h-14 p-0 flex items-center justify-center ${
+        reviewDisabled ? "opacity-50 cursor-not-allowed" : ""
+      }`}
+      aria-label={reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"}
+      title={reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"}
+    >
+      <History className="h-6 w-6" />
+    </Link>
 
-  {/* Delete */}
-  <button
-    onClick={() => {
-      setTarget({
-        id: q.id,
-        title: q.title || "Untitled Quiz",
-        group_id: q.group_id ?? null,
-      });
-      setConfirmOpen(true);
-    }}
-    className={`${btnBase} ${btnGray} h-16 p-0 flex items-center justify-center`}
-    aria-label="Delete quiz"
-    title="Delete"
-  >
-    <Trash2 className="h-6 w-6" />
-  </button>
-</div>
-      </li>
+    <Link
+      to={`/edit/${q.id}`}
+      className={`${btnBase} ${btnGray} h-14 p-0 flex items-center justify-center`}
+      aria-label="Edit quiz"
+      title="Edit"
+    >
+      <SquarePen className="h-6 w-6" />
+    </Link>
+
+    <button
+      onClick={() => {
+        setTarget({ id: q.id, title: q.title || "Untitled Quiz", group_id: q.group_id ?? null });
+        setConfirmOpen(true);
+      }}
+      className={`${btnBase} ${btnGray} h-14 p-0 flex items-center justify-center`}
+      aria-label="Delete quiz"
+      title="Delete"
+    >
+      <Trash2 className="h-6 w-6" />
+    </button>
+  </div>
+</li>
+
+
+
     );
   })}
 </ul>
