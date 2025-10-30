@@ -856,7 +856,7 @@ setScoresByQuiz(map);
     <div className="flex-none w-full sm:w-72 md:w-96">
       <input
         className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 placeholder:text-gray-400"
-        placeholder="Search quizzes… (e.g., ba)"
+        placeholder="Search quizzes…"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
