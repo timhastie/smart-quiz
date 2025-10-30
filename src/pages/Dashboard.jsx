@@ -114,6 +114,22 @@ export default function Dashboard() {
     }
   }
 
+async function continueWithGoogle() {
+  try {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        // send users back to your app root (no /auth/callback)
+        redirectTo: window.location.origin,
+      },
+    });
+    if (error) alert(error.message);
+  } catch (e) {
+    console.error(e);
+    alert("Google sign-in failed. Please try again.");
+  }
+}
+
   async function handleSignOut() {
     await signout();
     setAuthMessage(
@@ -1180,9 +1196,9 @@ export default function Dashboard() {
               onChange={(e) => setAuthPass(e.target.value)}
             />
 
-            <div className="flex flex-col sm:flex-row justify-end gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <button
-                className={`${btnBase} ${btnGray}`}
+                className={`${btnBase} ${btnGray} w-full`}
                 onClick={() => { if (!authBusy) { setAuthMessage(""); setAuthOpen(false); } }}
                 disabled={authBusy}
               >
@@ -1190,7 +1206,7 @@ export default function Dashboard() {
               </button>
 
               <button
-                className={`${btnBase} ${btnGreen}`}
+                className={`${btnBase} ${btnGreen} w-full`}
                 onClick={handleCreateAccount}
                 disabled={authBusy}
                 title="Upgrade this guest to an email/password account"
@@ -1199,17 +1215,37 @@ export default function Dashboard() {
               </button>
 
               <button
-                className={`${btnBase} ${btnGray}`}
+                className={`${btnBase} ${btnGray} w-full`}
                 onClick={async () => {
                   const ok = confirm("Signing in to an existing account will replace your guest session. Continue?");
                   if (ok) await signInExisting();
                 }}
                 disabled={authBusy}
-                title="Sign in to an existing account (replaces guest session)"
+                title="Sign in instead (replaces guest session)"
               >
                 Sign in instead
               </button>
             </div>
+
+{/* New line: icon-only Google sign-in */}
+<div className="mt-3 flex justify-center">
+  <button
+    type="button"
+    onClick={continueWithGoogle}
+    className="h-12 w-12 rounded-full bg-white border border-gray-300 shadow flex items-center justify-center hover:shadow-md active:scale-95 transition"
+    aria-label="Continue with Google"
+    title="Continue with Google"
+    disabled={authBusy}
+  >
+    {/* Google 'G' mark (official) */}
+    <svg width="24" height="24" viewBox="0 0 48 48" aria-hidden="true">
+      <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.6 32.4 29.2 35 24 35c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C33.8 5.1 29.2 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21c10.5 0 20-7.6 20-21 0-1.3-.1-2.7-.4-3.5z"/>
+      <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 16 19 13 24 13c3 0 5.8 1.1 7.9 3l5.7-5.7C33.8 5.1 29.2 3 24 3 16 3 8.9 7.6 6.3 14.7z"/>
+      <path fill="#4CAF50" d="M24 45c5.1 0 9.8-1.9 13.3-5.1l-6.1-5c-2 1.5-4.6 2.4-7.2 2.4-5.2 0-9.6-3.5-11.2-8.3L6.2 33.9C8.8 41 16 45 24 45z"/>
+      <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-1.1 3.1-3.6 5.6-6.6 6.9l6.1 5C37.8 37.9 41 31.9 41 24c0-1.3-.1-2.7-.4-3.5z"/>
+    </svg>
+  </button>
+</div>
           </div>
         </div>
       )}
