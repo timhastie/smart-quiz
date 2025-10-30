@@ -219,22 +219,22 @@ export default function Dashboard() {
       return;
     }
     const { data: scores, error: sErr } = await supabase
-  .from("quiz_scores")
-  .select("quiz_id, last_score, last_review_score")
-  .in("quiz_id", ids)
-  .eq("user_id", user.id);
-if (sErr || !scores) {
-  setScoresByQuiz({});
-  return;
-}
-const map = {};
-for (const row of scores) {
-  map[row.quiz_id] = {
-    last: row.last_score ?? null,
-    review: row.last_review_score ?? null,
-  };
-}
-setScoresByQuiz(map);
+      .from("quiz_scores")
+      .select("quiz_id, last_score, last_review_score")
+      .in("quiz_id", ids)
+      .eq("user_id", user.id);
+    if (sErr || !scores) {
+      setScoresByQuiz({});
+      return;
+    }
+    const map = {};
+    for (const row of scores) {
+      map[row.quiz_id] = {
+        last: row.last_score ?? null,
+        review: row.last_review_score ?? null,
+      };
+    }
+    setScoresByQuiz(map);
   }
   useEffect(() => {
     if (ready && user) load();
@@ -723,16 +723,15 @@ setScoresByQuiz(map);
 
   // ------- sorting + searching -------
   const sortedQuizzes = useMemo(() => {
-  return [...quizzes].sort((a, b) => {
-    const av = scoresByQuiz[a.id]?.last;
-    const bv = scoresByQuiz[b.id]?.last;
-    const aVal = av == null ? (scoreSort === "asc" ? Infinity : -Infinity) : av;
-    const bVal = bv == null ? (scoreSort === "asc" ? Infinity : -Infinity) : bv;
-    return scoreSort === "asc" ? aVal - bVal : bVal - aVal;
-  });
-}, [quizzes, scoresByQuiz]);
+    return [...quizzes].sort((a, b) => {
+      const av = scoresByQuiz[a.id]?.last;
+      const bv = scoresByQuiz[b.id]?.last;
+      const aVal = av == null ? (scoreSort === "asc" ? Infinity : -Infinity) : av;
+      const bVal = bv == null ? (scoreSort === "asc" ? Infinity : -Infinity) : bv;
+      return scoreSort === "asc" ? aVal - bVal : bVal - aVal;
+    });
+  }, [quizzes, scoresByQuiz]);
 
-  // NEW: client-side title filter (case-insensitive includes)
   const visibleQuizzes = useMemo(() => {
     const q = (query || "").toLowerCase();
     if (!q) return sortedQuizzes;
@@ -750,7 +749,7 @@ setScoresByQuiz(map);
 
   // --- Carousel refs / helpers ---
   const railRef = useRef(null);
-  const CARD_W = 380; // wider cards for smoother page-width scroll steps
+  const CARD_W = 380;
   function scrollLeft() {
     const rail = railRef.current;
     if (!rail) return;
@@ -766,10 +765,12 @@ setScoresByQuiz(map);
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       <header className="border-b border-gray-800 px-6 sm:px-8 lg:px-12 py-3 sm:py-4">
-        <div className="grid grid-cols-3 items-center">
-          <h1 className="text-xl font-bold justify-self-start">Your Quizzes</h1>
+        <div className="grid grid-cols-2 sm:grid-cols-3 items-center">
+          <h1 className="text-xl font-bold justify-self-start self-center order-2 sm:order-none mt-2 sm:mt-0">
 
-          <div className="flex items-center justify-center">
+  Your Quizzes
+</h1>
+         <div className="flex items-center justify-center col-span-2 sm:col-span-1 order-1 sm:order-none">
             <img
               src="/smartquizlogo.png"
               alt="Smart-Quiz logo"
@@ -778,7 +779,10 @@ setScoresByQuiz(map);
             />
           </div>
 
-          <div className="flex items-center gap-3 text-sm justify-self-end min-w-0">
+          <div className="flex items-center gap-3 text-sm justify-self-end self-center min-w-0 col-span-1 sm:col-span-1 order-2 sm:order-none mt-2 sm:mt-0">
+
+
+
             {!ready ? (
               <span className="text-gray-400">Loading…</span>
             ) : isAnon ? (
@@ -812,229 +816,285 @@ setScoresByQuiz(map);
         </div>
       </header>
 
-     <main className="max-w-6xl mx-auto p-6">
-  {/* ONE ROW: create buttons + filter + search (+ bulk actions on the far right) */}
-  <div className="mb-6 flex flex-wrap items-stretch gap-3">
-    <button
-      onClick={async () => {
-        if (filterGroupId && filterGroupId !== NO_GROUP) setGGroupId(filterGroupId);
-        else setGGroupId("");
-        const allowed = await ensureCanCreate();
-        if (!allowed) return;
-        setGenOpen(true);
-      }}
-      className={`whitespace-normal text-left leading-tight ${btnBase} ${btnGreen} ${actionH}`}
-    >
-      + Generate Quiz with AI
-    </button>
+      <main className="max-w-6xl mx-auto p-6">
+        {/* ---- MOBILE actions: buttons on ONE line; filters/search below ---- */}
+        <div className="mb-6 sm:hidden">
+          <div className="flex items-stretch gap-2">
+            <button
+              onClick={async () => {
+                if (filterGroupId && filterGroupId !== NO_GROUP) setGGroupId(filterGroupId);
+                else setGGroupId("");
+                const allowed = await ensureCanCreate();
+                if (!allowed) return;
+                setGenOpen(true);
+              }}
+              className={`whitespace-nowrap ${btnBase} ${btnGreen} h-11 px-3 py-2 text-[13px]`}
+            >
+              + Generate Quiz with AI
+            </button>
 
-    <button
-      onClick={createQuiz}
-      className={`whitespace-normal text-left leading-tight ${btnBase} ${btnGray} ${actionH}`}
-      disabled={creating}
-    >
-      {creating ? "Creating…" : "New empty quiz"}
-    </button>
+            <button
+              onClick={createQuiz}
+              className={`whitespace-nowrap ${btnBase} ${btnGray} h-11 px-3 py-2 text-[13px]`}
+              disabled={creating}
+            >
+              {creating ? "Creating…" : "New empty quiz"}
+            </button>
+          </div>
 
-    {/* Filter (same line) */}
-    <div className="flex items-center gap-2">
-      <label className="text-sm text-gray-300 shrink-0">Filter by group:</label>
-      <select
-        className="w-48 shrink-0 p-2 rounded bg-gray-800 text-white border border-gray-700"
-        value={filterGroupId}
-        onChange={(e) => setFilterGroupId(e.target.value)}
-      >
-        <option value="">All</option>
-        <option value={NO_GROUP}>No group</option>
-        {groups.map((g) => (
-          <option key={g.id} value={g.id}>{g.name}</option>
-        ))}
-      </select>
-    </div>
+          <div className="mt-3 flex flex-wrap items-stretch gap-3">
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-gray-300 shrink-0">Filter by group:</label>
+              <select
+                className="w-40 shrink-0 p-2 rounded bg-gray-800 text-white border border-gray-700"
+                value={filterGroupId}
+                onChange={(e) => setFilterGroupId(e.target.value)}
+              >
+                <option value="">All</option>
+                <option value={NO_GROUP}>No group</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>{g.name}</option>
+                ))}
+              </select>
+            </div>
 
-    {/* Search (same line, narrower) */}
-    <div className="flex-none w-full sm:w-72 md:w-96">
-      <input
-        className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 placeholder:text-gray-400"
-        placeholder="Search quizzes…"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-      />
-    </div>
+            <div className="flex-none w-full">
+              <input
+                className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 placeholder:text-gray-400"
+                placeholder="Search quizzes…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
 
-    {/* Bulk actions on far right of the same row */}
-    {hasSelected && (
-      <div className="ml-auto flex items-center gap-2">
-        <button onClick={() => setMoveOpen(true)} className={`${btnBase} ${btnGray}`}>
-          Move to group
-        </button>
-        <button onClick={() => setBulkConfirmOpen(true)} className={`${btnBase} ${btnRed}`}>
-          Delete selected
-        </button>
-      </div>
-    )}
-  </div>
+            {hasSelected && (
+              <div className="ml-auto flex items-center gap-2">
+                <button onClick={() => setMoveOpen(true)} className={`${btnBase} ${btnGray}`}>
+                  Move to group
+                </button>
+                <button onClick={() => setBulkConfirmOpen(true)} className={`${btnBase} ${btnRed}`}>
+                  Delete selected
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
 
-  {/* HORIZONTAL CAROUSEL — bigger & taller cards */}
-  {visibleQuizzes.length === 0 ? (
-    <div className="text-gray-400">No quizzes yet. Create one or generate with AI.</div>
-  ) : (
-    <div className="relative">
-      {/* Scroll buttons */}
-      <button
-        type="button"
-        onClick={scrollLeft}
-        className="hidden sm:block absolute -left-4 top-1/2 -translate-y-1/2 z-10 bg-gray-800 hover:bg-gray-700 rounded-full p-3 shadow"
-        aria-label="Scroll left"
-        title="Scroll left"
-      >
-        ‹
-      </button>
-      <button
-        type="button"
-        onClick={scrollRight}
-        className="hidden sm:block absolute -right-4 top-1/2 -translate-y-1/2 z-10 bg-gray-800 hover:bg-gray-700 rounded-full p-3 shadow"
-        aria-label="Scroll right"
-        title="Scroll right"
-      >
-        ›
-      </button>
+        {/* ---- DESKTOP/TABLET actions (unchanged layout) ---- */}
+        <div className="mb-6 hidden sm:flex flex-wrap items-stretch gap-3">
+          <button
+            onClick={async () => {
+              if (filterGroupId && filterGroupId !== NO_GROUP) setGGroupId(filterGroupId);
+              else setGGroupId("");
+              const allowed = await ensureCanCreate();
+              if (!allowed) return;
+              setGenOpen(true);
+            }}
+            className={`whitespace-normal text-left leading-tight ${btnBase} ${btnGreen} ${actionH}`}
+          >
+            + Generate Quiz with AI
+          </button>
 
-      <div
-        ref={railRef}
-        className="overflow-x-auto no-scrollbar snap-x snap-mandatory scroll-px-4"
-      >
-        <ul className="flex gap-6 px-1 py-2 min-w-full">
-  {visibleQuizzes.map((q) => {
-    const score = scoresByQuiz[q.id];
-    const rvCount = q.review_questions?.length ?? 0;
-    const reviewDisabled = rvCount === 0;
+          <button
+            onClick={createQuiz}
+            className={`whitespace-normal text-left leading-tight ${btnBase} ${btnGray} ${actionH}`}
+            disabled={creating}
+          >
+            {creating ? "Creating…" : "New empty quiz"}
+          </button>
 
-    return (
-  <li
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-gray-300 shrink-0">Filter by group:</label>
+            <select
+              className="w-48 shrink-0 p-2 rounded bg-gray-800 text-white border border-gray-700"
+              value={filterGroupId}
+              onChange={(e) => setFilterGroupId(e.target.value)}
+            >
+              <option value="">All</option>
+              <option value={NO_GROUP}>No group</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>{g.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex-none w-full sm:w-72 md:w-96">
+            <input
+              className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 placeholder:text-gray-400"
+              placeholder="Search quizzes…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+
+          {hasSelected && (
+            <div className="ml-auto flex items-center gap-2">
+              <button onClick={() => setMoveOpen(true)} className={`${btnBase} ${btnGray}`}>
+                Move to group
+              </button>
+              <button onClick={() => setBulkConfirmOpen(true)} className={`${btnBase} ${btnRed}`}>
+                Delete selected
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* HORIZONTAL CAROUSEL */}
+        {visibleQuizzes.length === 0 ? (
+          <div className="text-gray-400">No quizzes yet. Create one or generate with AI.</div>
+        ) : (
+          <div className="relative">
+            <button
+              type="button"
+              onClick={scrollLeft}
+              className="hidden sm:block absolute -left-4 top-1/2 -translate-y-1/2 z-10 bg-gray-800 hover:bg-gray-700 rounded-full p-3 shadow"
+              aria-label="Scroll left"
+              title="Scroll left"
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              onClick={scrollRight}
+              className="hidden sm:block absolute -right-4 top-1/2 -translate-y-1/2 z-10 bg-gray-800 hover:bg-gray-700 rounded-full p-3 shadow"
+              aria-label="Scroll right"
+              title="Scroll right"
+            >
+              ›
+            </button>
+
+            <div
+              ref={railRef}
+              className="overflow-x-auto no-scrollbar snap-x snap-mandatory scroll-px-4"
+            >
+              <ul className="flex gap-6 px-1 py-2 min-w-full">
+                {visibleQuizzes.map((q) => {
+                  const score = scoresByQuiz[q.id];
+                  const rvCount = q.review_questions?.length ?? 0;
+                  const reviewDisabled = rvCount === 0;
+
+                  return (
+                    <li
   key={q.id}
-  className="snap-start shrink-0 w-[420px] bg-gray-800 rounded-3xl p-4 shadow-sm border border-gray-800
-             h-[220px] flex flex-col"
+  className="snap-start shrink-0 w-[calc(100vw-3rem)] sm:w-[420px] max-w-[460px]
+             bg-gray-800 rounded-3xl p-4 sm:p-4 shadow-sm border border-gray-800
+             h-auto sm:h-[220px] flex flex-col"
 >
-  {/* Header: fixed height (2-line title supported), meta pinned to bottom */}
-  <div className="flex items-start gap-4">
-    <input
-      type="checkbox"
-      className="h-6 w-6 accent-emerald-500 mt-1"
-      checked={selectedIds.has(q.id)}
-      onChange={() => toggleSelected(q.id)}
-      aria-label={`Select ${q.title || "Untitled Quiz"}`}
-    />
-    <div className="min-w-0 flex-1">
-      <div className="h-[136px] flex flex-col">
-        {/* Title (wrap to max 2 lines, no clipping) */}
-        <div
-          className="text-2xl font-semibold leading-tight"
-          style={{
-            display: "-webkit-box",
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical",
-            overflow: "hidden",
-          }}
-          title={q.title || "Untitled Quiz"}
-        >
-          {q.title || "Untitled Quiz"}
-        </div>
+                      {/* Header area with fixed height so buttons align */}
+                      <div className="flex items-start gap-4">
+                        <input
+                          type="checkbox"
+                          className="h-6 w-6 accent-emerald-500 mt-1"
+                          checked={selectedIds.has(q.id)}
+                          onChange={() => toggleSelected(q.id)}
+                          aria-label={`Select ${q.title || "Untitled Quiz"}`}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="h-auto sm:h-[136px] flex flex-col">
+                            {/* Title (up to 2 lines, no clipping) */}
+                            <div
+                              className="text-xl sm:text-2xl font-semibold leading-tight"
+                              style={{
+                                display: "-webkit-box",
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: "vertical",
+                                overflow: "hidden",
+                              }}
+                              title={q.title || "Untitled Quiz"}
+                            >
+                              {q.title || "Untitled Quiz"}
+                            </div>
 
-        {/* Meta pinned to bottom, slightly more space above buttons */}
-        <div className="mt-auto pt-1 mb-4">
-          <div className="text-sm text-gray-400">
-            {q.questions?.length ?? 0} questions
+                            {/* Meta sits just above buttons */}
+                            <div className="mt-auto pt-1 mb-3 sm:mb-4">
+                              <div className="text-sm text-gray-400">
+                                {q.questions?.length ?? 0} questions
+                              </div>
+                              <div className="text-sm text-gray-400">
+                                Last score:{" "}
+                                {scoresByQuiz[q.id]?.last != null ? (
+                                  <span className={scoresByQuiz[q.id].last >= 90 ? "text-green-400 font-semibold" : ""}>
+                                    {scoresByQuiz[q.id].last}%
+                                  </span>
+                                ) : "—"}
+                              </div>
+                              <div className="text-sm text-gray-400">
+                                Revisit score:{" "}
+                                {scoresByQuiz[q.id]?.review != null ? (
+                                  <span className={scoresByQuiz[q.id].review >= 90 ? "text-green-400 font-semibold" : ""}>
+                                    {scoresByQuiz[q.id].review}%
+                                  </span>
+                                ) : "—"}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Bottom actions */}
+                      <div className="mt-auto grid grid-cols-4 gap-2">
+                        <Link
+                          to={`/play/${q.id}`}
+                          className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
+                          aria-label="Play quiz"
+                          title="Play"
+                        >
+                          <Play className="h-6 w-6" />
+                        </Link>
+
+                        <Link
+                          to={reviewDisabled ? "#" : `/play/${q.id}?mode=review`}
+                          onClick={(e) => { if (reviewDisabled) e.preventDefault(); }}
+                          className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center ${
+                            reviewDisabled ? "opacity-50 cursor-not-allowed" : ""
+                          }`}
+                          aria-label={reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"}
+                          title={reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"}
+                        >
+                          <History className="h-6 w-6" />
+                        </Link>
+
+                        <Link
+                          to={`/edit/${q.id}`}
+                          className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
+                          aria-label="Edit quiz"
+                          title="Edit"
+                        >
+                          <SquarePen className="h-6 w-6" />
+                        </Link>
+
+                        <button
+                          onClick={() => {
+                            setTarget({ id: q.id, title: q.title || "Untitled Quiz", group_id: q.group_id ?? null });
+                            setConfirmOpen(true);
+                          }}
+                          className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
+                          aria-label="Delete quiz"
+                          title="Delete"
+                        >
+                          <Trash2 className="h-6 w-6" />
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
           </div>
-          <div className="text-sm text-gray-400">
-            Last score:{" "}
-            {scoresByQuiz[q.id]?.last != null ? (
-              <span className={scoresByQuiz[q.id].last >= 90 ? "text-green-400 font-semibold" : ""}>
-                {scoresByQuiz[q.id].last}%
-              </span>
-            ) : "—"}
+        )}
+
+        {/* Group actions */}
+        {filterGroupId && filterGroupId !== NO_GROUP && currentGroup && (
+          <div className="mt-6 flex items-center gap-3">
+            <button onClick={openEditGroup} className={`${btnBase} ${btnGray}`}>
+              Edit Group Name
+            </button>
+            <button onClick={() => setDeleteGroupOpen(true)} className={`${btnBase} ${btnRed}`}>
+              Delete “{currentGroup.name}” group
+            </button>
           </div>
-          <div className="text-sm text-gray-400">
-            Revisit score:{" "}
-            {scoresByQuiz[q.id]?.review != null ? (
-              <span className={scoresByQuiz[q.id].review >= 90 ? "text-green-400 font-semibold" : ""}>
-                {scoresByQuiz[q.id].review}%
-              </span>
-            ) : "—"}
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  {/* Bottom actions */}
-  <div className="mt-auto grid grid-cols-4 gap-2">
-    <Link
-      to={`/play/${q.id}`}
-      className={`${btnBase} ${btnGray} h-14 p-0 flex items-center justify-center`}
-      aria-label="Play quiz"
-      title="Play"
-    >
-      <Play className="h-6 w-6" />
-    </Link>
-
-    <Link
-      to={reviewDisabled ? "#" : `/play/${q.id}?mode=review`}
-      onClick={(e) => { if (reviewDisabled) e.preventDefault(); }}
-      className={`${btnBase} ${btnGray} h-14 p-0 flex items-center justify-center ${
-        reviewDisabled ? "opacity-50 cursor-not-allowed" : ""
-      }`}
-      aria-label={reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"}
-      title={reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"}
-    >
-      <History className="h-6 w-6" />
-    </Link>
-
-    <Link
-      to={`/edit/${q.id}`}
-      className={`${btnBase} ${btnGray} h-14 p-0 flex items-center justify-center`}
-      aria-label="Edit quiz"
-      title="Edit"
-    >
-      <SquarePen className="h-6 w-6" />
-    </Link>
-
-    <button
-      onClick={() => {
-        setTarget({ id: q.id, title: q.title || "Untitled Quiz", group_id: q.group_id ?? null });
-        setConfirmOpen(true);
-      }}
-      className={`${btnBase} ${btnGray} h-14 p-0 flex items-center justify-center`}
-      aria-label="Delete quiz"
-      title="Delete"
-    >
-      <Trash2 className="h-6 w-6" />
-    </button>
-  </div>
-</li>
-
-
-
-    );
-  })}
-</ul>
-      </div>
-    </div>
-  )}
-
-  {/* Group actions */}
-  {filterGroupId && filterGroupId !== NO_GROUP && currentGroup && (
-    <div className="mt-6 flex items-center gap-3">
-      <button onClick={openEditGroup} className={`${btnBase} ${btnGray}`}>
-        Edit Group Name
-      </button>
-      <button onClick={() => setDeleteGroupOpen(true)} className={`${btnBase} ${btnRed}`}>
-        Delete “{currentGroup.name}” group
-      </button>
-    </div>
-  )}
-</main>
-
+        )}
+      </main>
 
       {/* --- single delete --- */}
       {confirmOpen && (

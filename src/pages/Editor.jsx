@@ -666,11 +666,12 @@ export default function Editor() {
     <div className="min-h-screen bg-gray-900 text-white">
       {/* Header */}
      <header className="border-b border-gray-800 px-6 sm:px-8 lg:px-12 py-3 sm:py-4">
-  <div className="grid grid-cols-3 items-center">
+  {/* --- Desktop / tablet (unchanged) --- */}
+  <div className="hidden sm:grid sm:grid-cols-3 sm:items-center">
     {/* Left: page title */}
     <h1 className="text-xl font-bold justify-self-start">Edit Quiz</h1>
 
-    {/* Center: logo (same sizing as Dashboard/Play) */}
+    {/* Center: logo */}
     <div className="flex items-center justify-center">
       <img
         src="/smartquizlogo.png"
@@ -682,12 +683,29 @@ export default function Editor() {
 
     {/* Right: actions */}
     <div className="flex items-center gap-2 justify-self-end">
-      <Link to="/" className={`${btnBase} ${btnGray}`}>
-        Back
-      </Link>
-      <button onClick={save} className={`${btnBase} ${btnGreen}`}>
-        Save
-      </button>
+      <Link to="/" className={`${btnBase} ${btnGray}`}>Back</Link>
+      <button onClick={save} className={`${btnBase} ${btnGreen}`}>Save</button>
+    </div>
+  </div>
+
+  {/* --- Mobile only --- */}
+  <div className="sm:hidden">
+    {/* Row 1: centered logo with a bit of extra bottom space */}
+    <div className="flex items-center justify-center mb-3">
+      <img
+        src="/smartquizlogo.png"
+        alt="Smart-Quiz logo"
+        className="h-12 w-auto my-1 object-contain select-none pointer-events-none"
+        draggable="false"
+      />
+    </div>
+    {/* Row 2: title left, actions right */}
+    <div className="flex items-center justify-between">
+      <h1 className="text-xl font-bold">Edit Quiz</h1>
+      <div className="flex items-center gap-2">
+        <Link to="/" className={`${btnBase} ${btnGray}`}>Back</Link>
+        <button onClick={save} className={`${btnBase} ${btnGreen}`}>Save</button>
+      </div>
     </div>
   </div>
 </header>

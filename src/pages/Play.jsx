@@ -569,27 +569,50 @@ saveLatestScore(pct, { review: isReviewMode });
       tabIndex={0}
     >
       <header className="border-b border-gray-800 px-6 sm:px-8 lg:px-12 py-3 sm:py-4">
-        <div className="grid grid-cols-3 items-center">
-          <h1 className="text-lg sm:text-xl font-bold truncate pr-3">
-            {(quiz.title || "Quiz")}{isReviewMode ? " — Review" : ""}
-          </h1>
+  {/* --- Desktop / tablet (unchanged) --- */}
+  <div className="hidden sm:grid sm:grid-cols-3 sm:items-center">
+    <h1 className="text-lg sm:text-xl font-bold truncate pr-3">
+      {(quiz.title || "Quiz")}{isReviewMode ? " — Review" : ""}
+    </h1>
 
-          <div className="flex items-center justify-center">
-            <img
-              src="/smartquizlogo.png"
-              alt="Smart-Quiz logo"
-              className="h-12 sm:h-10 md:h-16 w-auto my-2 sm:my-3 object-contain select-none pointer-events-none"
-              draggable="false"
-            />
-          </div>
+    <div className="flex items-center justify-center">
+      <img
+        src="/smartquizlogo.png"
+        alt="Smart-Quiz logo"
+        className="h-12 sm:h-10 md:h-16 w-auto my-2 sm:my-3 object-contain select-none pointer-events-none"
+        draggable="false"
+      />
+    </div>
 
-          <div className="justify-self-end">
-            <Link to="/" className={`${btnBase} ${btnGray}`}>
-              Back
-            </Link>
-          </div>
-        </div>
-      </header>
+    <div className="justify-self-end">
+      <Link to="/" className={`${btnBase} ${btnGray}`}>
+        Back
+      </Link>
+    </div>
+  </div>
+
+  {/* --- Mobile only --- */}
+  <div className="sm:hidden">
+    {/* Row 1: centered logo with a bit of extra bottom space (same as Editor) */}
+    <div className="flex items-center justify-center mb-3">
+      <img
+        src="/smartquizlogo.png"
+        alt="Smart-Quiz logo"
+        className="h-12 w-auto my-1 object-contain select-none pointer-events-none"
+        draggable="false"
+      />
+    </div>
+    {/* Row 2: title left, Back right */}
+    <div className="flex items-center justify-between">
+      <h1 className="text-lg font-bold truncate pr-3">
+        {(quiz.title || "Quiz")}{isReviewMode ? " — Review" : ""}
+      </h1>
+      <Link to="/" className={`${btnBase} ${btnGray}`}>
+        Back
+      </Link>
+    </div>
+  </div>
+</header>
 
       <main className="px-4 sm:px-6 py-6 text-base sm:text-2xl">
         {/* OUTER: centers the whole UI */}
@@ -600,36 +623,154 @@ saveLatestScore(pct, { review: isReviewMode });
               <div className="mx-auto w-full max-w-[740px]">
                 {/* Question line — left-aligned to the stage’s left edge */}
                 <p className="mb-3 sm:mb-4 leading-snug">
-                  <span className="mr-2 inline-block w-16 sm:w-14 text-right">
-                    {index + 1}/{total}
-                  </span>
-                  {current.prompt}
-                </p>
+  <span className="mr-2">{index + 1}/{total}</span>
+  {current.prompt}
+</p>
+               {/* Strict mode + Actions (mobile and desktop layouts) */}
+<div className="mb-3">
+  {/* Row: Strict mode (all breakpoints) */}
+  <div className="flex items-center justify-between">
+    <label className="inline-flex items-center gap-2 text-sm sm:text-base">
+      <input
+        type="checkbox"
+        className="h-4 w-4"
+        checked={strict}
+        onChange={(e) => setStrict(e.target.checked)}
+      />
+      <span className="text-gray-300">Strict mode</span>
+    </label>
 
-                {/* Strict mode (left)  +  Display answer (right) — both snap to stage edges */}
-                <div className="mb-3 flex items-center justify-between">
-                  <label className="inline-flex items-center gap-2 text-sm sm:text-base">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4"
-                      checked={strict}
-                      onChange={(e) => setStrict(e.target.checked)}
-                    />
-                    <span className="text-gray-300">Strict mode</span>
-                  </label>
+    {/* Desktop actions row (unchanged, text centered via inline-flex) */}
+    <div className="hidden sm:flex items-center gap-2">
+      {isReviewMode ? (
+        <Link
+          to={`/play/${quizId}`}
+          className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray}`}
+          title="Go to the main quiz (not the review set)"
+        >
+          Play Main Quiz
+        </Link>
+      ) : (
+        <Link
+          to={`/play/${quizId}?mode=review`}
+          className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray}`}
+          title="Practice only the questions in your review group"
+        >
+          Practice Revisit
+        </Link>
+      )}
 
-                  <button
-                    type="button"
-                    className={`${btnBase} ${btnGray}`}
-                    onClick={() => {
-                      const ans = String(current.answer ?? "");
-                      handleChange(ans);
-                      areaRef.current?.focus();
-                    }}
-                  >
-                    Display answer
-                  </button>
-                </div>
+      {isReviewMode ? (
+        <button
+          type="button"
+          className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray}`}
+          onClick={removeCurrentFromReview}
+          disabled={!current || !alreadyInReview(current?.prompt)}
+          title={
+            !current
+              ? "No question"
+              : alreadyInReview(current?.prompt)
+              ? "Remove this from your review group"
+              : "Not in review group"
+          }
+        >
+          Remove from Review Group
+        </button>
+      ) : (
+        <button
+          type="button"
+          className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray}`}
+          onClick={addCurrentToReview}
+          disabled={!current || alreadyInReview(current?.prompt)}
+          title={
+            alreadyInReview(current?.prompt)
+              ? "Already added to review group"
+              : "Add this question to your review group"
+          }
+        >
+          Add To Review Group
+        </button>
+      )}
+
+      <button
+        type="button"
+        className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray}`}
+        onClick={() => {
+          const ans = String(current?.answer ?? "");
+          handleChange(ans);
+          areaRef.current?.focus();
+        }}
+      >
+        Display answer
+      </button>
+    </div>
+  </div>
+
+  {/* Mobile-only: equal-width buttons with extra height to prevent overflow */}
+<div className="mt-2 grid grid-cols-3 gap-2 sm:hidden">
+  {isReviewMode ? (
+    <Link
+      to={`/play/${quizId}`}
+      className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
+      title="Go to the main quiz (not the review set)"
+    >
+      Play Main Quiz
+    </Link>
+  ) : (
+    <Link
+      to={`/play/${quizId}?mode=review`}
+      className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
+      title="Practice only the questions in your review group"
+    >
+      Practice Revisit
+    </Link>
+  )}
+
+  {isReviewMode ? (
+    <button
+      type="button"
+      className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
+      onClick={removeCurrentFromReview}
+      disabled={!current || !alreadyInReview(current?.prompt)}
+      title={
+        !current
+          ? "No question"
+          : alreadyInReview(current?.prompt)
+          ? "Remove this from your review group"
+          : "Not in review group"
+      }
+    >
+      Remove from Review Group
+    </button>
+  ) : (
+    <button
+      type="button"
+      className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
+      onClick={addCurrentToReview}
+      disabled={!current || !alreadyInReview(current?.prompt)}
+      title={
+        alreadyInReview(current?.prompt)
+          ? "Already added to review group"
+          : "Add this question to your review group"
+      }
+    >
+      Add To Review Group
+    </button>
+  )}
+
+  <button
+    type="button"
+    className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
+    onClick={() => {
+      const ans = String(current?.answer ?? "");
+      handleChange(ans);
+      areaRef.current?.focus();
+    }}
+  >
+    Display answer
+  </button>
+</div>
+</div>
 
                 {/* TEXTAREA FRAME — Enter button is absolutely positioned so it doesn't shift layout */}
                 <div className="relative">
