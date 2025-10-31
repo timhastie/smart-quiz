@@ -14,7 +14,7 @@ const NO_GROUP = "__none__";
 export default function Dashboard() {
   const { user, ready, signout, signupOrLink, signin } = useAuth();
 
-  // --- UI helpers (unchanged palette) ---
+  // --- UI helpers (palette unchanged) ---
   const pressAnim = "transition-transform duration-100 active:scale-95";
   const btnBase =
     "px-3 py-2 rounded disabled:opacity-60 disabled:cursor-not-allowed";
@@ -114,21 +114,18 @@ export default function Dashboard() {
     }
   }
 
-async function continueWithGoogle() {
-  try {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        // send users back to your app root (no /auth/callback)
-        redirectTo: window.location.origin,
-      },
-    });
-    if (error) alert(error.message);
-  } catch (e) {
-    console.error(e);
-    alert("Google sign-in failed. Please try again.");
+  async function continueWithGoogle() {
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: window.location.origin },
+      });
+      if (error) alert(error.message);
+    } catch (e) {
+      console.error(e);
+      alert("Google sign-in failed. Please try again.");
+    }
   }
-}
 
   async function handleSignOut() {
     await signout();
@@ -139,7 +136,11 @@ async function continueWithGoogle() {
   }
 
   // guest trial
-  const [trial, setTrial] = useState({ isAnon: false, remaining: Infinity, loading: true });
+  const [trial, setTrial] = useState({
+    isAnon: false,
+    remaining: Infinity,
+    loading: true,
+  });
   function openSignupModal(msg) {
     setAuthMessage(
       msg || "Free trial limit reached. Create an account to make more quizzes."
@@ -268,7 +269,9 @@ async function continueWithGoogle() {
       if (!alive) return;
       setGroups(data ?? []);
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [user?.id]);
 
   useEffect(() => {
@@ -282,7 +285,11 @@ async function continueWithGoogle() {
         .from("quizzes")
         .select("id", { count: "exact", head: true })
         .eq("user_id", user.id);
-      setTrial({ isAnon: true, remaining: Math.max(0, 2 - (count ?? 0)), loading: false });
+      setTrial({
+        isAnon: true,
+        remaining: Math.max(0, 2 - (count ?? 0)),
+        loading: false,
+      });
     })();
   }, [isAnon, user?.id, quizzes.length]);
 
@@ -295,7 +302,9 @@ async function continueWithGoogle() {
       return next;
     });
   }
-  function clearSelection() { setSelectedIds(new Set()); }
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
 
   function enqueueEmptyGroups(ids) {
     if (!ids?.length) return;
@@ -389,7 +398,9 @@ async function continueWithGoogle() {
         return;
       }
       nav(`/edit/${data.id}`);
-    } finally { setCreating(false); }
+    } finally {
+      setCreating(false);
+    }
   }
 
   async function handleDelete() {
@@ -427,7 +438,10 @@ async function continueWithGoogle() {
     ) {
       return await file.text();
     }
-    if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+    if (
+      file.type === "application/pdf" ||
+      file.name.toLowerCase().endsWith(".pdf")
+    ) {
       const buf = await file.arrayBuffer();
       const pdf = await getDocument({ data: buf }).promise;
       let out = "";
@@ -453,7 +467,9 @@ async function continueWithGoogle() {
       .select("id", { count: "exact", head: true })
       .eq("user_id", ures.user.id);
     if ((count ?? 0) >= 2) {
-      openSignupModal("Free trial limit reached. Create an account to make more quizzes.");
+      openSignupModal(
+        "Free trial limit reached. Create an account to make more quizzes."
+      );
       return false;
     }
     return true;
@@ -473,14 +489,16 @@ async function continueWithGoogle() {
       const targetGroupIdForNoRepeat =
         (gGroupId && gGroupId !== "") ||
         (filterGroupId && filterGroupId !== NO_GROUP)
-          ? (gGroupId || (filterGroupId !== NO_GROUP ? filterGroupId : ""))
+          ? gGroupId || (filterGroupId !== NO_GROUP ? filterGroupId : "")
           : "";
 
       // Optional RAG
       let file_id = null;
       if (gFile) {
         let rawDoc = "";
-        try { rawDoc = await extractTextFromFile(gFile); } catch (e) {
+        try {
+          rawDoc = await extractTextFromFile(gFile);
+        } catch (e) {
           alert(`Couldn't read file "${gFile.name}".\n\n${e}`);
           setGenerating(false);
           return;
@@ -506,7 +524,9 @@ async function continueWithGoogle() {
           return;
         }
         let idxOut = {};
-        try { idxOut = idxText ? JSON.parse(idxText) : {}; } catch {}
+        try {
+          idxOut = idxText ? JSON.parse(idxText) : {};
+        } catch {}
         file_id = idxOut?.file_id ?? null;
         if (!file_id) {
           alert("Indexing returned no file_id.");
@@ -567,11 +587,19 @@ async function continueWithGoogle() {
       );
 
       let raw = "";
-      try { raw = await res.text(); } catch {}
+      try {
+        raw = await res.text();
+      } catch {}
 
       if (!res.ok) {
-        if (res.status === 403) openSignupModal("Free trial limit reached. Create an account to make more quizzes.");
-        else alert(`Failed to generate quiz (${res.status}):\n${raw || "Unknown error"}`);
+        if (res.status === 403)
+          openSignupModal(
+            "Free trial limit reached. Create an account to make more quizzes."
+          );
+        else
+          alert(
+            `Failed to generate quiz (${res.status}):\n${raw || "Unknown error"}`
+          );
         setGenerating(false);
         return;
       }
@@ -604,7 +632,9 @@ async function continueWithGoogle() {
       } else {
         alert("Failed to create group. Please try again.");
       }
-    } finally { setGCreatingGroup(false); }
+    } finally {
+      setGCreatingGroup(false);
+    }
   }
 
   async function doBulkDelete() {
@@ -618,7 +648,9 @@ async function continueWithGoogle() {
         .in("id", ids)
         .eq("user_id", user.id);
       if (readErr) throw readErr;
-      const affectedGroupIds = Array.from(new Set((rows || []).map((r) => r.group_id).filter(Boolean)));
+      const affectedGroupIds = Array.from(
+        new Set((rows || []).map((r) => r.group_id).filter(Boolean))
+      );
 
       const { error } = await supabase
         .from("quizzes")
@@ -633,7 +665,9 @@ async function continueWithGoogle() {
       if (affectedGroupIds.length) enqueueEmptyGroups(affectedGroupIds);
     } catch {
       alert("Failed to delete selected quizzes. Please try again.");
-    } finally { setBulkDeleting(false); }
+    } finally {
+      setBulkDeleting(false);
+    }
   }
 
   async function doBulkMove() {
@@ -647,7 +681,9 @@ async function continueWithGoogle() {
         .in("id", ids)
         .eq("user_id", user.id);
       if (beforeErr) throw beforeErr;
-      const prevGroupIds = Array.from(new Set((beforeRows || []).map((r) => r.group_id).filter(Boolean)));
+      const prevGroupIds = Array.from(
+        new Set((beforeRows || []).map((r) => r.group_id).filter(Boolean))
+      );
 
       let targetGroupId = moveGroupId || "";
       if (moveNewName.trim()) {
@@ -663,7 +699,10 @@ async function continueWithGoogle() {
 
       const { error } = await supabase
         .from("quizzes")
-        .update({ group_id: targetGroupId || null, updated_at: new Date().toISOString() })
+        .update({
+          group_id: targetGroupId || null,
+          updated_at: new Date().toISOString(),
+        })
         .in("id", ids)
         .eq("user_id", user.id);
       if (error) throw error;
@@ -678,7 +717,9 @@ async function continueWithGoogle() {
       if (toCheck.length) enqueueEmptyGroups(toCheck);
     } catch {
       alert("Failed to move selected quizzes. Please try again.");
-    } finally { setMoving(false); }
+    } finally {
+      setMoving(false);
+    }
   }
 
   async function deleteCurrentGroupNow() {
@@ -727,14 +768,17 @@ async function continueWithGoogle() {
         .single();
       if (error) throw error;
       setGroups((gs) =>
-        gs.map((g) => (g.id === currentGroup.id ? { ...g, name: data.name } : g))
+        gs
+          .map((g) => (g.id === currentGroup.id ? { ...g, name: data.name } : g))
           .sort((a, b) => a.name.localeCompare(b.name))
       );
       setEditGroupOpen(false);
     } catch (e) {
       console.error(e);
       alert("Failed to rename group. Please try again.");
-    } finally { setSavingGroupName(false); }
+    } finally {
+      setSavingGroupName(false);
+    }
   }
 
   // ------- sorting + searching -------
@@ -751,7 +795,9 @@ async function continueWithGoogle() {
   const visibleQuizzes = useMemo(() => {
     const q = (query || "").toLowerCase();
     if (!q) return sortedQuizzes;
-    return sortedQuizzes.filter((x) => (x.title || "").toLowerCase().includes(q));
+    return sortedQuizzes.filter((x) =>
+      (x.title || "").toLowerCase().includes(q)
+    );
   }, [sortedQuizzes, query]);
 
   const selectedTitles = useMemo(() => {
@@ -759,13 +805,13 @@ async function continueWithGoogle() {
     const byId = new Map(quizzes.map((q) => [q.id, q]));
     return Array.from(selectedIds).map((id) => {
       const t = byId.get(id)?.title;
-      return (t && t.trim()) ? t : "Untitled Quiz";
+      return t && t.trim() ? t : "Untitled Quiz";
     });
   }, [selectedIds, quizzes]);
 
   // --- Carousel refs / helpers ---
   const railRef = useRef(null);
-  const CARD_W = 380;
+  const CARD_W = 520;
   function scrollLeft() {
     const rail = railRef.current;
     if (!rail) return;
@@ -774,7 +820,19 @@ async function continueWithGoogle() {
   function scrollRight() {
     const rail = railRef.current;
     if (!rail) return;
-    rail.scrollBy({ left: (rail.clientWidth || CARD_W), behavior: "smooth" });
+    rail.scrollBy({ left: rail.clientWidth || CARD_W, behavior: "smooth" });
+  }
+
+  // Helper: build questions preview text (now extra line between questions)
+  function buildPreview(quiz) {
+    const items = Array.isArray(quiz?.questions) ? quiz.questions : [];
+    const lines = [];
+    for (let i = 0; i < items.length; i++) {
+      const p = (items[i]?.prompt || "").toString().trim();
+      if (!p) continue;
+      lines.push(`${i + 1}. ${p}`);
+    }
+    return lines.join("\n\n"); // <— extra blank line
   }
 
   // ---------- UI ----------
@@ -783,10 +841,9 @@ async function continueWithGoogle() {
       <header className="border-b border-gray-800 px-6 sm:px-8 lg:px-12 py-3 sm:py-4">
         <div className="grid grid-cols-2 sm:grid-cols-3 items-center">
           <h1 className="text-xl font-bold justify-self-start self-center order-2 sm:order-none mt-2 sm:mt-0">
-
-  Your Quizzes
-</h1>
-         <div className="flex items-center justify-center col-span-2 sm:col-span-1 order-1 sm:order-none">
+            Your Quizzes
+          </h1>
+          <div className="flex items-center justify-center col-span-2 sm:col-span-1 order-1 sm:order-none">
             <img
               src="/smartquizlogo.png"
               alt="Smart-Quiz logo"
@@ -796,16 +853,16 @@ async function continueWithGoogle() {
           </div>
 
           <div className="flex items-center gap-3 text-sm justify-self-end self-center min-w-0 col-span-1 sm:col-span-1 order-2 sm:order-none mt-2 sm:mt-0">
-
-
-
             {!ready ? (
               <span className="text-gray-400">Loading…</span>
             ) : isAnon ? (
               <>
                 <span className="text-gray-300 hidden sm:inline">Guest</span>
                 <button
-                  onClick={() => { setAuthMessage(""); setAuthOpen(true); }}
+                  onClick={() => {
+                    setAuthMessage("");
+                    setAuthOpen(true);
+                  }}
                   className={`${btnBase} ${btnGreen}`}
                 >
                   Sign Up / Sign In
@@ -822,7 +879,10 @@ async function continueWithGoogle() {
               </>
             ) : (
               <button
-                onClick={() => { setAuthMessage(""); setAuthOpen(true); }}
+                onClick={() => {
+                  setAuthMessage("");
+                  setAuthOpen(true);
+                }}
                 className={`${btnBase} ${btnGreen}`}
               >
                 Sign Up / Sign In
@@ -833,71 +893,75 @@ async function continueWithGoogle() {
       </header>
 
       <main className="max-w-6xl mx-auto p-6">
-        {/* ---- MOBILE actions: buttons on ONE line; filters/search below ---- */}
+        {/* ---- MOBILE actions (unchanged) ---- */}
         <div className="mb-6 sm:hidden">
-          <div className="flex items-stretch gap-2">
-            <button
-              onClick={async () => {
-                if (filterGroupId && filterGroupId !== NO_GROUP) setGGroupId(filterGroupId);
-                else setGGroupId("");
-                const allowed = await ensureCanCreate();
-                if (!allowed) return;
-                setGenOpen(true);
-              }}
-              className={`whitespace-nowrap ${btnBase} ${btnGreen} h-11 px-3 py-2 text-[13px]`}
-            >
-              + Generate Quiz with AI
-            </button>
+  <div className="flex items-stretch gap-2">
+    {/* keep AI button natural width */}
+    <button
+      onClick={async () => {
+        if (filterGroupId && filterGroupId !== NO_GROUP) setGGroupId(filterGroupId);
+        else setGGroupId("");
+        const allowed = await ensureCanCreate();
+        if (!allowed) return;
+        setGenOpen(true);
+      }}
+      className={`flex-none whitespace-nowrap ${btnBase} ${btnGreen} h-11 px-3 py-2 text-[13px]`}
+    >
+      + Generate Quiz with AI
+    </button>
 
-            <button
-              onClick={createQuiz}
-              className={`whitespace-nowrap ${btnBase} ${btnGray} h-11 px-3 py-2 text-[13px]`}
-              disabled={creating}
-            >
-              {creating ? "Creating…" : "New empty quiz"}
-            </button>
-          </div>
+    {/* make “New empty quiz” fill the rest of the row */}
+    <button
+      onClick={createQuiz}
+      className={`flex-1 w-full whitespace-nowrap ${btnBase} ${btnGray} h-11 px-3 py-2 text-[13px]`}
+      disabled={creating}
+    >
+      {creating ? "Creating…" : "New empty quiz"}
+    </button>
+  </div>
 
-          <div className="mt-3 flex flex-wrap items-stretch gap-3">
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-300 shrink-0">Filter by group:</label>
-              <select
-                className="w-40 shrink-0 p-2 rounded bg-gray-800 text-white border border-gray-700"
-                value={filterGroupId}
-                onChange={(e) => setFilterGroupId(e.target.value)}
-              >
-                <option value="">All</option>
-                <option value={NO_GROUP}>No group</option>
-                {groups.map((g) => (
-                  <option key={g.id} value={g.id}>{g.name}</option>
-                ))}
-              </select>
-            </div>
+  <div className="mt-3 flex flex-wrap items-stretch gap-3">
+    <div className="flex-none w-full">
+      <input
+        className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 placeholder:text-gray-400"
+        placeholder="Search quizzes…"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+    </div>
 
-            <div className="flex-none w-full">
-              <input
-                className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 placeholder:text-gray-400"
-                placeholder="Search quizzes…"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-            </div>
+    <div className="flex items-center gap-2 w-full">
+      <label className="text-sm text-gray-300 shrink-0">Filter by group:</label>
+      <select
+        className="w-full p-2 rounded bg-gray-800 text-white border border-gray-700"
+        value={filterGroupId}
+        onChange={(e) => setFilterGroupId(e.target.value)}
+      >
+        <option value="">All</option>
+        <option value={NO_GROUP}>No group</option>
+        {groups.map((g) => (
+          <option key={g.id} value={g.id}>
+            {g.name}
+          </option>
+        ))}
+      </select>
+    </div>
 
-            {hasSelected && (
-              <div className="ml-auto flex items-center gap-2">
-                <button onClick={() => setMoveOpen(true)} className={`${btnBase} ${btnGray}`}>
-                  Move to group
-                </button>
-                <button onClick={() => setBulkConfirmOpen(true)} className={`${btnBase} ${btnRed}`}>
-                  Delete selected
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
+    {hasSelected && (
+      <div className="ml-auto flex items-center gap-2">
+        <button onClick={() => setMoveOpen(true)} className={`${btnBase} ${btnGray}`}>
+          Move to group
+        </button>
+        <button onClick={() => setBulkConfirmOpen(true)} className={`${btnBase} ${btnRed}`}>
+          Delete selected
+        </button>
+      </div>
+    )}
+  </div>
+</div>
 
-        {/* ---- DESKTOP/TABLET actions (unchanged layout) ---- */}
-        <div className="mb-6 hidden sm:flex flex-wrap items-stretch gap-3">
+        {/* ---- DESKTOP/TABLET actions ---- */}
+        <div className="mb-6 hidden sm:flex flex-wrap items-stretch gap-3 w-full">
           <button
             onClick={async () => {
               if (filterGroupId && filterGroupId !== NO_GROUP) setGGroupId(filterGroupId);
@@ -919,28 +983,37 @@ async function continueWithGoogle() {
             {creating ? "Creating…" : "New empty quiz"}
           </button>
 
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-300 shrink-0">Filter by group:</label>
-            <select
-              className="w-48 shrink-0 p-2 rounded bg-gray-800 text-white border border-gray-700"
-              value={filterGroupId}
-              onChange={(e) => setFilterGroupId(e.target.value)}
-            >
-              <option value="">All</option>
-              <option value={NO_GROUP}>No group</option>
-              {groups.map((g) => (
-                <option key={g.id} value={g.id}>{g.name}</option>
-              ))}
-            </select>
-          </div>
+          {/* Search + (to its right) Group Filter */}
+          <div className="flex-1 flex justify-end gap-3 w-full">
+            {/* Narrower search */}
+            <div className="flex-none w-64 md:w-80">
+              <input
+                className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 placeholder:text-gray-400"
+                placeholder="Search quizzes…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
 
-          <div className="flex-none w-full sm:w-72 md:w-96">
-            <input
-              className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 placeholder:text-gray-400"
-              placeholder="Search quizzes…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
+            {/* Narrower filter */}
+            <div className="flex-none w-56 md:w-64 flex items-center">
+              <label className="text-sm text-gray-300 mr-2 whitespace-nowrap">
+                Filter by group:
+              </label>
+              <select
+                className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700"
+                value={filterGroupId}
+                onChange={(e) => setFilterGroupId(e.target.value)}
+              >
+                <option value="">All</option>
+                <option value={NO_GROUP}>No group</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {hasSelected && (
@@ -955,148 +1028,325 @@ async function continueWithGoogle() {
           )}
         </div>
 
-        {/* HORIZONTAL CAROUSEL */}
+         {/* HORIZONTAL CAROUSEL */}
         {visibleQuizzes.length === 0 ? (
-          <div className="text-gray-400">No quizzes yet. Create one or generate with AI.</div>
+          <div className="text-gray-400">
+            No quizzes yet. Create one or generate with AI.
+          </div>
         ) : (
-          <div className="relative">
-            <button
-              type="button"
-              onClick={scrollLeft}
-              className="hidden sm:block absolute -left-4 top-1/2 -translate-y-1/2 z-10 bg-gray-800 hover:bg-gray-700 rounded-full p-3 shadow"
-              aria-label="Scroll left"
-              title="Scroll left"
-            >
-              ‹
-            </button>
-            <button
-              type="button"
-              onClick={scrollRight}
-              className="hidden sm:block absolute -right-4 top-1/2 -translate-y-1/2 z-10 bg-gray-800 hover:bg-gray-700 rounded-full p-3 shadow"
-              aria-label="Scroll right"
-              title="Scroll right"
-            >
-              ›
-            </button>
+          <>
+            {/* --- MOBILE: vertical, self-contained scroll --- */}
+<div className="sm:hidden">
+  <div className="relative">
+    <div
+      className="
+        max-h-[70vh]
+        overflow-y-auto
+        overscroll-contain
+        touch-pan-y
+        -mx-1 px-1 py-2
+      "
+      aria-label="Your quizzes (scrollable list)"
+    >
+      <ul className="grid grid-cols-1 gap-3">
+        {visibleQuizzes.map((q) => {
+          const score = scoresByQuiz[q.id];
+          const rvCount = q.review_questions?.length ?? 0;
+          const reviewDisabled = rvCount === 0;
 
-            <div
-              ref={railRef}
-              className="overflow-x-auto no-scrollbar snap-x snap-mandatory scroll-px-4"
+          return (
+            <li
+              key={q.id}
+              className="w-full max-w-[580px]
+                         bg-gray-800 rounded-2xl p-4 shadow-sm border border-gray-800
+                         flex flex-col overflow-hidden
+                         h-[360px]"  // <-- fixed height so exactly one card fits comfortably
             >
-              <ul className="flex gap-6 px-1 py-2 min-w-full">
-                {visibleQuizzes.map((q) => {
-                  const score = scoresByQuiz[q.id];
-                  const rvCount = q.review_questions?.length ?? 0;
-                  const reviewDisabled = rvCount === 0;
+              {/* Top content: meta + preview */}
+              <div className="flex-1 grid grid-cols-1 gap-3 min-h-0 overflow-hidden">
+                {/* LEFT: title + meta */}
+                <div className="min-w-0">
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      className="h-5 w-5 accent-emerald-500 mt-1 shrink-0"
+                      checked={selectedIds.has(q.id)}
+                      onChange={() => toggleSelected(q.id)}
+                      aria-label={`Select ${q.title || "Untitled Quiz"}`}
+                    />
+                    <div className="min-w-0">
+                      {/* slightly smaller title */}
+                      <div
+                        className="text-xl font-semibold leading-tight break-words"
+                        title={q.title || "Untitled Quiz"}
+                      >
+                        {q.title || "Untitled Quiz"}
+                      </div>
 
-                  return (
-                    <li
-  key={q.id}
-  className="snap-start shrink-0 w-[calc(100vw-3rem)] sm:w-[420px] max-w-[460px]
-             bg-gray-800 rounded-3xl p-4 sm:p-4 shadow-sm border border-gray-800
-             h-auto sm:h-[220px] flex flex-col"
->
-                      {/* Header area with fixed height so buttons align */}
-                      <div className="flex items-start gap-4">
-                        <input
-                          type="checkbox"
-                          className="h-6 w-6 accent-emerald-500 mt-1"
-                          checked={selectedIds.has(q.id)}
-                          onChange={() => toggleSelected(q.id)}
-                          aria-label={`Select ${q.title || "Untitled Quiz"}`}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="h-auto sm:h-[136px] flex flex-col">
-                            {/* Title (up to 2 lines, no clipping) */}
-                            <div
-                              className="text-xl sm:text-2xl font-semibold leading-tight"
-                              style={{
-                                display: "-webkit-box",
-                                WebkitLineClamp: 2,
-                                WebkitBoxOrient: "vertical",
-                                overflow: "hidden",
-                              }}
-                              title={q.title || "Untitled Quiz"}
-                            >
-                              {q.title || "Untitled Quiz"}
-                            </div>
+                      <div className="mt-2 text-xs text-gray-300 space-y-0.5">
+                        <div>{q.questions?.length ?? 0} questions</div>
+                        <div>
+                          Last score:{" "}
+                          {score?.last != null ? (
+                            <span className={score.last >= 90 ? "text-green-400 font-semibold" : ""}>
+                              {score.last}%
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </div>
+                        <div>
+                          Revisit score:{" "}
+                          {score?.review != null ? (
+                            <span className={score.review >= 90 ? "text-green-400 font-semibold" : ""}>
+                              {score.review}%
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
-                            {/* Meta sits just above buttons */}
-                            <div className="mt-auto pt-1 mb-3 sm:mb-4">
-                              <div className="text-sm text-gray-400">
-                                {q.questions?.length ?? 0} questions
-                              </div>
-                              <div className="text-sm text-gray-400">
-                                Last score:{" "}
-                                {scoresByQuiz[q.id]?.last != null ? (
-                                  <span className={scoresByQuiz[q.id].last >= 90 ? "text-green-400 font-semibold" : ""}>
-                                    {scoresByQuiz[q.id].last}%
-                                  </span>
-                                ) : "—"}
-                              </div>
-                              <div className="text-sm text-gray-400">
-                                Revisit score:{" "}
-                                {scoresByQuiz[q.id]?.review != null ? (
-                                  <span className={scoresByQuiz[q.id].review >= 90 ? "text-green-400 font-semibold" : ""}>
-                                    {scoresByQuiz[q.id].review}%
-                                  </span>
-                                ) : "—"}
+                {/* RIGHT: Questions preview — tighter and shorter */}
+                <div className="relative bg-gray-900/30 border border-gray-700 rounded-xl p-3">
+                  <ol className="text-[13px] leading-5 list-decimal pl-5 pr-3 pb-7 space-y-1.5 max-h-[160px] overflow-hidden">
+                    {(Array.isArray(q.questions) ? q.questions : []).map((it, idx) => {
+                      const p = (it?.prompt || "").toString().trim();
+                      if (!p) return null;
+                      return (
+                        <li key={idx} className="break-words">
+                          {p}
+                        </li>
+                      );
+                    })}
+                  </ol>
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-gray-900/95 to-transparent" />
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end pr-3 pb-1.5 select-none">
+                    <span>…</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom actions — slightly shorter */}
+              <div className="mt-3 grid grid-cols-4 gap-2">
+                <Link
+                  to={`/play/${q.id}`}
+                  className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
+                  aria-label="Play quiz"
+                  title="Play"
+                >
+                  <Play className="h-5 w-5" />
+                </Link>
+
+                <Link
+                  to={reviewDisabled ? "#" : `/play/${q.id}?mode=review`}
+                  onClick={(e) => {
+                    if (reviewDisabled) e.preventDefault();
+                  }}
+                  className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center ${
+                    reviewDisabled ? "opacity-50 cursor-not-allowed" : ""
+                  }`}
+                  aria-label={reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"}
+                  title={reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"}
+                >
+                  <History className="h-5 w-5" />
+                </Link>
+
+                <Link
+                  to={`/edit/${q.id}`}
+                  className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
+                  aria-label="Edit quiz"
+                  title="Edit"
+                >
+                  <SquarePen className="h-5 w-5" />
+                </Link>
+
+                <button
+                  onClick={() => {
+                    setTarget({
+                      id: q.id,
+                      title: q.title || "Untitled Quiz",
+                      group_id: q.group_id ?? null,
+                    });
+                    setConfirmOpen(true);
+                  }}
+                  className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
+                  aria-label="Delete quiz"
+                  title="Delete"
+                >
+                  <Trash2 className="h-5 w-5" />
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  </div>
+</div>
+
+            {/* --- DESKTOP/TABLET: horizontal carousel (unchanged) --- */}
+            <div className="relative hidden sm:block">
+              <button
+                type="button"
+                onClick={scrollLeft}
+                className="absolute -left-4 top-1/2 -translate-y-1/2 z-10 bg-gray-800 hover:bg-gray-700 rounded-full p-3 shadow"
+                aria-label="Scroll left"
+                title="Scroll left"
+              >
+                ‹
+              </button>
+              <button
+                type="button"
+                onClick={scrollRight}
+                className="absolute -right-4 top-1/2 -translate-y-1/2 z-10 bg-gray-800 hover:bg-gray-700 rounded-full p-3 shadow"
+                aria-label="Scroll right"
+                title="Scroll right"
+              >
+                ›
+              </button>
+
+              <div ref={railRef} className="overflow-x-auto">
+                <ul className="flex gap-6 px-1 py-2 min-w-full">
+                  {visibleQuizzes.map((q) => {
+                    const score = scoresByQuiz[q.id];
+                    const rvCount = q.review_questions?.length ?? 0;
+                    const reviewDisabled = rvCount === 0;
+
+                    return (
+                      <li
+                        key={q.id}
+                        className="sm:snap-start shrink-0 w-[540px] max-w-[580px]
+                                   bg-gray-800 rounded-3xl p-5 shadow-sm border border-gray-800
+                                   h-[460px] flex flex-col overflow-hidden"
+                      >
+                        {/* Top content: left meta + right questions preview */}
+                        <div className="flex-1 grid grid-cols-2 gap-4 min-h-0 overflow-hidden">
+                          {/* LEFT: title + meta */}
+                          <div className="min-w-0">
+                            <div className="flex items-start gap-3">
+                              <input
+                                type="checkbox"
+                                className="h-6 w-6 accent-emerald-500 mt-1 shrink-0"
+                                checked={selectedIds.has(q.id)}
+                                onChange={() => toggleSelected(q.id)}
+                                aria-label={`Select ${q.title || "Untitled Quiz"}`}
+                              />
+                              <div className="min-w-0">
+                                <div
+                                  className="text-2xl font-semibold leading-tight break-words"
+                                  title={q.title || "Untitled Quiz"}
+                                >
+                                  {q.title || "Untitled Quiz"}
+                                </div>
+
+                                <div className="mt-3 text-sm text-gray-300 space-y-1">
+                                  <div>{q.questions?.length ?? 0} questions</div>
+                                  <div>
+                                    Last score:{" "}
+                                    {score?.last != null ? (
+                                      <span className={score.last >= 90 ? "text-green-400 font-semibold" : ""}>
+                                        {score.last}%
+                                      </span>
+                                    ) : (
+                                      "—"
+                                    )}
+                                  </div>
+                                  <div>
+                                    Revisit score:{" "}
+                                    {score?.review != null ? (
+                                      <span className={score.review >= 90 ? "text-green-400 font-semibold" : ""}>
+                                        {score.review}%
+                                      </span>
+                                    ) : (
+                                      "—"
+                                    )}
+                                  </div>
+                                </div>
                               </div>
                             </div>
                           </div>
+
+                          {/* RIGHT: Questions preview */}
+                          <div className="relative bg-gray-900/30 border border-gray-700 rounded-2xl p-3">
+                            <ol className="text-sm leading-6 list-decimal pl-5 pr-3 pb-8 space-y-2 max-h-[320px] overflow-hidden">
+                              {(Array.isArray(q.questions) ? q.questions : []).map((it, idx) => {
+                                const p = (it?.prompt || "").toString().trim();
+                                if (!p) return null;
+                                return (
+                                  <li key={idx} className="break-words">
+                                    {p}
+                                  </li>
+                                );
+                              })}
+                            </ol>
+                            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-gray-900/95 to-transparent" />
+                            <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end pr-3 pb-2 select-none">
+                              <span>…</span>
+                            </div>
+                          </div>
                         </div>
-                      </div>
 
-                      {/* Bottom actions */}
-                      <div className="mt-auto grid grid-cols-4 gap-2">
-                        <Link
-                          to={`/play/${q.id}`}
-                          className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
-                          aria-label="Play quiz"
-                          title="Play"
-                        >
-                          <Play className="h-6 w-6" />
-                        </Link>
+                        {/* Bottom actions */}
+                        <div className="mt-4 grid grid-cols-4 gap-2">
+                          <Link
+                            to={`/play/${q.id}`}
+                            className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
+                            aria-label="Play quiz"
+                            title="Play"
+                          >
+                            <Play className="h-6 w-6" />
+                          </Link>
 
-                        <Link
-                          to={reviewDisabled ? "#" : `/play/${q.id}?mode=review`}
-                          onClick={(e) => { if (reviewDisabled) e.preventDefault(); }}
-                          className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center ${
-                            reviewDisabled ? "opacity-50 cursor-not-allowed" : ""
-                          }`}
-                          aria-label={reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"}
-                          title={reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"}
-                        >
-                          <History className="h-6 w-6" />
-                        </Link>
+                          <Link
+                            to={reviewDisabled ? "#" : `/play/${q.id}?mode=review`}
+                            onClick={(e) => {
+                              if (reviewDisabled) e.preventDefault();
+                            }}
+                            className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center ${
+                              reviewDisabled ? "opacity-50 cursor-not-allowed" : ""
+                            }`}
+                            aria-label={reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"}
+                            title={reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"}
+                          >
+                            <History className="h-6 w-6" />
+                          </Link>
 
-                        <Link
-                          to={`/edit/${q.id}`}
-                          className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
-                          aria-label="Edit quiz"
-                          title="Edit"
-                        >
-                          <SquarePen className="h-6 w-6" />
-                        </Link>
+                          <Link
+                            to={`/edit/${q.id}`}
+                            className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
+                            aria-label="Edit quiz"
+                            title="Edit"
+                          >
+                            <SquarePen className="h-6 w-6" />
+                          </Link>
 
-                        <button
-                          onClick={() => {
-                            setTarget({ id: q.id, title: q.title || "Untitled Quiz", group_id: q.group_id ?? null });
-                            setConfirmOpen(true);
-                          }}
-                          className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
-                          aria-label="Delete quiz"
-                          title="Delete"
-                        >
-                          <Trash2 className="h-6 w-6" />
-                        </button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
+                          <button
+                            onClick={() => {
+                              setTarget({
+                                id: q.id,
+                                title: q.title || "Untitled Quiz",
+                                group_id: q.group_id ?? null,
+                              });
+                              setConfirmOpen(true);
+                            }}
+                            className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
+                            aria-label="Delete quiz"
+                            title="Delete"
+                          >
+                            <Trash2 className="h-6 w-6" />
+                          </button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
             </div>
-          </div>
+          </>
         )}
 
         {/* Group actions */}
@@ -1136,7 +1386,11 @@ async function continueWithGoogle() {
               <span className="font-semibold">{target?.title}</span>?
             </p>
             <div className="flex flex-col sm:flex-row justify-end gap-2">
-              <button className={`${btnBase} ${btnGray}`} onClick={() => setConfirmOpen(false)} disabled={deleting}>
+              <button
+                className={`${btnBase} ${btnGray}`}
+                onClick={() => setConfirmOpen(false)}
+                disabled={deleting}
+              >
                 Cancel
               </button>
               <button className={`${btnBase} ${btnGray}`} onClick={handleDelete} disabled={deleting}>
@@ -1151,7 +1405,12 @@ async function continueWithGoogle() {
       {authOpen && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-[95]"
-          onClick={() => { if (!authBusy) { setAuthMessage(""); setAuthOpen(false); } }}
+          onClick={() => {
+            if (!authBusy) {
+              setAuthMessage("");
+              setAuthOpen(false);
+            }
+          }}
           aria-modal="true"
           role="dialog"
         >
@@ -1196,10 +1455,15 @@ async function continueWithGoogle() {
               onChange={(e) => setAuthPass(e.target.value)}
             />
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <button
                 className={`${btnBase} ${btnGray} w-full`}
-                onClick={() => { if (!authBusy) { setAuthMessage(""); setAuthOpen(false); } }}
+                onClick={() => {
+                  if (!authBusy) {
+                    setAuthMessage("");
+                    setAuthOpen(false);
+                  }
+                }}
                 disabled={authBusy}
               >
                 Not now
@@ -1217,7 +1481,9 @@ async function continueWithGoogle() {
               <button
                 className={`${btnBase} ${btnGray} w-full`}
                 onClick={async () => {
-                  const ok = confirm("Signing in to an existing account will replace your guest session. Continue?");
+                  const ok = confirm(
+                    "Signing in to an existing account will replace your guest session. Continue?"
+                  );
                   if (ok) await signInExisting();
                 }}
                 disabled={authBusy}
@@ -1227,30 +1493,41 @@ async function continueWithGoogle() {
               </button>
             </div>
 
-{/* New line: icon-only Google sign-in */}
-<div className="mt-3 flex justify-center">
-  <button
-    type="button"
-    onClick={continueWithGoogle}
-    className="h-12 w-12 rounded-full bg-white border border-gray-300 shadow flex items-center justify-center hover:shadow-md active:scale-95 transition"
-    aria-label="Continue with Google"
-    title="Continue with Google"
-    disabled={authBusy}
-  >
-    {/* Google 'G' mark (official) */}
-    <svg width="24" height="24" viewBox="0 0 48 48" aria-hidden="true">
-      <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.6 32.4 29.2 35 24 35c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C33.8 5.1 29.2 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21c10.5 0 20-7.6 20-21 0-1.3-.1-2.7-.4-3.5z"/>
-      <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 16 19 13 24 13c3 0 5.8 1.1 7.9 3l5.7-5.7C33.8 5.1 29.2 3 24 3 16 3 8.9 7.6 6.3 14.7z"/>
-      <path fill="#4CAF50" d="M24 45c5.1 0 9.8-1.9 13.3-5.1l-6.1-5c-2 1.5-4.6 2.4-7.2 2.4-5.2 0-9.6-3.5-11.2-8.3L6.2 33.9C8.8 41 16 45 24 45z"/>
-      <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-1.1 3.1-3.6 5.6-6.6 6.9l6.1 5C37.8 37.9 41 31.9 41 24c0-1.3-.1-2.7-.4-3.5z"/>
-    </svg>
-  </button>
-</div>
+            {/* Google icon button on its own row */}
+            <div className="mt-3 flex justify-center">
+              <button
+                type="button"
+                onClick={continueWithGoogle}
+                className="h-12 w-12 rounded-full bg-white border border-gray-300 shadow flex items-center justify-center hover:shadow-md active:scale-95 transition"
+                aria-label="Continue with Google"
+                title="Continue with Google"
+                disabled={authBusy}
+              >
+                <svg width="24" height="24" viewBox="0 0 48 48" aria-hidden="true">
+                  <path
+                    fill="#FFC107"
+                    d="M43.6 20.5H42V20H24v8h11.3C33.6 32.4 29.2 35 24 35c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C33.8 5.1 29.2 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21c10.5 0 20-7.6 20-21 0-1.3-.1-2.7-.4-3.5z"
+                  />
+                  <path
+                    fill="#FF3D00"
+                    d="M6.3 14.7l6.6 4.8C14.5 16 19 13 24 13c3 0 5.8 1.1 7.9 3l5.7-5.7C33.8 5.1 29.2 3 24 3 16 3 8.9 7.6 6.3 14.7z"
+                  />
+                  <path
+                    fill="#4CAF50"
+                    d="M24 45c5.1 0 9.8-1.9 13.3-5.1l-6.1-5c-2 1.5-4.6 2.4-7.2 2.4-5.2 0-9.6-3.5-11.2-8.3L6.2 33.9C8.8 41 16 45 24 45z"
+                  />
+                  <path
+                    fill="#1976D2"
+                    d="M43.6 20.5H42V20H24v8h11.3c-1.1 3.1-3.6 5.6-6.6 6.9l6.1 5C37.8 37.9 41 31.9 41 24c0-1.3-.1-2.7-.4-3.5z"
+                  />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* --- Generate modal (unchanged UI) --- */}
+      {/* --- Generate modal (unchanged core UI) --- */}
       {genOpen && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-50"
@@ -1266,7 +1543,9 @@ async function continueWithGoogle() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
-                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-title">Name</label>
+                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-title">
+                  Name
+                </label>
                 <input
                   id="gen-title"
                   className="field w-full placeholder:text-gray-400"
@@ -1277,7 +1556,9 @@ async function continueWithGoogle() {
               </div>
 
               <div className="sm:col-span-2">
-                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-topic">Prompt</label>
+                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-topic">
+                  Prompt
+                </label>
                 <textarea
                   id="gen-topic"
                   className="field-textarea w-full min-h-[8rem] resize-y placeholder:text-gray-400"
@@ -1333,13 +1614,18 @@ async function continueWithGoogle() {
                   >
                     <option value="">No group</option>
                     {groups.map((g) => (
-                      <option key={g.id} value={g.id}>{g.name}</option>
+                      <option key={g.id} value={g.id}>
+                        {g.name}
+                      </option>
                     ))}
                   </select>
                   <button
                     type="button"
                     className={`${btnBase} ${btnGray}`}
-                    onClick={() => { setGNewName(""); setGNewOpen(true); }}
+                    onClick={() => {
+                      setGNewName("");
+                      setGNewOpen(true);
+                    }}
                   >
                     New group +
                   </button>
@@ -1397,7 +1683,11 @@ async function continueWithGoogle() {
               <button className={`${btnBase} ${btnGray}`} onClick={() => setGNewOpen(false)} disabled={gCreatingGroup}>
                 Cancel
               </button>
-              <button className={`${btnBase} ${btnGreen}`} onClick={createGroupForModal} disabled={gCreatingGroup || !gNewName.trim()}>
+              <button
+                className={`${btnBase} ${btnGreen}`}
+                onClick={createGroupForModal}
+                disabled={gCreatingGroup || !gNewName.trim()}
+              >
                 {gCreatingGroup ? "Creating…" : "Create"}
               </button>
             </div>
@@ -1466,15 +1756,15 @@ async function continueWithGoogle() {
                 >
                   <option value="">No group</option>
                   {groups.map((g) => (
-                    <option key={g.id} value={g.id}>{g.name}</option>
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-sm text-gray-300 mb-1">
-                  Or create a new group
-                </label>
+                <label className="block text-sm text-gray-300 mb-1">Or create a new group</label>
                 <input
                   className="w-full p-3 bg-white rounded bg-gray-800 text-white border border-gray-700"
                   placeholder="New group name (optional)"
@@ -1555,7 +1845,11 @@ async function continueWithGoogle() {
               <button className={`${btnBase} ${btnGray}`} onClick={() => setEditGroupOpen(false)} disabled={savingGroupName}>
                 Cancel
               </button>
-              <button className={`${btnBase} ${btnGreen}`} onClick={saveGroupName} disabled={savingGroupName || !editGroupName.trim()}>
+              <button
+                className={`${btnBase} ${btnGreen}`}
+                onClick={saveGroupName}
+                disabled={savingGroupName || !editGroupName.trim()}
+              >
                 {savingGroupName ? "Saving…" : "Save"}
               </button>
             </div>

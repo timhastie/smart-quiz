@@ -738,85 +738,108 @@ export default function Editor() {
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs sm:text-sm text-gray-300 mb-1">Group</label>
-            <div className="flex gap-2">
-              <select
-                className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 disabled:opacity-60 text-base"
-                value={groupId}
-                onChange={handleGroupChange}
-                disabled={savingGroup}
-              >
-                <option value="">No group</option>
-                {groups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
+         <div>
+  <label className="block text-xs sm:text-sm text-gray-300 mb-1">Group</label>
+  <div className="flex gap-2">
+    <select
+      className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 disabled:opacity-60 text-base"
+      value={groupId}
+      onChange={handleGroupChange}
+      disabled={savingGroup}
+    >
+      <option value="">No group</option>
+      {groups.map((g) => (
+        <option key={g.id} value={g.id}>
+          {g.name}
+        </option>
+      ))}
+    </select>
+    <button
+      className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 whitespace-nowrap text-sm sm:text-base"
+      onClick={() => setNewOpen(true)}
+      disabled={savingGroup}
+    >
+      New group +
+    </button>
+  </div>
+
+  {/* Actions row under group: left = Unselect all, right = Delete selected */}
+  {selectedCount > 0 && (
+    <div className="mt-3 flex items-center justify-between">
+      <button
+        onClick={clearSelection}
+        className={`${btnBase} ${btnGray} px-4 py-2`}
+        title="Unselect all selected questions"
+      >
+        Unselect all
+      </button>
+
+      <button
+        onClick={deleteSelected}
+        className={`${btnBase} ${btnRed} px-4 py-2 font-semibold`}
+        title="Delete selected questions"
+      >
+        Delete selected ({selectedCount})
+      </button>
+    </div>
+  )}
+</div>
+        </div>
+
+        {/* Questions — vertically scrollable container (desktop & mobile) */}
+<div className="relative">
+  <div className="max-h-[70vh] overflow-y-auto overscroll-contain touch-pan-y pr-1 space-y-4">
+    {questions.map((row, i) => (
+      <div key={i} className="bg-gray-800 p-4 rounded-xl">
+        <div className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            aria-label={`Select Question ${i + 1}`}
+            className="mt-1 h-5 w-5 accent-emerald-500"
+            checked={selected.has(i)}
+            onChange={() => toggleSelect(i)}
+          />
+          <div className="flex-1">
+            <label className="block text-xs sm:text-sm text-gray-300 mb-1">
+              Question {i + 1}
+            </label>
+            <textarea
+              className="w-full p-3 rounded bg-white text-gray-900 border border-gray-300 placeholder:text-gray-500 mb-3 text-base sm:text-lg"
+              placeholder={`Question ${i + 1} prompt`}
+              value={row.prompt}
+              onChange={(e) => updateRow(i, "prompt", e.target.value)}
+              rows={3}
+            />
+            <label className="block text-xs sm:text-sm text-gray-300 mb-1">
+              Exact answer
+            </label>
+            <textarea
+              className="w-full p-3 rounded bg-white text-gray-900 border border-gray-300 placeholder:text-gray-500 text-base sm:text-lg"
+              placeholder="Exact correct answer"
+              value={row.answer}
+              onChange={(e) => updateRow(i, "answer", e.target.value)}
+              rows={2}
+            />
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-2">
               <button
-                className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 whitespace-nowrap text-sm sm:text-base"
-                onClick={() => setNewOpen(true)}
-                disabled={savingGroup}
+                onClick={save}
+                className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm sm:text-base"
               >
-                New group +
+                Save
+              </button>
+              <button
+                onClick={() => removeRow(i)}
+                className="w-full sm:w-auto px-3 py-2 rounded bg-red-500 hover:bg-red-600 text-sm sm:text-base"
+              >
+                Delete
               </button>
             </div>
           </div>
         </div>
-
-        {/* Questions list with checkboxes */}
-        <div className="space-y-4">
-          {questions.map((row, i) => (
-            <div key={i} className="bg-gray-800 p-4 rounded-xl">
-              <div className="flex items-start gap-3">
-                <input
-                  type="checkbox"
-                  aria-label={`Select Question ${i + 1}`}
-                  className="mt-1 h-5 w-5 accent-emerald-500"
-                  checked={selected.has(i)}
-                  onChange={() => toggleSelect(i)}
-                />
-                <div className="flex-1">
-                  <label className="block text-xs sm:text-sm text-gray-300 mb-1">
-                    Question {i + 1}
-                  </label>
-                  <textarea
-                    className="w-full p-3 rounded bg-white text-gray-900 border border-gray-300 placeholder:text-gray-500 mb-3 text-base sm:text-lg"
-                    placeholder={`Question ${i + 1} prompt`}
-                    value={row.prompt}
-                    onChange={(e) => updateRow(i, "prompt", e.target.value)}
-                    rows={3}
-                  />
-                  <label className="block text-xs sm:text-sm text-gray-300 mb-1">
-                    Exact answer
-                  </label>
-                  <textarea
-                    className="w-full p-3 rounded bg-white text-gray-900 border border-gray-300 placeholder:text-gray-500 text-base sm:text-lg"
-                    placeholder="Exact correct answer"
-                    value={row.answer}
-                    onChange={(e) => updateRow(i, "answer", e.target.value)}
-                    rows={2}
-                  />
-                  <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-2">
-                    <button
-                      onClick={save}
-                      className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm sm:text-base"
-                    >
-                      Save
-                    </button>
-                    <button
-                      onClick={() => removeRow(i)}
-                      className="w-full sm:w-auto px-3 py-2 rounded bg-red-500 hover:bg-red-600 text-sm sm:text-base"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+      </div>
+    ))}
+  </div>
+</div>
 
         <button
           onClick={addRow}
@@ -825,19 +848,6 @@ export default function Editor() {
           + Add Question
         </button>
       </main>
-
-      {/* Sticky delete-selected button (only when any selected) */}
-      {selectedCount > 0 && (
-        <div className="fixed right-4 sm:right-6 top-1/2 -translate-y-1/2 z-50">
-          <button
-            onClick={deleteSelected}
-            className={`${btnBase} ${btnRed} shadow-lg px-4 py-3 font-semibold`}
-            title="Delete selected questions"
-          >
-            Delete selected ({selectedCount})
-          </button>
-        </div>
-      )}
 
       {/* New Group modal */}
       {newOpen && (
