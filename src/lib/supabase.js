@@ -11,3 +11,5 @@ export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
+
+if (typeof window !== "undefined") window.sb = supabase; // TEMP for console tests

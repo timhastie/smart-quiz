@@ -7,14 +7,142 @@ import { supabase } from "../lib/supabase";
 
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist/build/pdf.mjs";
 import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+
+import { getInitialGroupFromUrlOrStorage, persistLastGroup } from "../lib/groupFilter";
+import { useLocation } from "react-router-dom";
+
+/* ------------------------------- CONSTANTS -------------------------------- */
+const ALL_GROUP_ID = "00000000-0000-0000-0000-000000000000"; // sentinel for “All”
+const NO_GROUP = "__none__";
+const NO_GROUP_ID = "00000000-0000-0000-0000-000000000001"; // sentinel for “No Group” in group_scores
+
+// --- DEBUG: expose sentinels & logger in window for devtools ---
+if (typeof window !== "undefined") {
+  window.__SQ_SENTINELS__ = { ALL_GROUP_ID, NO_GROUP, NO_GROUP_ID };
+}
+function dbg(...args) {
+  // comment this out later
+  console.log("[DashDBG]", ...args);
+}
+
+/* ------------------------------- HELPERS (DB) ------------------------------ */
+async function fetchAllRevisitScore(sb) {
+  try {
+    const { data: ures } = await sb.auth.getUser();
+    const userId = ures?.user?.id;
+    if (!userId) return null;
+
+    let { data, error } = await sb
+      .from("group_scores")
+      .select("last_review_score, updated_at")
+      .eq("user_id", userId)
+      .eq("scope", "all")
+      .eq("group_id", ALL_GROUP_ID)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!error && typeof data?.last_review_score === "number") {
+      return data.last_review_score;
+    }
+
+    const res2 = await sb
+      .from("group_scores")
+      .select("last_review_score, updated_at")
+      .eq("user_id", userId)
+      .eq("scope", "all")
+      .is("group_id", null)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!res2.error && typeof res2.data?.last_review_score === "number") {
+      return res2.data.last_review_score;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchGroupRevisitScoresMap(sb, userId) {
+  try {
+    const { data, error } = await sb
+      .from("group_scores")
+      .select("group_id, last_review_score")
+      .eq("user_id", userId)
+      .eq("scope", "group");
+
+    if (error) return new Map();
+    const m = new Map();
+    for (const r of data || []) {
+      if (r.group_id) m.set(r.group_id, r.last_review_score ?? null);
+    }
+    return m;
+  } catch {
+    return new Map();
+  }
+}
+
+/* --------------------------------- PDF.js --------------------------------- */
 GlobalWorkerOptions.workerSrc = workerSrc;
 
-const NO_GROUP = "__none__";
-
+/* ========================================================================== */
+/*                                DASHBOARD                                   */
+/* ========================================================================== */
 export default function Dashboard() {
+  const nav = useNavigate();
   const { user, ready, signout, signupOrLink, signin } = useAuth();
 
-  // --- UI helpers (palette unchanged) ---
+const [allRevisitScore, setAllRevisitScore] = useState(null);
+const [groupRevisitScores, setGroupRevisitScores] = useState(new Map());
+
+// NEW: All-Questions (non-Revisit) score tracking
+const [allAllScore, setAllAllScore] = useState(null);
+const [groupAllScores, setGroupAllScores] = useState(new Map());
+
+  async function refreshAllRevisitScore() {
+    const v = await fetchAllRevisitScore(supabase);
+    setAllRevisitScore(v);
+  }
+  useEffect(() => {
+    const onFocus = () => refreshAllRevisitScore();
+    window.addEventListener("visibilitychange", onFocus);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("visibilitychange", onFocus);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!user?.id) {
+        if (alive) setAllRevisitScore(null);
+        return;
+      }
+      const val = await fetchAllRevisitScore(supabase);
+      if (alive) setAllRevisitScore(val);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let alive = true;
+    (async () => {
+      const m = await fetchGroupRevisitScoresMap(supabase, user.id);
+      if (alive) setGroupRevisitScores(m);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [user?.id]);
+
   const pressAnim = "transition-transform duration-100 active:scale-95";
   const btnBase =
     "px-3 py-2 rounded disabled:opacity-60 disabled:cursor-not-allowed";
@@ -59,12 +187,9 @@ export default function Dashboard() {
     console.log("auth snapshot", snapshot);
   }, [ready, user, isAnon]);
 
-  const nav = useNavigate();
-
   const [quizzes, setQuizzes] = useState([]);
   const [scoresByQuiz, setScoresByQuiz] = useState({});
 
-  // auth modal
   const [authOpen, setAuthOpen] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
   const [authPass, setAuthPass] = useState("");
@@ -81,7 +206,9 @@ export default function Dashboard() {
         return;
       }
       await signupOrLink(email, password);
-      setAuthMessage("Check your email to confirm your account, then return here.");
+      setAuthMessage(
+        "Check your email to confirm your account, then return here."
+      );
     } catch (err) {
       console.error(err);
       alert(err?.message || "Failed to start signup.");
@@ -135,7 +262,6 @@ export default function Dashboard() {
     setAuthOpen(true);
   }
 
-  // guest trial
   const [trial, setTrial] = useState({
     isAnon: false,
     remaining: Infinity,
@@ -148,12 +274,10 @@ export default function Dashboard() {
     setAuthOpen(true);
   }
 
-  // single delete
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [target, setTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  // AI generate
   const [genOpen, setGenOpen] = useState(false);
   const [gTitle, setGTitle] = useState("");
   const [gTopic, setGTopic] = useState("");
@@ -164,33 +288,33 @@ export default function Dashboard() {
   const [gFile, setGFile] = useState(null);
   const [gNoRepeat, setGNoRepeat] = useState(true);
 
-  // create group in modal
   const [gNewOpen, setGNewOpen] = useState(false);
   const [gNewName, setGNewName] = useState("");
   const [gCreatingGroup, setGCreatingGroup] = useState(false);
 
-  // groups/filter
-  const [groups, setGroups] = useState([]);
-  const [filterGroupId, setFilterGroupId] = useState("");
+  const location = useLocation();
+
+const [groups, setGroups] = useState([]);
+const [filterGroupId, setFilterGroupId] = useState(() =>
+  getInitialGroupFromUrlOrStorage(location.search)
+);
   const scoreSort = "asc";
   const currentGroup = groups.find((g) => g.id === filterGroupId) || null;
 
-  // edit/delete group
+  dbg("INIT filterGroupId =", JSON.stringify(filterGroupId));
+
   const [editGroupOpen, setEditGroupOpen] = useState(false);
   const [editGroupName, setEditGroupName] = useState("");
   const [savingGroupName, setSavingGroupName] = useState(false);
 
-  // empty-group cleanup
   const [cleanupQueue, setCleanupQueue] = useState([]);
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [cleanupGroup, setCleanupGroup] = useState(null);
   const [cleaning, setCleaning] = useState(false);
 
-  // multi-select
   const [selectedIds, setSelectedIds] = useState(new Set());
   const hasSelected = selectedIds.size > 0;
 
-  // bulk modals
   const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
@@ -198,122 +322,262 @@ export default function Dashboard() {
   const [moveNewName, setMoveNewName] = useState("");
   const [moving, setMoving] = useState(false);
 
-  // delete-current-group
   const [deleteGroupOpen, setDeleteGroupOpen] = useState(false);
   const [deletingGroup, setDeletingGroup] = useState(false);
 
-  // NEW: client search
   const [query, setQuery] = useState("");
 
-  // ---------- data ----------
   async function load() {
-    let q = supabase
-      .from("quizzes")
-      .select("id, title, questions, review_questions, updated_at, group_id")
-      .eq("user_id", user.id)
-      .order("updated_at", { ascending: false });
+  let q = supabase
+    .from("quizzes")
+    .select("id, title, questions, review_questions, updated_at, group_id")
+    .eq("user_id", user.id)
+    .order("updated_at", { ascending: false });
 
-    if (filterGroupId === "") {
-      // all
-    } else if (filterGroupId === NO_GROUP) {
-      q = q.is("group_id", null);
-    } else {
-      q = q.eq("group_id", filterGroupId);
-    }
+  // Normalize the current selection
+  const sel = (filterGroupId ?? "").trim();
+  const isAll = sel === "" || sel === ALL_GROUP_ID;   // treat sentinel as All
+  const isNoGroup = sel === NO_GROUP || sel === "null";
 
-    const { data, error } = await q;
-    if (error) {
-      setQuizzes([]);
-      setScoresByQuiz({});
-      return;
-    }
-    const list = data ?? [];
-    setQuizzes(list);
+  if (isNoGroup) {
+    q = q.is("group_id", null);
+  } else if (!isAll) {
+    q = q.eq("group_id", sel);
+  }
 
-    const ids = list.map((x) => x.id);
-    if (!ids.length) {
-      setScoresByQuiz({});
-      return;
-    }
+  const { data, error } = await q;
+  if (error) {
+    setQuizzes([]);
+    setScoresByQuiz({});
+    setAllRevisitScore(null);
+    setGroupRevisitScores(new Map());
+    setAllAllScore(null);
+    setGroupAllScores(new Map());
+    return;
+  }
+
+  const list = data ?? [];
+  setQuizzes(list);
+
+  const ids = list.map((x) => x.id);
+  if (!ids.length) {
+    setScoresByQuiz({});
+  } else {
     const { data: scores, error: sErr } = await supabase
       .from("quiz_scores")
       .select("quiz_id, last_score, last_review_score")
       .in("quiz_id", ids)
       .eq("user_id", user.id);
+
     if (sErr || !scores) {
       setScoresByQuiz({});
+    } else {
+      const map = {};
+      for (const row of scores) {
+        map[row.quiz_id] = {
+          last: row.last_score ?? null,
+          review: row.last_review_score ?? null,
+        };
+      }
+      setScoresByQuiz(map);
+    }
+  }
+
+  // Read all score rows for this user (ordered newest first)
+  const { data: gs, error: gErr } = await supabase
+    .from("group_scores")
+    .select("scope, group_id, last_review_score, last_all_score, updated_at")
+    .eq("user_id", user.id)
+    .order("updated_at", { ascending: false });
+
+  if (gErr || !gs) {
+    setAllRevisitScore(null);
+    setGroupRevisitScores(new Map());
+    setAllAllScore(null);
+    setGroupAllScores(new Map());
+    return;
+  }
+
+  // ---- ALL bucket (allow sentinel or legacy NULL) --------------------------
+  const allRow =
+    gs.find((r) => r.scope === "all" && r.group_id === ALL_GROUP_ID) ??
+    gs.find((r) => r.scope === "all" && r.group_id == null);
+
+  setAllRevisitScore(
+    typeof allRow?.last_review_score === "number" ? allRow.last_review_score : null
+  );
+  setAllAllScore(
+    typeof allRow?.last_all_score === "number" ? allRow.last_all_score : null
+  );
+
+  // ---- GROUP buckets -------------------------------------------------------
+  const mReview = new Map();
+  const mAll = new Map();
+
+  for (const r of gs) {
+    if (r.scope !== "group") continue;
+
+    const gid = r.group_id == null ? NO_GROUP_ID : r.group_id;
+
+    if (!mReview.has(gid) && typeof r.last_review_score === "number") {
+      mReview.set(gid, r.last_review_score);
+    }
+    if (!mAll.has(gid) && typeof r.last_all_score === "number") {
+      mAll.set(gid, r.last_all_score);
+    }
+  }
+
+  setGroupRevisitScores(mReview);
+  setGroupAllScores(mAll);
+}
+
+
+// Load dashboard aggregates (groups, scores, etc.)
+useEffect(() => {
+  if (ready && user) load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [ready, user?.id, filterGroupId]);
+
+// Persist the current group filter so Play → Dashboard restores it
+useEffect(() => {
+  persistLastGroup(filterGroupId || "");
+  console.log("[Dash] persistLastGroup ->", filterGroupId || "");
+}, [filterGroupId]);
+
+// Normalize ALL_GROUP_ID to "" so "All" footer/actions always render
+useEffect(() => {
+  const v = getInitialGroupFromUrlOrStorage(location.search);
+  let normalized = v == null ? "" : v;
+  if (normalized === ALL_GROUP_ID) normalized = ""; // ← key fix
+  dbg("URL sync fired:", { search: location.search, v, normalized });
+  setFilterGroupId((prev) => {
+    const next = prev === normalized ? prev : normalized;
+    if (prev !== next) dbg("filterGroupId changed via URL sync:", { prev, next });
+    return next;
+  });
+}, [location.search]);
+
+// Fetch groups (for dropdown)
+useEffect(() => {
+  if (!user?.id) return;
+  let alive = true;
+  (async () => {
+    const { data, error } = await supabase
+      .from("groups")
+      .select("id, name")
+      .eq("user_id", user.id)
+      .order("name", { ascending: true });
+
+    if (!alive) return;
+    if (error) {
+      console.error("[Dash] groups read error", error);
+      setGroups([]);
       return;
     }
-    const map = {};
-    for (const row of scores) {
-      map[row.quiz_id] = {
-        last: row.last_score ?? null,
-        review: row.last_review_score ?? null,
-      };
+    setGroups(data ?? []);
+  })();
+  return () => {
+    alive = false;
+  };
+}, [user?.id]);
+
+// 🔎 FETCH QUIZZES (diagnostic: ensure 'All' selection doesn't filter; log state)
+useEffect(() => {
+  if (!user?.id) return;
+
+  // safe logger (uses dbg() if you added it; otherwise falls back to console.log)
+  const _dbg = (...a) => {
+    try {
+      (typeof dbg === "function" ? dbg : console.log)("[DashDBG]", ...a);
+    } catch {}
+  };
+
+  // Normalize the selection
+  const sel = (filterGroupId ?? "").trim();
+  const isAll = sel === "" || sel === ALL_GROUP_ID; // "" = All
+  const isNoGroup = sel === NO_GROUP || sel === "null"; // do NOT treat "" as No group
+
+  let alive = true;
+
+  (async () => {
+    _dbg("FETCH start", { raw: filterGroupId, sel, isAll, isNoGroup, userId: user?.id });
+
+    let q = supabase
+      .from("quizzes")
+      .select("id, title, group_id, questions, review_questions, updated_at")
+      .eq("user_id", user.id)
+      .order("updated_at", { ascending: false });
+
+    // ✅ Do NOT add a group filter when “All” is selected
+    if (isNoGroup) {
+      q = q.is("group_id", null);
+    } else if (!isAll) {
+      q = q.eq("group_id", sel);
     }
-    setScoresByQuiz(map);
-  }
-  useEffect(() => {
-    if (ready && user) load();
-  }, [ready, user?.id, filterGroupId]);
 
-  useEffect(() => {
-    if (!user?.id) return;
-    let alive = true;
-    (async () => {
-      const { data } = await supabase
-        .from("groups")
-        .select("id, name")
-        .eq("user_id", user.id)
-        .order("name", { ascending: true });
-      if (!alive) return;
-      setGroups(data ?? []);
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [user?.id]);
+    const { data, error } = await q;
 
-  useEffect(() => {
-    if (!user?.id) return;
-    (async () => {
-      if (!isAnon) {
-        setTrial({ isAnon: false, remaining: Infinity, loading: false });
-        return;
-      }
-      const { count } = await supabase
-        .from("quizzes")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", user.id);
-      setTrial({
-        isAnon: true,
-        remaining: Math.max(0, 2 - (count ?? 0)),
-        loading: false,
-      });
-    })();
-  }, [isAnon, user?.id, quizzes.length]);
+    if (!alive) return;
 
-  // ---------- helpers ----------
-  function toggleSelected(quizId) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(quizId)) next.delete(quizId);
-      else next.add(quizId);
-      return next;
+    if (error) {
+      _dbg("FETCH error", error);
+      setQuizzes([]);
+      return;
+    }
+
+    _dbg("FETCH done", { count: (data || []).length, isAll, isNoGroup });
+    setQuizzes(data || []);
+  })();
+
+  return () => {
+    alive = false;
+  };
+}, [user?.id, filterGroupId]);
+// Anonymous trial counters
+useEffect(() => {
+  if (!user?.id) return;
+  (async () => {
+    const anon =
+      !!user &&
+      Array.isArray(user.identities) &&
+      user.identities.some((i) => i?.provider === "anonymous");
+    if (!anon) {
+      setTrial({ isAnon: false, remaining: Infinity, loading: false });
+      return;
+    }
+    const { count } = await supabase
+      .from("quizzes")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id);
+    setTrial({
+      isAnon: true,
+      remaining: Math.max(0, 2 - (count ?? 0)),
+      loading: false,
     });
-  }
-  function clearSelection() {
-    setSelectedIds(new Set());
-  }
+  })();
+}, [user?.id, quizzes.length]);
 
-  function enqueueEmptyGroups(ids) {
-    if (!ids?.length) return;
-    setCleanupQueue((prev) => {
-      const set = new Set(prev);
-      ids.forEach((id) => id && set.add(id));
-      return Array.from(set);
-    });
-  }
+function toggleSelected(quizId) {
+  setSelectedIds((prev) => {
+    const next = new Set(prev);
+    if (next.has(quizId)) next.delete(quizId);
+    else next.add(quizId);
+    return next;
+  });
+}
+function clearSelection() {
+  setSelectedIds(new Set());
+}
+
+function enqueueEmptyGroups(ids) {
+  if (!ids?.length) return;
+  setCleanupQueue((prev) => {
+    const set = new Set(prev);
+    ids.forEach((id) => id && set.add(id));
+    return Array.from(set);
+  });
+}
+
   async function checkEmptyGroup(groupId) {
     if (!groupId) return null;
     const { count, error } = await supabase
@@ -492,7 +756,6 @@ export default function Dashboard() {
           ? gGroupId || (filterGroupId !== NO_GROUP ? filterGroupId : "")
           : "";
 
-      // Optional RAG
       let file_id = null;
       if (gFile) {
         let rawDoc = "";
@@ -535,7 +798,6 @@ export default function Dashboard() {
         }
       }
 
-      // Avoid prompts
       let avoid_prompts = [];
       if (gNoRepeat && targetGroupIdForNoRepeat) {
         const { data: prior, error: priorErr } = await supabase
@@ -625,7 +887,9 @@ export default function Dashboard() {
         .select("id, name")
         .single();
       if (!error && data) {
-        setGroups((gs) => [...gs, data].sort((a, b) => a.name.localeCompare(b.name)));
+        setGroups((gs) =>
+          [...gs, data].sort((a, b) => a.name.localeCompare(b.name))
+        );
         setGGroupId(data.id);
         setGNewOpen(false);
         setGNewName("");
@@ -693,7 +957,9 @@ export default function Dashboard() {
           .select("id, name")
           .single();
         if (gErr) throw gErr;
-        setGroups((gs) => [...gs, g].sort((a, b) => a.name.localeCompare(b.name)));
+        setGroups((gs) =>
+          [...gs, g].sort((a, b) => a.name.localeCompare(b.name))
+        );
         targetGroupId = g.id;
       }
 
@@ -713,7 +979,9 @@ export default function Dashboard() {
       clearSelection();
       await load();
 
-      const toCheck = prevGroupIds.filter((gid) => gid !== (targetGroupId || null));
+      const toCheck = prevGroupIds.filter(
+        (gid) => gid !== (targetGroupId || null)
+      );
       if (toCheck.length) enqueueEmptyGroups(toCheck);
     } catch {
       alert("Failed to move selected quizzes. Please try again.");
@@ -769,7 +1037,9 @@ export default function Dashboard() {
       if (error) throw error;
       setGroups((gs) =>
         gs
-          .map((g) => (g.id === currentGroup.id ? { ...g, name: data.name } : g))
+          .map((g) =>
+            g.id === currentGroup.id ? { ...g, name: data.name } : g
+          )
           .sort((a, b) => a.name.localeCompare(b.name))
       );
       setEditGroupOpen(false);
@@ -781,16 +1051,13 @@ export default function Dashboard() {
     }
   }
 
-  // ------- sorting + searching -------
   const sortedQuizzes = useMemo(() => {
     return [...quizzes].sort((a, b) => {
-      const av = scoresByQuiz[a.id]?.last;
-      const bv = scoresByQuiz[b.id]?.last;
-      const aVal = av == null ? (scoreSort === "asc" ? Infinity : -Infinity) : av;
-      const bVal = bv == null ? (scoreSort === "asc" ? Infinity : -Infinity) : bv;
-      return scoreSort === "asc" ? aVal - bVal : bVal - aVal;
+      const ad = new Date(a?.updated_at || 0).getTime();
+      const bd = new Date(b?.updated_at || 0).getTime();
+      return bd - ad;
     });
-  }, [quizzes, scoresByQuiz]);
+  }, [quizzes]);
 
   const visibleQuizzes = useMemo(() => {
     const q = (query || "").toLowerCase();
@@ -800,18 +1067,106 @@ export default function Dashboard() {
     );
   }, [sortedQuizzes, query]);
 
-  const selectedTitles = useMemo(() => {
-    if (!selectedIds.size) return [];
-    const byId = new Map(quizzes.map((q) => [q.id, q]));
-    return Array.from(selectedIds).map((id) => {
-      const t = byId.get(id)?.title;
-      return t && t.trim() ? t : "Untitled Quiz";
-    });
-  }, [selectedIds, quizzes]);
+  // Revisit counts (existing)
+const groupReviewCount = useMemo(() => {
+  if (!(filterGroupId && filterGroupId !== NO_GROUP)) return 0;
+  return visibleQuizzes.reduce(
+    (sum, q) => sum + (q?.review_questions?.length ?? 0),
+    0
+  );
+}, [visibleQuizzes, filterGroupId]);
 
-  // --- Carousel refs / helpers ---
+const noGroupReviewCount = useMemo(() => {
+  if (filterGroupId !== NO_GROUP) return 0;
+  return visibleQuizzes.reduce(
+    (sum, q) => sum + (q?.review_questions?.length ?? 0),
+    0
+  );
+}, [visibleQuizzes, filterGroupId]);
+
+const allReviewCount = useMemo(() => {
+  if (filterGroupId !== "") return 0;
+  return visibleQuizzes.reduce(
+    (sum, q) => sum + (q?.review_questions?.length ?? 0),
+    0
+  );
+}, [visibleQuizzes, filterGroupId]);
+
+// NEW: All-Questions counts (any question, not just Revisit)
+const groupAllCount = useMemo(() => {
+  if (!(filterGroupId && filterGroupId !== NO_GROUP)) return 0;
+  return visibleQuizzes.reduce((sum, q) => sum + (q?.questions?.length ?? 0), 0);
+}, [visibleQuizzes, filterGroupId]);
+
+const noGroupAllCount = useMemo(() => {
+  if (filterGroupId !== NO_GROUP) return 0;
+  return visibleQuizzes.reduce((sum, q) => sum + (q?.questions?.length ?? 0), 0);
+}, [visibleQuizzes, filterGroupId]);
+
+const allAllCount = useMemo(() => {
+  if (filterGroupId !== "") return 0;
+  return visibleQuizzes.reduce((sum, q) => sum + (q?.questions?.length ?? 0), 0);
+}, [visibleQuizzes, filterGroupId]);
+
+
+useEffect(() => {
+  dbg("COUNTS", {
+    filterGroupId,
+    groupReviewCount,
+    noGroupReviewCount,
+    allReviewCount,
+    groupAllCount,
+    noGroupAllCount,
+    allAllCount,
+    allRevisitScore,
+    allAllScore,
+    groupRevisitForCurrent: currentGroup ? groupRevisitScores.get(currentGroup.id) : null,
+    groupAllForCurrent: currentGroup ? groupAllScores.get(currentGroup.id) : null,
+  });
+}, [
+  filterGroupId,
+  groupReviewCount,
+  noGroupReviewCount,
+  allReviewCount,
+  groupAllCount,
+  noGroupAllCount,
+  allAllCount,
+  allRevisitScore,
+  allAllScore,
+  currentGroup,
+  groupRevisitScores,
+  groupAllScores,
+]);
+
   const railRef = useRef(null);
   const CARD_W = 520;
+  const [canLeft, setCanLeft] = useState(false);
+  const [canRight, setCanRight] = useState(false);
+
+  function updateScrollButtons() {
+    const el = railRef.current;
+    if (!el) {
+      setCanLeft(false);
+      setCanRight(false);
+      return;
+    }
+    const max = Math.max(0, el.scrollWidth - el.clientWidth);
+    const eps = 1;
+    setCanLeft(el.scrollLeft > eps);
+    setCanRight(max - el.scrollLeft > eps);
+  }
+
+  useEffect(() => {
+    updateScrollButtons();
+    const onResize = () => updateScrollButtons();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useEffect(() => {
+    setTimeout(updateScrollButtons, 0);
+  }, [visibleQuizzes.length]);
+
   function scrollLeft() {
     const rail = railRef.current;
     if (!rail) return;
@@ -823,21 +1178,9 @@ export default function Dashboard() {
     rail.scrollBy({ left: rail.clientWidth || CARD_W, behavior: "smooth" });
   }
 
-  // Helper: build questions preview text (now extra line between questions)
-  function buildPreview(quiz) {
-    const items = Array.isArray(quiz?.questions) ? quiz.questions : [];
-    const lines = [];
-    for (let i = 0; i < items.length; i++) {
-      const p = (items[i]?.prompt || "").toString().trim();
-      if (!p) continue;
-      lines.push(`${i + 1}. ${p}`);
-    }
-    return lines.join("\n\n"); // <— extra blank line
-  }
-
-  // ---------- UI ----------
+  /* ---------------------------------- UI ---------------------------------- */
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
+    <div className="min-h-screen bg-gray-900 text-white overflow-x-hidden">
       <header className="border-b border-gray-800 px-6 sm:px-8 lg:px-12 py-3 sm:py-4">
         <div className="grid grid-cols-2 sm:grid-cols-3 items-center">
           <h1 className="text-xl font-bold justify-self-start self-center order-2 sm:order-none mt-2 sm:mt-0">
@@ -893,10 +1236,10 @@ export default function Dashboard() {
       </header>
 
       <main className="max-w-6xl mx-auto p-6">
-        {/* ---- MOBILE actions (unchanged) ---- */}
-        <div className="mb-6 sm:hidden">
+       {/* ---- MOBILE actions ---- */}
+<div className="mb-6 sm:hidden">
+  {/* Top buttons (unchanged positions) */}
   <div className="flex items-stretch gap-2">
-    {/* keep AI button natural width */}
     <button
       onClick={async () => {
         if (filterGroupId && filterGroupId !== NO_GROUP) setGGroupId(filterGroupId);
@@ -910,30 +1253,22 @@ export default function Dashboard() {
       + Generate Quiz with AI
     </button>
 
-    {/* make “New empty quiz” fill the rest of the row */}
     <button
       onClick={createQuiz}
-      className={`flex-1 w-full whitespace-nowrap ${btnBase} ${btnGray} h-11 px-3 py-2 text-[13px]`}
+      className={`flex-1 whitespace-nowrap ${btnBase} ${btnGray} h-11 px-3 py-2 text-[13px]`}
       disabled={creating}
     >
       {creating ? "Creating…" : "New empty quiz"}
     </button>
   </div>
 
+  {/* Filters/search underneath */}
   <div className="mt-3 flex flex-wrap items-stretch gap-3">
-    <div className="flex-none w-full">
-      <input
-        className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 placeholder:text-gray-400"
-        placeholder="Search quizzes…"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-      />
-    </div>
-
+    {/* Filter by group (moved above search) */}
     <div className="flex items-center gap-2 w-full">
       <label className="text-sm text-gray-300 shrink-0">Filter by group:</label>
       <select
-        className="w-full p-2 rounded bg-gray-800 text-white border border-gray-700"
+        className="w-full rounded bg-gray-800 text-white border border-gray-700 px-3 py-2 h-11 text-[13px]"
         value={filterGroupId}
         onChange={(e) => setFilterGroupId(e.target.value)}
       >
@@ -946,6 +1281,16 @@ export default function Dashboard() {
         ))}
       </select>
     </div>
+
+   {/* Search — full-width on mobile */}
+<div className="w-full">
+  <input
+    className="block w-full rounded bg-gray-800 text-white border border-gray-700 px-3 py-2 h-11 text-[13px] placeholder:text-gray-400"
+    placeholder="Search quizzes…"
+    value={query}
+    onChange={(e) => setQuery(e.target.value)}
+  />
+</div>
 
     {hasSelected && (
       <div className="ml-auto flex items-center gap-2">
@@ -964,7 +1309,8 @@ export default function Dashboard() {
         <div className="mb-6 hidden sm:flex flex-wrap items-stretch gap-3 w-full">
           <button
             onClick={async () => {
-              if (filterGroupId && filterGroupId !== NO_GROUP) setGGroupId(filterGroupId);
+              if (filterGroupId && filterGroupId !== NO_GROUP)
+                setGGroupId(filterGroupId);
               else setGGroupId("");
               const allowed = await ensureCanCreate();
               if (!allowed) return;
@@ -983,9 +1329,7 @@ export default function Dashboard() {
             {creating ? "Creating…" : "New empty quiz"}
           </button>
 
-          {/* Search + (to its right) Group Filter */}
           <div className="flex-1 flex justify-end gap-3 w-full">
-            {/* Narrower search */}
             <div className="flex-none w-64 md:w-80">
               <input
                 className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 placeholder:text-gray-400"
@@ -995,13 +1339,12 @@ export default function Dashboard() {
               />
             </div>
 
-            {/* Narrower filter */}
-            <div className="flex-none w-56 md:w-64 flex items-center">
+            <div className="relative z-50 flex-none w-56 md:w-64 flex items-center">
               <label className="text-sm text-gray-300 mr-2 whitespace-nowrap">
                 Filter by group:
               </label>
               <select
-                className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700"
+                className="relative z-50 w-full p-3 rounded bg-gray-800 text-white border border-gray-700"
                 value={filterGroupId}
                 onChange={(e) => setFilterGroupId(e.target.value)}
               >
@@ -1018,34 +1361,34 @@ export default function Dashboard() {
 
           {hasSelected && (
             <div className="ml-auto flex items-center gap-2">
-              <button onClick={() => setMoveOpen(true)} className={`${btnBase} ${btnGray}`}>
+              <button
+                onClick={() => setMoveOpen(true)}
+                className={`${btnBase} ${btnGray}`}
+              >
                 Move to group
               </button>
-              <button onClick={() => setBulkConfirmOpen(true)} className={`${btnBase} ${btnRed}`}>
+              <button
+                onClick={() => setBulkConfirmOpen(true)}
+                className={`${btnBase} ${btnRed}`}
+              >
                 Delete selected
               </button>
             </div>
           )}
         </div>
 
-         {/* HORIZONTAL CAROUSEL */}
+        {/* ----------------------- QUIZ LIST / CAROUSEL ---------------------- */}
         {visibleQuizzes.length === 0 ? (
           <div className="text-gray-400">
             No quizzes yet. Create one or generate with AI.
           </div>
         ) : (
           <>
-            {/* --- MOBILE: vertical, self-contained scroll --- */}
+           {/* --- MOBILE vertical list --- */}
 <div className="sm:hidden">
   <div className="relative">
     <div
-      className="
-        max-h-[70vh]
-        overflow-y-auto
-        overscroll-contain
-        touch-pan-y
-        -mx-1 px-1 py-2
-      "
+      className="w-full pt-2 max-h-[72vh] overflow-y-auto overscroll-contain"
       aria-label="Your quizzes (scrollable list)"
     >
       <ul className="grid grid-cols-1 gap-3">
@@ -1057,12 +1400,9 @@ export default function Dashboard() {
           return (
             <li
               key={q.id}
-              className="w-full max-w-[580px]
-                         bg-gray-800 rounded-2xl p-4 shadow-sm border border-gray-800
-                         flex flex-col overflow-hidden
-                         h-[360px]"  // <-- fixed height so exactly one card fits comfortably
+              className="w-full max-w-[580px] bg-gray-800 rounded-2xl p-4 shadow-sm border border-gray-800 flex flex-col overflow-hidden h-[360px]"
             >
-              {/* Top content: meta + preview */}
+              {/* Top: meta + preview */}
               <div className="flex-1 grid grid-cols-1 gap-3 min-h-0 overflow-hidden">
                 {/* LEFT: title + meta */}
                 <div className="min-w-0">
@@ -1075,7 +1415,6 @@ export default function Dashboard() {
                       aria-label={`Select ${q.title || "Untitled Quiz"}`}
                     />
                     <div className="min-w-0">
-                      {/* slightly smaller title */}
                       <div
                         className="text-xl font-semibold leading-tight break-words"
                         title={q.title || "Untitled Quiz"}
@@ -1088,7 +1427,11 @@ export default function Dashboard() {
                         <div>
                           Last score:{" "}
                           {score?.last != null ? (
-                            <span className={score.last >= 90 ? "text-green-400 font-semibold" : ""}>
+                            <span
+                              className={
+                                score.last >= 90 ? "text-green-400 font-semibold" : ""
+                              }
+                            >
                               {score.last}%
                             </span>
                           ) : (
@@ -1098,7 +1441,11 @@ export default function Dashboard() {
                         <div>
                           Revisit score:{" "}
                           {score?.review != null ? (
-                            <span className={score.review >= 90 ? "text-green-400 font-semibold" : ""}>
+                            <span
+                              className={
+                                score.review >= 90 ? "text-green-400 font-semibold" : ""
+                              }
+                            >
                               {score.review}%
                             </span>
                           ) : (
@@ -1110,8 +1457,8 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* RIGHT: Questions preview — tighter and shorter */}
-                <div className="relative bg-gray-900/30 border border-gray-700 rounded-xl p-3">
+                {/* RIGHT: Questions preview */}
+                <div className="relative bg-gray-900/30 border border-gray-700 rounded-xl p-3 overflow-hidden">
                   <ol className="text-[13px] leading-5 list-decimal pl-5 pr-3 pb-7 space-y-1.5 max-h-[160px] overflow-hidden">
                     {(Array.isArray(q.questions) ? q.questions : []).map((it, idx) => {
                       const p = (it?.prompt || "").toString().trim();
@@ -1130,7 +1477,7 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Bottom actions — slightly shorter */}
+              {/* Bottom actions */}
               <div className="mt-3 grid grid-cols-4 gap-2">
                 <Link
                   to={`/play/${q.id}`}
@@ -1188,28 +1535,36 @@ export default function Dashboard() {
   </div>
 </div>
 
-            {/* --- DESKTOP/TABLET: horizontal carousel (unchanged) --- */}
-            <div className="relative hidden sm:block">
-              <button
-                type="button"
-                onClick={scrollLeft}
-                className="absolute -left-4 top-1/2 -translate-y-1/2 z-10 bg-gray-800 hover:bg-gray-700 rounded-full p-3 shadow"
-                aria-label="Scroll left"
-                title="Scroll left"
-              >
-                ‹
-              </button>
-              <button
-                type="button"
-                onClick={scrollRight}
-                className="absolute -right-4 top-1/2 -translate-y-1/2 z-10 bg-gray-800 hover:bg-gray-700 rounded-full p-3 shadow"
-                aria-label="Scroll right"
-                title="Scroll right"
-              >
-                ›
-              </button>
+            {/* --- DESKTOP/TABLET horizontal carousel --- */}
+            <div className="relative hidden sm:block overflow-x-clip">
+              {canLeft && (
+                <button
+                  type="button"
+                  onClick={scrollLeft}
+                  className="absolute -left-4 top-1/2 -translate-y-1/2 z-10 bg-gray-800 hover:bg-gray-700 rounded-full p-3 shadow"
+                  aria-label="Scroll left"
+                  title="Scroll left"
+                >
+                  ‹
+                </button>
+              )}
+              {canRight && (
+                <button
+                  type="button"
+                  onClick={scrollRight}
+                  className="absolute -right-4 top-1/2 -translate-y-1/2 z-10 bg-gray-800 hover:bg-gray-700 rounded-full p-3 shadow"
+                  aria-label="Scroll right"
+                  title="Scroll right"
+                >
+                  ›
+                </button>
+              )}
 
-              <div ref={railRef} className="overflow-x-auto">
+              <div
+                ref={railRef}
+                className="overflow-x-auto"
+                onScroll={updateScrollButtons}
+              >
                 <ul className="flex gap-6 px-1 py-2 min-w-full">
                   {visibleQuizzes.map((q) => {
                     const score = scoresByQuiz[q.id];
@@ -1223,7 +1578,7 @@ export default function Dashboard() {
                                    bg-gray-800 rounded-3xl p-5 shadow-sm border border-gray-800
                                    h-[460px] flex flex-col overflow-hidden"
                       >
-                        {/* Top content: left meta + right questions preview */}
+                        {/* Top content */}
                         <div className="flex-1 grid grid-cols-2 gap-4 min-h-0 overflow-hidden">
                           {/* LEFT: title + meta */}
                           <div className="min-w-0">
@@ -1248,7 +1603,13 @@ export default function Dashboard() {
                                   <div>
                                     Last score:{" "}
                                     {score?.last != null ? (
-                                      <span className={score.last >= 90 ? "text-green-400 font-semibold" : ""}>
+                                      <span
+                                        className={
+                                          score.last >= 90
+                                            ? "text-green-400 font-semibold"
+                                            : ""
+                                        }
+                                      >
                                         {score.last}%
                                       </span>
                                     ) : (
@@ -1258,7 +1619,13 @@ export default function Dashboard() {
                                   <div>
                                     Revisit score:{" "}
                                     {score?.review != null ? (
-                                      <span className={score.review >= 90 ? "text-green-400 font-semibold" : ""}>
+                                      <span
+                                        className={
+                                          score.review >= 90
+                                            ? "text-green-400 font-semibold"
+                                            : ""
+                                        }
+                                      >
                                         {score.review}%
                                       </span>
                                     ) : (
@@ -1271,17 +1638,21 @@ export default function Dashboard() {
                           </div>
 
                           {/* RIGHT: Questions preview */}
-                          <div className="relative bg-gray-900/30 border border-gray-700 rounded-2xl p-3">
+                          <div className="relative bg-gray-900/30 border border-gray-700 rounded-2xl p-3 overflow-hidden">
                             <ol className="text-sm leading-6 list-decimal pl-5 pr-3 pb-8 space-y-2 max-h-[320px] overflow-hidden">
-                              {(Array.isArray(q.questions) ? q.questions : []).map((it, idx) => {
-                                const p = (it?.prompt || "").toString().trim();
-                                if (!p) return null;
-                                return (
-                                  <li key={idx} className="break-words">
-                                    {p}
-                                  </li>
-                                );
-                              })}
+                              {(Array.isArray(q.questions) ? q.questions : []).map(
+                                (it, idx) => {
+                                  const p = (it?.prompt || "")
+                                    .toString()
+                                    .trim();
+                                  if (!p) return null;
+                                  return (
+                                    <li key={idx} className="break-words">
+                                      {p}
+                                    </li>
+                                  );
+                                }
+                              )}
                             </ol>
                             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-gray-900/95 to-transparent" />
                             <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end pr-3 pb-2 select-none">
@@ -1302,15 +1673,25 @@ export default function Dashboard() {
                           </Link>
 
                           <Link
-                            to={reviewDisabled ? "#" : `/play/${q.id}?mode=review`}
+                            to={
+                              reviewDisabled ? "#" : `/play/${q.id}?mode=review`
+                            }
                             onClick={(e) => {
                               if (reviewDisabled) e.preventDefault();
                             }}
                             className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center ${
                               reviewDisabled ? "opacity-50 cursor-not-allowed" : ""
                             }`}
-                            aria-label={reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"}
-                            title={reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"}
+                            aria-label={
+                              reviewDisabled
+                                ? "No Revisit questions yet"
+                                : "Practice Revisit"
+                            }
+                            title={
+                              reviewDisabled
+                                ? "No Revisit questions yet"
+                                : "Practice Revisit"
+                            }
                           >
                             <History className="h-6 w-6" />
                           </Link>
@@ -1349,20 +1730,219 @@ export default function Dashboard() {
           </>
         )}
 
-        {/* Group actions */}
-        {filterGroupId && filterGroupId !== NO_GROUP && currentGroup && (
-          <div className="mt-6 flex items-center gap-3">
-            <button onClick={openEditGroup} className={`${btnBase} ${btnGray}`}>
-              Edit Group Name
-            </button>
-            <button onClick={() => setDeleteGroupOpen(true)} className={`${btnBase} ${btnRed}`}>
-              Delete “{currentGroup.name}” group
-            </button>
+        {dbg("FOOTER check", { filterGroupId, isEmpty: filterGroupId === "", isNoGroup: filterGroupId === NO_GROUP, hasCurrent: !!currentGroup })}
+
+        {/* ---------------- Footer actions + “Last score” ------------------- */}
+{(() => {
+  const isAll = filterGroupId === "" || filterGroupId === ALL_GROUP_ID;
+  const isNoGroup = filterGroupId === NO_GROUP;
+  const isConcreteGroup = !!(filterGroupId && filterGroupId !== NO_GROUP && currentGroup);
+
+  return (isAll || isNoGroup || isConcreteGroup) ? (
+    <div className="mt-8 flex justify-center">
+      {/* Mobile: full width; ≥sm: shrink to content */}
+      <div className="w-full sm:w-auto">
+        <div className="w-full sm:w-auto bg-gray-800/60 border border-gray-700 rounded-2xl p-5 sm:p-6 shadow-sm">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between md:flex-nowrap gap-4">
+            {/* LEFT: context + last scores */}
+            <div className="text-base text-gray-300 space-y-2">
+              <div>
+                <span className="font-semibold text-white text-xl sm:text-2xl tracking-tight">
+                  {isConcreteGroup
+                    ? `${currentGroup.name} Group`
+                    : isNoGroup
+                    ? "“No group”"
+                    : "All group"}
+                </span>
+              </div>
+
+              {/* Revisit last score */}
+              <div className="text-sm sm:text-base">
+                <span className="text-gray-400">Revisit last score:</span>{" "}
+                {isAll ? (
+                  typeof allRevisitScore === "number" ? (
+                    <span className={allRevisitScore >= 90 ? "text-green-400 font-semibold" : "text-white"}>
+                      {allRevisitScore}%
+                    </span>
+                  ) : "—"
+                ) : isConcreteGroup ? (
+                  typeof groupRevisitScores.get(currentGroup.id) === "number" ? (
+                    <span className={groupRevisitScores.get(currentGroup.id) >= 90 ? "text-green-400 font-semibold" : "text-white"}>
+                      {groupRevisitScores.get(currentGroup.id)}%
+                    </span>
+                  ) : "—"
+                ) : isNoGroup ? (
+                  typeof groupRevisitScores.get(NO_GROUP_ID) === "number" ? (
+                    <span className={groupRevisitScores.get(NO_GROUP_ID) >= 90 ? "text-green-400 font-semibold" : "text-white"}>
+                      {groupRevisitScores.get(NO_GROUP_ID)}%
+                    </span>
+                  ) : "—"
+                ) : "—"}
+              </div>
+
+              {/* All-Questions last score */}
+              <div className="text-sm sm:text-base">
+                <span className="text-gray-400">All-questions last score:</span>{" "}
+                {isAll ? (
+                  typeof allAllScore === "number" ? (
+                    <span className={allAllScore >= 90 ? "text-green-400 font-semibold" : "text-white"}>
+                      {allAllScore}%
+                    </span>
+                  ) : "—"
+                ) : isConcreteGroup ? (
+                  typeof groupAllScores.get(currentGroup.id) === "number" ? (
+                    <span className={groupAllScores.get(currentGroup.id) >= 90 ? "text-green-400 font-semibold" : "text-white"}>
+                      {groupAllScores.get(currentGroup.id)}%
+                    </span>
+                  ) : "—"
+                ) : isNoGroup ? (
+                  typeof groupAllScores.get(NO_GROUP_ID) === "number" ? (
+                    <span className={groupAllScores.get(NO_GROUP_ID) >= 90 ? "text-green-400 font-semibold" : "text-white"}>
+                      {groupAllScores.get(NO_GROUP_ID)}%
+                    </span>
+                  ) : "—"
+                ) : "—"}
+              </div>
+            </div>
+
+            {/* RIGHT: actions (icons only; larger) */}
+            <div className="flex flex-col sm:flex-row md:flex-row md:flex-nowrap items-stretch gap-3">
+              {isConcreteGroup ? (
+                <>
+                  <Link
+                    to={groupReviewCount > 0 ? `/play/group/${currentGroup.id}?mode=review` : "#"}
+                    onClick={(e) => groupReviewCount === 0 && e.preventDefault()}
+                    className={`${btnBase} ${btnGray} inline-flex items-center justify-center min-h-[3.5rem] sm:min-h-[3.75rem] px-5 ${
+                      groupReviewCount === 0 ? "opacity-50 cursor-not-allowed" : ""
+                    }`}
+                    title={
+                      groupReviewCount === 0
+                        ? "No Revisit questions in this group yet"
+                        : `Play “${currentGroup.name}” Revisit Questions`
+                    }
+                    aria-label={`Play ${currentGroup.name} Revisit Questions`}
+                  >
+                    <History className="h-7 w-7 sm:h-8 sm:w-8 shrink-0" />
+                  </Link>
+
+                  <Link
+                    to={groupAllCount > 0 ? `/play/group/${currentGroup.id}?mode=all` : "#"}
+                    onClick={(e) => groupAllCount === 0 && e.preventDefault()}
+                    className={`${btnBase} ${btnGreen} inline-flex items-center justify-center min-h-[3.5rem] sm:min-h-[3.75rem] px-5 ${
+                      groupAllCount === 0 ? "opacity-50 cursor-not-allowed" : ""
+                    }`}
+                    title={
+                      groupAllCount === 0
+                        ? "No questions in this group yet"
+                        : `Play “${currentGroup.name}” All Questions`
+                    }
+                    aria-label={`Play ${currentGroup.name} All Questions`}
+                  >
+                    <Play className="h-7 w-7 sm:h-8 sm:w-8 shrink-0" />
+                  </Link>
+
+                  <button
+                    onClick={openEditGroup}
+                    className={`${btnBase} ${btnGray} inline-flex items-center justify-center min-h-[3.5rem] sm:min-h-[3.75rem] px-5`}
+                    title="Edit this group’s name"
+                    aria-label="Edit group name"
+                  >
+                    <SquarePen className="h-8 w-8" strokeWidth={2} />
+                  </button>
+
+                  <button
+                    onClick={() => setDeleteGroupOpen(true)}
+                    className={`${btnBase} ${btnRed} inline-flex items-center justify-center min-h-[3.5rem] sm:min-h-[3.75rem] px-5`}
+                    title={`Delete “${currentGroup.name}” and all its quizzes`}
+                    aria-label={`Delete ${currentGroup.name} group`}
+                  >
+                    <Trash2 className="h-8 w-8" strokeWidth={2} />
+                  </button>
+                </>
+              ) : isNoGroup ? (
+                <>
+                  <Link
+                    to={noGroupReviewCount > 0 ? `/play/group/${NO_GROUP_ID}?mode=review` : "#"}
+                    onClick={(e) => noGroupReviewCount === 0 && e.preventDefault()}
+                    className={`${btnBase} ${btnGray} inline-flex items-center justify-center min-h-[3.5rem] sm:min-h-[3.75rem] px-5 ${
+                      noGroupReviewCount === 0 ? "opacity-50 cursor-not-allowed" : ""
+                    }`}
+                    title={
+                      noGroupReviewCount === 0
+                        ? "No Revisit questions in No group yet"
+                        : "Play “No group” Revisit Questions"
+                    }
+                    aria-label="Play No group Revisit Questions"
+                  >
+                    <History className="h-7 w-7 sm:h-8 sm:w-8 shrink-0" />
+                  </Link>
+
+                  <Link
+                    to={noGroupAllCount > 0 ? `/play/group/${NO_GROUP_ID}?mode=all` : "#"}
+                    onClick={(e) => noGroupAllCount === 0 && e.preventDefault()}
+                    className={`${btnBase} ${btnGreen} inline-flex items-center justify-center min-h-[3.5rem] sm:min-h-[3.75rem] px-5 ${
+                      noGroupAllCount === 0 ? "opacity-50 cursor-not-allowed" : ""
+                    }`}
+                    title={
+                      noGroupAllCount === 0
+                        ? "No questions in No group yet"
+                        : "Play “No group” All Questions"
+                    }
+                    aria-label="Play No group All Questions"
+                  >
+                    <Play className="h-7 w-7 sm:h-8 sm:w-8 shrink-0" />
+                  </Link>
+                </>
+              ) : (
+                <>
+                  {/* Treat "" and ALL_GROUP_ID as All */}
+                  <Link
+                    to={allReviewCount > 0 ? `/play/all?mode=review` : "#"}
+                    onClick={(e) => allReviewCount === 0 && e.preventDefault()}
+                    className={`${btnBase} ${btnGray} inline-flex items-center justify-center min-h-[3.5rem] sm:min-h-[3.75rem] px-6 ${
+                      allReviewCount === 0 ? "opacity-50 cursor-not-allowed" : ""
+                    }`}
+                    title={
+                      allReviewCount === 0
+                        ? "No Revisit questions yet"
+                        : "Play Revisit Questions (All quizzes)"
+                    }
+                    aria-label="Play Revisit Questions (All)"
+                  >
+                    <History className="h-7 w-7 sm:h-8 sm:w-8 shrink-0" />
+                  </Link>
+
+                  <Link
+                    to={allAllCount > 0 ? `/play/all?mode=all` : "#"}
+                    onClick={(e) => allAllCount === 0 && e.preventDefault()}
+                    className={`${btnBase} ${btnGreen} inline-flex items-center justify-center min-h-[3.5rem] sm:min-h-[3.75rem] px-6 ${
+                      allAllCount === 0 ? "opacity-50 cursor-not-allowed" : ""
+                    }`}
+                    title={
+                      allAllCount === 0
+                        ? "No questions yet"
+                        : "Play All Questions (All quizzes)"
+                    }
+                    aria-label="Play All Questions (All)"
+                  >
+                    <Play className="h-7 w-7 sm:h-8 sm:w-8 shrink-0" />
+                  </Link>
+                </>
+              )}
+            </div>
           </div>
-        )}
+        </div>
+      </div>
+    </div>
+  ) : null;
+})()}
+
+
+
+
       </main>
 
-      {/* --- single delete --- */}
+      {/* ------------------------------ Modals ------------------------------- */}
       {confirmOpen && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-50"
@@ -1393,7 +1973,11 @@ export default function Dashboard() {
               >
                 Cancel
               </button>
-              <button className={`${btnBase} ${btnGray}`} onClick={handleDelete} disabled={deleting}>
+              <button
+                className={`${btnBase} ${btnGray}`}
+                onClick={handleDelete}
+                disabled={deleting}
+              >
                 {deleting ? "Deleting..." : "Delete"}
               </button>
             </div>
@@ -1401,7 +1985,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* --- Auth modal --- */}
       {authOpen && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-[95]"
@@ -1418,7 +2001,9 @@ export default function Dashboard() {
             className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-xl font-bold mb-2">Create account or sign in</h2>
+            <h2 className="text-xl font-bold mb-2">
+              Create account or sign in
+            </h2>
 
             {authMessage && (
               <div className="mb-4 rounded-lg bg-emerald-900/30 border border-emerald-800 p-3 text-sm">
@@ -1427,10 +2012,14 @@ export default function Dashboard() {
             )}
 
             <p className="text-gray-300 mb-4 text-sm">
-              Creating an account upgrades your current guest session so your quizzes stay with you.
+              Creating an account upgrades your current guest session so your
+              quizzes stay with you.
             </p>
 
-            <label className="block text-sm text-gray-300 mb-1" htmlFor="auth-email">
+            <label
+              className="block text-sm text-gray-300 mb-1"
+              htmlFor="auth-email"
+            >
               Email
             </label>
             <input
@@ -1443,7 +2032,10 @@ export default function Dashboard() {
               autoFocus
             />
 
-            <label className="block text-sm text-gray-300 mb-1" htmlFor="auth-pass">
+            <label
+              className="block text-sm text-gray-300 mb-1"
+              htmlFor="auth-pass"
+            >
               Password
             </label>
             <input
@@ -1493,7 +2085,6 @@ export default function Dashboard() {
               </button>
             </div>
 
-            {/* Google icon button on its own row */}
             <div className="mt-3 flex justify-center">
               <button
                 type="button"
@@ -1527,7 +2118,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* --- Generate modal (unchanged core UI) --- */}
       {genOpen && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-50"
@@ -1594,7 +2184,11 @@ export default function Dashboard() {
                 {gFile && (
                   <div className="mt-1 text-xs text-gray-300">
                     Selected: {gFile.name}{" "}
-                    <button type="button" className="underline" onClick={() => setGFile(null)}>
+                    <button
+                      type="button"
+                      className="underline"
+                      onClick={() => setGFile(null)}
+                    >
                       Clear
                     </button>
                   </div>
@@ -1649,10 +2243,18 @@ export default function Dashboard() {
             </div>
 
             <div className="flex flex-col sm:flex-row justify-end gap-2 mt-6">
-              <button className={`${btnBase} ${btnGray}`} onClick={() => setGenOpen(false)} disabled={generating}>
+              <button
+                className={`${btnBase} ${btnGray}`}
+                onClick={() => setGenOpen(false)}
+                disabled={generating}
+              >
                 Cancel
               </button>
-              <button className={`${btnBase} ${btnGreen}`} onClick={generateQuiz} disabled={generating}>
+              <button
+                className={`${btnBase} ${btnGreen}`}
+                onClick={generateQuiz}
+                disabled={generating}
+              >
                 {generating ? "Generating…" : "Generate"}
               </button>
             </div>
@@ -1660,7 +2262,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* --- New Group modal --- */}
       {gNewOpen && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-50"
@@ -1680,7 +2281,11 @@ export default function Dashboard() {
               onChange={(e) => setGNewName(e.target.value)}
             />
             <div className="flex justify-end gap-2 mt-6">
-              <button className={`${btnBase} ${btnGray}`} onClick={() => setGNewOpen(false)} disabled={gCreatingGroup}>
+              <button
+                className={`${btnBase} ${btnGray}`}
+                onClick={() => setGNewOpen(false)}
+                disabled={gCreatingGroup}
+              >
                 Cancel
               </button>
               <button
@@ -1695,7 +2300,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* --- Bulk Delete modal --- */}
       {bulkConfirmOpen && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-50"
@@ -1707,18 +2311,30 @@ export default function Dashboard() {
             className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-xl font-bold mb-2">Delete selected quizzes?</h2>
+            <h2 className="text-xl font-bold mb-2">
+              Delete selected quizzes?
+            </h2>
             <p className="text-gray-300 mb-4">
               You have selected:
               <span className="block mt-1 font-semibold break-words">
-                {selectedTitles.join(", ")}
+                {Array.from(selectedIds).length
+                  ? Array.from(selectedIds).join(", ")
+                  : "None"}
               </span>
             </p>
             <div className="flex flex-col sm:flex-row justify-end gap-2">
-              <button className={`${btnBase} ${btnGray}`} onClick={() => setBulkConfirmOpen(false)} disabled={bulkDeleting}>
+              <button
+                className={`${btnBase} ${btnGray}`}
+                onClick={() => setBulkConfirmOpen(false)}
+                disabled={bulkDeleting}
+              >
                 Cancel
               </button>
-              <button className={`${btnBase} ${btnRedSoft}`} onClick={doBulkDelete} disabled={bulkDeleting}>
+              <button
+                className={`${btnBase} ${btnRedSoft}`}
+                onClick={doBulkDelete}
+                disabled={bulkDeleting}
+              >
                 {bulkDeleting ? "Deleting…" : "Delete selected"}
               </button>
             </div>
@@ -1726,7 +2342,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* --- Move to Group modal --- */}
       {moveOpen && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-50"
@@ -1764,7 +2379,9 @@ export default function Dashboard() {
               </div>
 
               <div>
-                <label className="block text-sm text-gray-300 mb-1">Or create a new group</label>
+                <label className="block text-sm text-gray-300 mb-1">
+                  Or create a new group
+                </label>
                 <input
                   className="w-full p-3 bg-white rounded bg-gray-800 text-white border border-gray-700"
                   placeholder="New group name (optional)"
@@ -1772,13 +2389,18 @@ export default function Dashboard() {
                   onChange={(e) => setMoveNewName(e.target.value)}
                 />
                 <p className="text-xs text-gray-400 mt-1">
-                  If you enter a name here, a new group will be created and used.
+                  If you enter a name here, a new group will be created and
+                  used.
                 </p>
               </div>
             </div>
 
             <div className="flex flex-col sm:flex-row justify-end gap-2 mt-6">
-              <button className={`${btnBase} ${btnGray}`} onClick={() => setMoveOpen(false)} disabled={moving}>
+              <button
+                className={`${btnBase} ${btnGray}`}
+                onClick={() => setMoveOpen(false)}
+                disabled={moving}
+              >
                 Cancel
               </button>
               <button
@@ -1794,7 +2416,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* --- Delete current group modal --- */}
       {deleteGroupOpen && currentGroup && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-50"
@@ -1808,13 +2429,23 @@ export default function Dashboard() {
           >
             <h2 className="text-xl font-bold mb-2">Delete group?</h2>
             <p className="text-gray-300 mb-6">
-              This deletes the group <span className="font-semibold">{currentGroup.name}</span> and all quizzes inside it.
+              This deletes the group{" "}
+              <span className="font-semibold">{currentGroup.name}</span> and all
+              quizzes inside it.
             </p>
             <div className="flex flex-col sm:flex-row justify-end gap-2">
-              <button className={`${btnBase} ${btnGray}`} onClick={() => setDeleteGroupOpen(false)} disabled={deletingGroup}>
+              <button
+                className={`${btnBase} ${btnGray}`}
+                onClick={() => setDeleteGroupOpen(false)}
+                disabled={deletingGroup}
+              >
                 Cancel
               </button>
-              <button className={`${btnBase} ${btnRed}`} onClick={deleteCurrentGroupNow} disabled={deletingGroup}>
+              <button
+                className={`${btnBase} ${btnRed}`}
+                onClick={deleteCurrentGroupNow}
+                disabled={deletingGroup}
+              >
                 {deletingGroup ? "Deleting…" : "Delete group"}
               </button>
             </div>
@@ -1822,7 +2453,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* --- Edit group name modal --- */}
       {editGroupOpen && currentGroup && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-50"
@@ -1842,7 +2472,11 @@ export default function Dashboard() {
               placeholder="Group name"
             />
             <div className="flex flex-col sm:flex-row justify-end gap-2 mt-6">
-              <button className={`${btnBase} ${btnGray}`} onClick={() => setEditGroupOpen(false)} disabled={savingGroupName}>
+              <button
+                className={`${btnBase} ${btnGray}`}
+                onClick={() => setEditGroupOpen(false)}
+                disabled={savingGroupName}
+              >
                 Cancel
               </button>
               <button
@@ -1857,7 +2491,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* --- Empty group cleanup modal --- */}
       {cleanupOpen && cleanupGroup && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-50"
@@ -1871,13 +2504,23 @@ export default function Dashboard() {
           >
             <h2 className="text-xl font-bold mb-2">Delete empty group?</h2>
             <p className="text-gray-300 mb-6">
-              The group <span className="font-semibold">{cleanupGroup.name}</span> is now empty. Would you like to delete it?
+              The group{" "}
+              <span className="font-semibold">{cleanupGroup.name}</span> is now
+              empty. Would you like to delete it?
             </p>
             <div className="flex flex-col sm:flex-row justify-end gap-2">
-              <button className={`${btnBase} ${btnGray}`} onClick={keepEmptyGroupNow} disabled={cleaning}>
+              <button
+                className={`${btnBase} ${btnGray}`}
+                onClick={keepEmptyGroupNow}
+                disabled={cleaning}
+              >
                 Keep group
               </button>
-              <button className={`${btnBase} ${btnRed}`} onClick={deleteEmptyGroupNow} disabled={cleaning}>
+              <button
+                className={`${btnBase} ${btnRed}`}
+                onClick={deleteEmptyGroupNow}
+                disabled={cleaning}
+              >
                 {cleaning ? "Deleting…" : "Delete group"}
               </button>
             </div>

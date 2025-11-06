@@ -1,8 +1,116 @@
 // src/pages/Play.jsx
 import { useEffect, useState, useRef } from "react";
-import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useParams, Link, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
+import { getInitialGroupFromUrlOrStorage } from "../lib/groupFilter";
+
+// --- Sentinel for the ALL bucket ---
+const ALL_GROUP_ID = "00000000-0000-0000-0000-000000000000";
+// Use this for the “No Group” bucket’s persisted score
+const NO_GROUP_ID = "00000000-0000-0000-0000-000000000001";
+const NO_GROUP = "__none__"; // Dashboard's token for "No Group"
+
+// Rounded INT write + verify row (REVISIT score)
+async function saveGroupRevisitScore(userId, { scope, groupId, percentExact }) {
+  try {
+    if (!userId || typeof percentExact !== "number") return;
+    if (scope !== "all" && scope !== "group") return;
+
+    const percentInt = Math.round(percentExact);
+    const gid = scope === "all"
+      ? ALL_GROUP_ID
+      : (groupId && groupId !== "null" && groupId !== "" ? groupId : NO_GROUP_ID);
+
+    const payload = {
+      user_id: userId,
+      scope,                         // 'group' | 'all'
+      group_id: gid,                 // ALL_GROUP_ID for 'all', sentinel for “No group”
+      last_review_score: percentInt, // INTEGER (must exist in DB)
+      updated_at: new Date().toISOString(),
+    };
+
+    console.log("[group_scores][REVIEW] upsert payload =>", payload);
+
+    const { error: upErr } = await supabase
+      .from("group_scores")
+      .upsert(payload, { onConflict: "user_id,scope,group_id" });
+
+    if (upErr) {
+      console.error("[group_scores][REVIEW] upsert error:", upErr);
+      return;
+    }
+
+    // Read back the exact row we just wrote (so you can see it in DevTools)
+    const { data: row, error: readErr } = await supabase
+      .from("group_scores")
+      .select("user_id, scope, group_id, last_review_score, updated_at")
+      .eq("user_id", userId)
+      .eq("scope", scope)
+      .eq("group_id", gid)
+      .single();
+
+    if (readErr) console.error("[group_scores][REVIEW] verify read error:", readErr);
+    else console.log("[group_scores][REVIEW] verify row =>", row);
+  } catch (e) {
+    console.error("[group_scores][REVIEW] thrown:", e);
+  }
+}
+
+// Rounded INT write + verify row (ALL-QUESTIONS score)
+// Requires a column: group_scores.last_all_score INT
+async function saveGroupAllScore(userId, { scope, groupId, percentExact }) {
+  try {
+    if (!userId || typeof percentExact !== "number") return;
+    if (scope !== "all" && scope !== "group") return;
+
+    const percentInt = Math.round(percentExact);
+    const gid = scope === "all"
+      ? ALL_GROUP_ID
+      : (groupId && groupId !== "null" && groupId !== "" ? groupId : NO_GROUP_ID);
+
+    const payload = {
+      user_id: userId,
+      scope,
+      group_id: gid,
+      last_all_score: percentInt, // <-- make sure this column exists in DB
+      updated_at: new Date().toISOString(),
+    };
+
+    console.log("[group_scores][ALL-Q] upsert payload =>", payload);
+
+    const { error: upErr } = await supabase
+      .from("group_scores")
+      .upsert(payload, { onConflict: "user_id,scope,group_id" });
+
+    if (upErr) {
+      console.error("[group_scores][ALL-Q] upsert error:", upErr);
+      return;
+    }
+
+    const { data: row, error: readErr } = await supabase
+      .from("group_scores")
+      .select("user_id, scope, group_id, last_all_score, updated_at")
+      .eq("user_id", userId)
+      .eq("scope", scope)
+      .eq("group_id", gid)
+      .single();
+
+    if (readErr) console.error("[group_scores][ALL-Q] verify read error:", readErr);
+    else console.log("[group_scores][ALL-Q] verify row =>", row);
+  } catch (e) {
+    console.error("[group_scores][ALL-Q] thrown:", e);
+  }
+}
+
+
+
+
+// Placeholder for forthcoming SQL change to store “All Questions” scores per Group/All
+async function saveGroupAllQuestionsScore(/* userId, { scope, groupId, percentExact } */) {
+  // Will write to group_scores.last_all_score (or similar) after the SQL step.
+  console.warn("[group_scores] last_all_score not persisted yet – SQL migration pending.");
+}
 
 /* ---------- Free local fuzzy helpers (cheap) ---------- */
 function normalize(s) {
@@ -112,21 +220,54 @@ function strictFactCorrect(userAns, expected) {
 export default function Play() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { quizId } = useParams();
+
+  // Support /play/:quizId, /play/group/:groupId?mode=..., and /play/all?mode=...
+  const { quizId, groupId } = useParams();
   const [sp] = useSearchParams();
-  const isReviewMode = (sp.get("mode") || "").toLowerCase() === "review";
+  const location = useLocation();
+  const lastGroup = getInitialGroupFromUrlOrStorage(location.search);
+
+  const modeParam = (sp.get("mode") || "").toLowerCase(); // "review" | "all" (or "questions"/"full")
+  const wantsReview = modeParam === "review";
+  const wantsAllQuestions = modeParam === "all" || modeParam === "questions" || modeParam === "full";
+
+  const isGroupMode = !!groupId;
+  const isAllMode = location.pathname.startsWith("/play/all");
+  const isSyntheticMode = isGroupMode || isAllMode;
+  
+  const backPath = (() => {
+  if (isGroupMode) {
+    const gid = groupId;
+    // Map the synthetic No-Group UUID (or empty-ish) to the Dashboard token "__none__"
+    const token =
+      !gid || gid === "null" || gid === "" || gid === NO_GROUP_ID ? NO_GROUP : gid;
+    return `/?group=${encodeURIComponent(token)}`;
+  }
+  if (isAllMode) {
+    return `/?group=${encodeURIComponent(ALL_GROUP_ID)}`;
+  }
+  // Single quiz: fall back to last stored/URL group
+  const last = getInitialGroupFromUrlOrStorage("");
+  return last ? `/?group=${encodeURIComponent(last)}` : "/";
+})();
+
+
+  // For SINGLE quiz: default to main (questions) unless ?mode=review
+  // For SYNTHETIC: we respect the mode param; default to REVIEW if param is missing/invalid.
+  const isReviewMode = isSyntheticMode ? (wantsReview || !wantsAllQuestions) : wantsReview;
+  const isAllQuestionsMode = isSyntheticMode ? wantsAllQuestions : !isReviewMode;
 
   const [quiz, setQuiz] = useState(null);
   const [index, setIndex] = useState(0);
 
   // Per-question state
-  const [answered, setAnswered] = useState([]);               // correct flags
-  const [inputs, setInputs] = useState([]);                   // cached text per Q
-  const [feedback, setFeedback] = useState("");               // UI message
+  const [answered, setAnswered] = useState([]);
+  const [inputs, setInputs] = useState([]);
+  const [feedback, setFeedback] = useState("");
 
   // Scoring/attempt state
-  const [attempted, setAttempted] = useState([]);             // tried at least once
-  const [firstTryCorrect, setFirstTryCorrect] = useState([]); // first submission correct?
+  const [attempted, setAttempted] = useState([]);
+  const [firstTryCorrect, setFirstTryCorrect] = useState([]);
 
   // Results modal
   const [showResult, setShowResult] = useState(false);
@@ -155,27 +296,149 @@ export default function Play() {
   const [showRemovePrompt, setShowRemovePrompt] = useState(false);
   const [removedFromReview, setRemovedFromReview] = useState(false);
 
-  // --- Peek state for "Display answer" toggle ---
-  // peekOn[qIndex]: whether we are showing the correct answer in the textarea for that question
+  // --- Peek state ---
   const [peekOn, setPeekOn] = useState([]);
-  // peekStash[qIndex]: the user's original text saved before we switched to the correct answer
   const [peekStash, setPeekStash] = useState([]);
 
-  // Load quiz
+  // Load quiz, group revisit/all, or ALL revisit/all
   useEffect(() => {
+    if (!user?.id) return;
+
     (async () => {
+      // --- ALL synthetic: /play/all?mode=review|all ---
+      if (isAllMode) {
+        const { data: rows, error } = await supabase
+          .from("quizzes")
+          .select("id, title, questions, review_questions")
+          .eq("user_id", user.id)
+          .order("updated_at", { ascending: false });
+
+        if (error) {
+          console.error("[ALL] quizzes read error:", error);
+          setQuiz({ title: isReviewMode ? "All — Revisit" : "All — All Questions", questions: [], review_questions: [] });
+        }
+
+        const merged = [];
+        for (const row of rows || []) {
+          const arr = isReviewMode
+            ? Array.isArray(row?.review_questions) ? row.review_questions : []
+            : Array.isArray(row?.questions) ? row.questions : [];
+          for (const q of arr) {
+            merged.push({
+              prompt: String(q?.prompt ?? ""),
+              answer: String(q?.answer ?? ""),
+              __srcQuizId: row.id,
+              __srcTitle: row.title || "Untitled Quiz",
+            });
+          }
+        }
+
+        const title = isReviewMode ? "All — Revisit" : "All — All Questions";
+        const synthetic = isReviewMode
+          ? { title, questions: [], review_questions: merged, file_id: null }
+          : { title, questions: merged, review_questions: [], file_id: null };
+
+        const len = merged.length;
+
+        setQuiz(synthetic);
+        setIndex(0);
+        setAnswered(Array(len).fill(false));
+        setInputs(Array(len).fill(""));
+        setAttempted(Array(len).fill(false));
+        setFirstTryCorrect(Array(len).fill(false));
+        setReturnIndex(null);
+        setInput("");
+        setFeedback("");
+        setShowResult(false);
+        setShowReviewPrompt(false);
+        setAddedToReview(false);
+        setShowRemovePrompt(false);
+        setRemovedFromReview(false);
+        setPeekOn(Array(len).fill(false));
+        setPeekStash(Array(len).fill(""));
+        return;
+      }
+
+      // --- GROUP synthetic: /play/group/:groupId?mode=review|all ---
+      if (isGroupMode) {
+        const isNoGroupParam = groupId === NO_GROUP_ID;
+        const { data: g, error: gErr } = await supabase
+          .from("groups")
+          .select("id,name")
+          .eq("user_id", user.id)
+          .eq("id", groupId)
+          .maybeSingle();
+        if (gErr) console.warn("[GROUP] groups read error:", gErr);
+
+        let q = supabase
+          .from("quizzes")
+          .select("id, title, questions, review_questions, group_id")
+          .eq("user_id", user.id)
+          .order("updated_at", { ascending: false });
+
+        q = isNoGroupParam ? q.is("group_id", null) : q.eq("group_id", groupId);
+        const { data: qs, error: qsErr } = await q;
+        if (qsErr) console.error("[GROUP] quizzes read error:", qsErr);
+
+        const merged = [];
+        for (const row of qs || []) {
+          const arr = isReviewMode
+            ? Array.isArray(row?.review_questions) ? row.review_questions : []
+            : Array.isArray(row?.questions) ? row.questions : [];
+          for (const qq of arr) {
+            merged.push({
+              prompt: String(qq?.prompt ?? ""),
+              answer: String(qq?.answer ?? ""),
+              __srcQuizId: row.id,
+              __srcTitle: row.title || "Untitled Quiz",
+            });
+          }
+        }
+
+        const groupLabel = g?.name ?? (isNoGroupParam ? "No Group" : "Group");
+        const title = isReviewMode ? `${groupLabel} — Revisit` : `${groupLabel} — All Questions`;
+        const synthetic = isReviewMode
+          ? { title, questions: [], review_questions: merged, file_id: null }
+          : { title, questions: merged, review_questions: [], file_id: null };
+
+        const len = merged.length;
+
+        setQuiz(synthetic);
+        setIndex(0);
+        setAnswered(Array(len).fill(false));
+        setInputs(Array(len).fill(""));
+        setAttempted(Array(len).fill(false));
+        setFirstTryCorrect(Array(len).fill(false));
+        setReturnIndex(null);
+        setInput("");
+        setFeedback("");
+        setShowResult(false);
+        setShowReviewPrompt(false);
+        setAddedToReview(false);
+        setShowRemovePrompt(false);
+        setRemovedFromReview(false);
+        setPeekOn(Array(len).fill(false));
+        setPeekStash(Array(len).fill(""));
+        return;
+      }
+
+      // --- SINGLE QUIZ: /play/:quizId (normal or ?mode=review)
       const { data, error } = await supabase
         .from("quizzes")
         .select("title, questions, review_questions, file_id")
         .eq("id", quizId)
         .eq("user_id", user.id)
         .single();
-      if (error || !data) return;
 
-      const arr = isReviewMode ? (data.review_questions ?? []) : (data.questions ?? []);
+      if (error || !data) {
+        console.warn("[SINGLE] quiz read error or no data:", error);
+        setQuiz({ title: "Quiz", questions: [], review_questions: [] });
+      }
+
+      const arr = isReviewMode ? (data?.review_questions ?? []) : (data?.questions ?? []);
       const len = arr.length;
 
-      setQuiz(data);
+      setQuiz(data || { title: "Quiz", questions: [], review_questions: [] });
       setIndex(0);
       setAnswered(Array(len).fill(false));
       setInputs(Array(len).fill(""));
@@ -192,7 +455,15 @@ export default function Play() {
       setPeekOn(Array(len).fill(false));
       setPeekStash(Array(len).fill(""));
     })();
-  }, [quizId, user.id, isReviewMode]);
+  }, [
+    quizId,
+    groupId,
+    user?.id,
+    isReviewMode,
+    isGroupMode,
+    isAllMode,
+    isAllQuestionsMode,
+  ]);
 
   // Helpers to access the active question set
   const questionsArr = isReviewMode ? (quiz?.review_questions ?? []) : (quiz?.questions ?? []);
@@ -208,16 +479,16 @@ export default function Play() {
   const canContinue = /press\s*c\s*to\s*continue/i.test(feedback);
 
   // When switching questions, restore saved input & CLEAR feedback unless this Q is already correct
-useEffect(() => {
-  if (index == null) return;
-  setInput((arr) => (Array.isArray(arr) ? arr[index] || "" : inputs[index] || ""));
-  setFeedback(answered[index] ? "✅ Correct! Press C to continue." : "");
-  setShowReviewPrompt(false);
-  setAddedToReview(false);
-  setShowRemovePrompt(false);
-  setRemovedFromReview(false);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [index]);
+  useEffect(() => {
+    if (index == null) return;
+    setInput((arr) => (Array.isArray(arr) ? arr[index] || "" : inputs[index] || ""));
+    setFeedback(answered[index] ? "✅ Correct! Press C to continue." : "");
+    setShowReviewPrompt(false);
+    setAddedToReview(false);
+    setShowRemovePrompt(false);
+    setRemovedFromReview(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [index]);
 
   // --- Unanswered earlier question detection ---
   const firstUnansweredBefore = attempted.slice(0, index).findIndex((v) => !v);
@@ -232,8 +503,9 @@ useEffect(() => {
     });
   }
 
-  // Save latest score for Dashboard
-  async function saveLatestScore(pct, { review = false } = {}) {
+  // Save latest per-quiz score (rounded for display)
+  async function saveLatestScore(pctRounded, { review = false } = {}) {
+    if (isSyntheticMode) return; // no per-quiz score to store
     try {
       const { data: existing } = await supabase
         .from("quiz_scores")
@@ -248,56 +520,104 @@ useEffect(() => {
         user_id: user.id,
         quiz_id: quizId,
         updated_at: now,
-        last_score: review ? (existing?.last_score ?? null) : pct,
-        last_review_score: review ? pct : (existing?.last_review_score ?? null),
+        last_score: review ? (existing?.last_score ?? null) : pctRounded,
+        last_review_score: review ? pctRounded : (existing?.last_review_score ?? null),
       };
 
-      await supabase
-        .from("quiz_scores")
-        .upsert(payload, { onConflict: "user_id,quiz_id" });
+      await supabase.from("quiz_scores").upsert(payload, { onConflict: "user_id,quiz_id" });
     } catch {
       /* ignore */
     }
   }
-  function maybeFinish(attemptedNext, firstTryNext) {
-    if (!attemptedNext.every(Boolean)) return;
-    const points = firstTryNext.filter(Boolean).length;
-    const pct = total ? Math.round((points / total) * 100) : 0;
-    setScorePct(pct);
-    setShowResult(true);
-    saveLatestScore(pct, { review: isReviewMode });
+
+  // Replace your maybeFinish with this version
+async function maybeFinish(attemptedNext, firstTryNext) {
+  if (!attemptedNext.every(Boolean)) return;
+
+  const points = firstTryNext.filter(Boolean).length;
+  const pctExact = total ? (points / total) * 100 : 0;   // exact for storage
+  const pctRounded = Math.round(pctExact);               // rounded for UI
+
+  setScorePct(pctRounded);
+  setShowResult(true);
+
+  // Per-quiz last score (no-op for synthetic modes inside saveLatestScore)
+  await saveLatestScore(pctRounded, { review: isReviewMode });
+
+  // Group/All — Revisit scores
+  if (isSyntheticMode && isReviewMode) {
+    if (isGroupMode) {
+      const gid = groupId || NO_GROUP_ID;
+      await saveGroupRevisitScore(user?.id, { scope: "group", groupId: gid, percentExact: pctExact });
+    } else if (isAllMode) {
+      await saveGroupRevisitScore(user?.id, { scope: "all", groupId: ALL_GROUP_ID, percentExact: pctExact });
+    }
   }
 
-  function submitQuizNow() {
-    const points = firstTryCorrect.filter(Boolean).length;
-    const pct = total ? Math.round((points / total) * 100) : 0;
-    setScorePct(pct);
-    setShowResult(true);
-    saveLatestScore(pct, { review: isReviewMode });
+  // Group/All — All-questions scores (synthetic, non-review)
+  if (!isReviewMode && isSyntheticMode) {
+    if (isGroupMode) {
+      const gid = groupId || NO_GROUP_ID;
+      await saveGroupAllScore(user?.id, { scope: "group", groupId: gid, percentExact: pctExact });
+    } else if (isAllMode) {
+      await saveGroupAllScore(user?.id, { scope: "all", groupId: ALL_GROUP_ID, percentExact: pctExact });
+    }
   }
+}
+
+// Replace your submitQuizNow with this version
+async function submitQuizNow() {
+  const points = firstTryCorrect.filter(Boolean).length;
+  const pctExact = total ? (points / total) * 100 : 0;   // exact for storage
+  const pctRounded = Math.round(pctExact);               // rounded for UI
+
+  setScorePct(pctRounded);
+  setShowResult(true);
+
+  // Per-quiz last score (no-op for synthetic modes inside saveLatestScore)
+  await saveLatestScore(pctRounded, { review: isReviewMode });
+
+  // Group/All — Revisit scores
+  if (isSyntheticMode && isReviewMode) {
+    if (isGroupMode) {
+      const gid = groupId || NO_GROUP_ID;
+      await saveGroupRevisitScore(user?.id, { scope: "group", groupId: gid, percentExact: pctExact });
+    } else if (isAllMode) {
+      await saveGroupRevisitScore(user?.id, { scope: "all", groupId: ALL_GROUP_ID, percentExact: pctExact });
+    }
+  }
+
+  // Group/All — All-questions scores (synthetic, non-review)
+  if (!isReviewMode && isSyntheticMode) {
+    if (isGroupMode) {
+      const gid = groupId || NO_GROUP_ID;
+      await saveGroupAllScore(user?.id, { scope: "group", groupId: gid, percentExact: pctExact });
+    } else if (isAllMode) {
+      await saveGroupAllScore(user?.id, { scope: "all", groupId: ALL_GROUP_ID, percentExact: pctExact });
+    }
+  }
+}
 
   // --- review helpers (add/remove) ---
   function alreadyInReview(prompt) {
+    if (isSyntheticMode && isReviewMode) return true; // by definition
     const rv = quiz?.review_questions ?? [];
     const key = (prompt || "").trim().toLowerCase();
     return rv.some((q) => (q?.prompt || "").trim().toLowerCase() === key);
   }
 
   async function addCurrentToReview() {
-    if (!current) return;
-
+    if (!current || isSyntheticMode) return;
     if (alreadyInReview(current.prompt)) {
       setAddedToReview(true);
       setShowReviewPrompt(false);
       return;
     }
-
     const rv = quiz?.review_questions ?? [];
     const newArr = [
       ...rv,
       { prompt: String(current.prompt ?? ""), answer: String(current.answer ?? "") },
     ];
-
     const { error } = await supabase
       .from("quizzes")
       .update({ review_questions: newArr, updated_at: new Date().toISOString() })
@@ -311,9 +631,92 @@ useEffect(() => {
     }
   }
 
+  // Legacy alias
+  function addCurrentFromReview() {
+    return addCurrentToReview();
+  }
+
   async function removeCurrentFromReview() {
     if (!current) return;
 
+    if (isSyntheticMode) {
+      const srcId = current.__srcQuizId;
+      const key = (current.prompt || "").trim().toLowerCase();
+
+      const { data: src, error: readErr } = await supabase
+        .from("quizzes")
+        .select("review_questions, title")
+        .eq("id", srcId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (readErr) return;
+
+      const srcRv = Array.isArray(src?.review_questions) ? src.review_questions : [];
+      const pruned = srcRv.filter(
+        (q) => (q?.prompt || "").trim().toLowerCase() !== key
+      );
+
+      const { error: updErr } = await supabase
+        .from("quizzes")
+        .update({ review_questions: pruned, updated_at: new Date().toISOString() })
+        .eq("id", srcId)
+        .eq("user_id", user.id);
+      if (updErr) return;
+
+      setQuiz((prev) => {
+        if (!prev) return prev;
+        const list = Array.isArray(prev.review_questions) ? prev.review_questions.slice() : [];
+        const removedIdx = index;
+        if (removedIdx >= 0 && removedIdx < list.length) list.splice(removedIdx, 1);
+        return { ...prev, review_questions: list };
+      });
+
+      const removedIdx = index;
+      setRemovedFromReview(true);
+      setShowRemovePrompt(false);
+
+      setAnswered((arr) => {
+        const next = arr.slice();
+        if (removedIdx >= 0 && removedIdx < next.length) next.splice(removedIdx, 1);
+        return next;
+      });
+      setInputs((arr) => {
+        const next = arr.slice();
+        if (removedIdx >= 0 && removedIdx < next.length) next.splice(removedIdx, 1);
+        return next;
+      });
+      setAttempted((arr) => {
+        const next = arr.slice();
+        if (removedIdx >= 0 && removedIdx < next.length) next.splice(removedIdx, 1);
+        return next;
+      });
+      setFirstTryCorrect((arr) => {
+        const next = arr.slice();
+        if (removedIdx >= 0 && removedIdx < next.length) next.splice(removedIdx, 1);
+        return next;
+      });
+      setPeekOn((arr) => {
+        const next = arr.slice();
+        if (removedIdx >= 0 && removedIdx < next.length) next.splice(removedIdx, 1);
+        return next;
+      });
+      setPeekStash((arr) => {
+        const next = arr.slice();
+        if (removedIdx >= 0 && removedIdx < next.length) next.splice(removedIdx, 1);
+        return next;
+      });
+
+      setIndex((prev) => {
+        const newLen = (questionsArr.length - 1);
+        if (newLen <= 0) return 0;
+        const candidate = Math.min(removedIdx, newLen - 1);
+        return candidate < 0 ? 0 : candidate;
+      });
+
+      return;
+    }
+
+    // Normal (single-quiz) review removal
     const rv = quiz?.review_questions ?? [];
     const key = (current.prompt || "").trim().toLowerCase();
     const newArr = rv.filter((q) => (q?.prompt || "").trim().toLowerCase() !== key);
@@ -438,7 +841,6 @@ useEffect(() => {
       setShowReviewPrompt(false);
       setAddedToReview(false);
 
-      // if it was peeking, keep the toggle state, but no need to change it here
       if (isReviewMode && alreadyInReview(current.prompt)) {
         setShowRemovePrompt(true);
         setRemovedFromReview(false);
@@ -447,7 +849,7 @@ useEffect(() => {
         setRemovedFromReview(false);
       }
     } else {
-      const canOfferAdd = !isReviewMode && !alreadyInReview(current.prompt);
+      const canOfferAdd = !isSyntheticMode && !isReviewMode && !alreadyInReview(current.prompt);
       setShowReviewPrompt(canOfferAdd);
       setAddedToReview(false);
       setShowRemovePrompt(false);
@@ -573,7 +975,6 @@ useEffect(() => {
     if (!current) return;
     const correct = String(current.answer ?? "");
     if (!isPeeking) {
-      // Save user's current text and show the correct answer WITHOUT focusing textarea
       setPeekStash((arr) => {
         const next = arr.slice();
         next[index] = input;
@@ -585,9 +986,7 @@ useEffect(() => {
         next[index] = true;
         return next;
       });
-      // IMPORTANT: no focus call here
     } else {
-      // Restore user's original text
       const original = peekStash[index] ?? "";
       handleChange(original);
       setPeekOn((arr) => {
@@ -595,7 +994,6 @@ useEffect(() => {
         next[index] = false;
         return next;
       });
-      // no focus
     }
   }
 
@@ -607,6 +1005,12 @@ useEffect(() => {
 
   if (!quiz) return null;
 
+  const originalQuizLink = isSyntheticMode
+    ? (current?.__srcQuizId ? `/play/${current.__srcQuizId}` : "#")
+    : `/play/${quizId}`;
+
+  const originalQuizDisabled = isSyntheticMode ? !current?.__srcQuizId : false;
+
   return (
     <div
       className="quiz-play min-h-screen bg-gray-900 text-white"
@@ -617,7 +1021,8 @@ useEffect(() => {
         {/* --- Desktop / tablet --- */}
         <div className="hidden sm:grid sm:grid-cols-3 sm:items-center">
           <h1 className="text-lg sm:text-xl font-bold truncate pr-3">
-            {(quiz.title || "Quiz")}{isReviewMode ? " — Review" : ""}
+            {(quiz.title || "Quiz")}
+            {isSyntheticMode ? (isReviewMode ? " — Review" : " — All Questions") : (isReviewMode ? " — Review" : "")}
           </h1>
           <div className="flex items-center justify-center">
             <img
@@ -628,9 +1033,9 @@ useEffect(() => {
             />
           </div>
           <div className="justify-self-end">
-            <Link to="/" className={`${btnBase} ${btnGray}`} title="Go back to dashboard">
-              Back
-            </Link>
+            <Link to={backPath} className={`${btnBase} ${btnGray}`} title="Go back to dashboard">
+  Back
+</Link>
           </div>
         </div>
 
@@ -646,11 +1051,12 @@ useEffect(() => {
           </div>
           <div className="flex items-center justify-between">
             <h1 className="text-lg font-bold truncate pr-3">
-              {(quiz.title || "Quiz")}{isReviewMode ? " — Review" : ""}
+              {(quiz.title || "Quiz")}
+              {isSyntheticMode ? (isReviewMode ? " — Review" : " — All Questions") : (isReviewMode ? " — Review" : "")}
             </h1>
-            <Link to="/" className={`${btnBase} ${btnGray}`}>
-              Back
-            </Link>
+            <Link to={backPath} className={`${btnBase} ${btnGray}`}>
+  Back
+</Link>
           </div>
         </div>
       </header>
@@ -683,11 +1089,23 @@ useEffect(() => {
 
                     {/* Desktop actions row */}
                     <div className="hidden sm:flex items-center gap-2">
-                      {isReviewMode ? (
+                      {/* First action: label depends on mode */}
+                      {isSyntheticMode ? (
+                        <Link
+                          to={originalQuizLink}
+                          onClick={(e) => {
+                            if (originalQuizDisabled) e.preventDefault();
+                          }}
+                          className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} ${originalQuizDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
+                          title="Go to the original quiz for this question"
+                        >
+                          Play Main Quiz
+                        </Link>
+                      ) : isReviewMode ? (
                         <Link
                           to={`/play/${quizId}`}
                           className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray}`}
-                          title="Go to the main quiz (not the review set)"
+                          title="Go to the main quiz (not the revisit set)"
                         >
                           Play Main Quiz
                         </Link>
@@ -697,39 +1115,67 @@ useEffect(() => {
                           className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray}`}
                           title="Practice only the questions in your review group"
                         >
-                          Practice Revisit
+                          Play Revisit Quiz
                         </Link>
                       )}
 
-                      {isReviewMode ? (
+                      {/* Add/Remove Review */}
+                      {!isSyntheticMode && (
+                        <>
+                          {isReviewMode ? (
+                            <button
+                              type="button"
+                              className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray}`}
+                              onClick={removeCurrentFromReview}
+                              disabled={!current || !alreadyInReview(current?.prompt)}
+                              title={
+                                !current
+                                  ? "No question"
+                                  : alreadyInReview(current?.prompt)
+                                  ? "Remove this from your review group"
+                                  : "Not in review group"
+                              }
+                            >
+                              Remove from Review Group
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray}`}
+                              onClick={addCurrentFromReview}
+                              disabled
+                              title="(Hidden) Legacy button"
+                              style={{ display: "none" }}
+                            />
+                          )}
+                          {!isReviewMode && (
+                            <button
+                              type="button"
+                              className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray}`}
+                              onClick={addCurrentToReview}
+                              disabled={!current || alreadyInReview(current?.prompt)}
+                              title={
+                                alreadyInReview(current?.prompt)
+                                  ? "Already added to review group"
+                                  : "Add this question to your review group"
+                              }
+                            >
+                              Add To Review Group
+                            </button>
+                          )}
+                        </>
+                      )}
+
+                      {/* In synthetic revisit (group/all), always allow removing from SOURCE */}
+                      {isSyntheticMode && isReviewMode && (
                         <button
                           type="button"
                           className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray}`}
                           onClick={removeCurrentFromReview}
-                          disabled={!current || !alreadyInReview(current?.prompt)}
-                          title={
-                            !current
-                              ? "No question"
-                              : alreadyInReview(current?.prompt)
-                              ? "Remove this from your review group"
-                              : "Not in review group"
-                          }
+                          disabled={!current}
+                          title="Remove this from its quiz’s review group"
                         >
                           Remove from Review Group
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray}`}
-                          onClick={addCurrentToReview}
-                          disabled={!current || alreadyInReview(current?.prompt)}
-                          title={
-                            alreadyInReview(current?.prompt)
-                              ? "Already added to review group"
-                              : "Add this question to your review group"
-                          }
-                        >
-                          Add To Review Group
                         </button>
                       )}
 
@@ -746,11 +1192,22 @@ useEffect(() => {
 
                   {/* Mobile-only actions */}
                   <div className="mt-2 grid grid-cols-3 gap-2 sm:hidden">
-                    {isReviewMode ? (
+                    {isSyntheticMode ? (
+                      <Link
+                        to={originalQuizLink}
+                        onClick={(e) => {
+                          if (originalQuizDisabled) e.preventDefault();
+                        }}
+                        className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal ${originalQuizDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
+                        title="Go to the original quiz for this question"
+                      >
+                        Play Main Quiz
+                      </Link>
+                    ) : isReviewMode ? (
                       <Link
                         to={`/play/${quizId}`}
                         className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
-                        title="Go to the main quiz (not the review set)"
+                        title="Go to the main quiz (not the revisit set)"
                       >
                         Play Main Quiz
                       </Link>
@@ -760,40 +1217,58 @@ useEffect(() => {
                         className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
                         title="Practice only the questions in your review group"
                       >
-                        Practice Revisit
+                        Play Revisit Quiz
                       </Link>
                     )}
 
-                    {isReviewMode ? (
-                      <button
-                        type="button"
-                        className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
-                        onClick={removeCurrentFromReview}
-                        disabled={!current || !alreadyInReview(current?.prompt)}
-                        title={
-                          !current
-                            ? "No question"
-                            : alreadyInReview(current?.prompt)
-                            ? "Remove this from your review group"
-                            : "Not in review group"
-                        }
-                      >
-                        Remove from Review Group
-                      </button>
+                    {/* Add/Remove Review */}
+                    {!isSyntheticMode ? (
+                      isReviewMode ? (
+                        <button
+                          type="button"
+                          className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
+                          onClick={removeCurrentFromReview}
+                          disabled={!current || !alreadyInReview(current?.prompt)}
+                          title={
+                            !current
+                              ? "No question"
+                              : alreadyInReview(current?.prompt)
+                              ? "Remove this from your review group"
+                              : "Not in review group"
+                          }
+                        >
+                          Remove from Review Group
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
+                          onClick={addCurrentToReview}
+                          disabled={!current || alreadyInReview(current?.prompt)}
+                          title={
+                            alreadyInReview(current?.prompt)
+                              ? "Already added to review group"
+                              : "Add this question to your review group"
+                          }
+                        >
+                          Add To Review Group
+                        </button>
+                      )
                     ) : (
-                      <button
-                        type="button"
-                        className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
-                        onClick={addCurrentToReview}
-                        disabled={!current || alreadyInReview(current?.prompt)}
-                        title={
-                          alreadyInReview(current?.prompt)
-                            ? "Already added to review group"
-                            : "Add this question to your review group"
-                        }
-                      >
-                        Add To Review Group
-                      </button>
+                      isReviewMode ? (
+                        <button
+                          type="button"
+                          className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
+                          onClick={removeCurrentFromReview}
+                          disabled={!current}
+                          title="Remove this from its quiz’s review group"
+                        >
+                          Remove from Review Group
+                        </button>
+                      ) : (
+                        // In synthetic ALL-QUESTIONS mode there is no review add/remove
+                        <div className="min-h-14" />
+                      )
                     )}
 
                     <button
@@ -813,8 +1288,8 @@ useEffect(() => {
                     <textarea
                       ref={areaRef}
                       className="w-full h-56 p-4 rounded-lg bg-white text-gray-900 border border-gray-300
-                           focus:outline-none focus:ring-2 focus:ring-emerald-600 text-base sm:text-xl
-                           placeholder:text-gray-500"
+           focus:outline-none focus:ring-2 focus:ring-emerald-600 text-base sm:text-xl
+           placeholder:text-gray-500"
                       value={input}
                       onChange={(e) => handleChange(e.target.value)}
                       placeholder="Type your answer and press Enter…"
@@ -860,7 +1335,7 @@ useEffect(() => {
                     type="button"
                     onClick={(e) => submit(e)}
                     className={`hidden lg:flex ${btnBase} ${btnGray} h-12 items-center justify-center
-        absolute top-1/2 -translate-y-1/2 left-full ml-3`}
+absolute top-1/2 -translate-y-1/2 left-full ml-3`}
                     aria-label="Submit answer"
                     title="Submit (same as pressing Enter)"
                   >
@@ -945,15 +1420,25 @@ useEffect(() => {
           ) : (
             <>
               <p className="text-gray-300 text-center">No questions yet. Add some in the editor.</p>
-              {isReviewMode && (
+              {(isReviewMode || isSyntheticMode) && (
                 <div className="mt-4 flex justify-center">
-                  <Link
-                    to={`/play/${quizId}`}
-                    className={`${btnBase} ${btnIndigo}`}
-                    title="Return to the main quiz"
-                  >
-                    Return to Main Quiz
-                  </Link>
+                  {isSyntheticMode ? (
+                    <Link
+                      to="/"
+                      className={`${btnBase} ${btnIndigo}`}
+                      title="Return to dashboard"
+                    >
+                      Return to Dashboard
+                    </Link>
+                  ) : (
+                    <Link
+                      to={`/play/${quizId}`}
+                      className={`${btnBase} ${btnIndigo}`}
+                      title="Return to the main quiz"
+                    >
+                      Return to Main Quiz
+                    </Link>
+                  )}
                 </div>
               )}
             </>
@@ -966,19 +1451,21 @@ useEffect(() => {
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-3 sm:p-4 z-50">
           <div className="bg-gray-800 text-white rounded-2xl p-5 sm:p-6 max-w-md w-full max-h-[85vh] overflow-y-auto">
             <h2 className="text-xl sm:text-2xl font-bold mb-2">
-              {isReviewMode ? "Revisit Score" : "Your Score"} {hasConfetti ? "🎉" : ""}
+              {isSyntheticMode
+                ? (isReviewMode ? "Revisit Score" : "All Questions Score")
+                : (isReviewMode ? "Revisit Score" : "Your Score")} {hasConfetti ? "🎉" : ""}
             </h2>
             <p className="text-base sm:text-lg mb-6">
-              You scored <span className="font-semibold">{scorePct}%</span> on this {isReviewMode ? "revisit set" : "quiz"}.
+              You scored <span className="font-semibold">{scorePct}%</span> on this {isSyntheticMode ? (isReviewMode ? "revisit set" : "all-questions set") : (isReviewMode ? "revisit set" : "quiz")}.
             </p>
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2">
               <button type="button" className={`${btnBase} ${btnGray} w-full sm:w-auto`} onClick={retake}>
-                Retake Quiz
+                Retake
               </button>
               <button
                 type="button"
                 className={`${btnBase} ${btnIndigo} w-full sm:w-auto`}
-                onClick={() => navigate("/")}
+                onClick={() => navigate(backPath)}
               >
                 Return to Dashboard
               </button>

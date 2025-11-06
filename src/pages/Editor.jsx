@@ -786,9 +786,20 @@ export default function Editor() {
 </div>
         </div>
 
-        {/* Questions — vertically scrollable container (desktop & mobile) */}
+       {/* Questions — vertically scrollable container (desktop & mobile) */}
 <div className="relative">
-  <div className="max-h-[70vh] overflow-y-auto overscroll-contain touch-pan-y pr-1 space-y-4">
+  <div
+    className="
+      max-h-[70vh]
+      overflow-y-auto
+      overscroll-contain
+      touch-pan-y
+      pr-1
+      space-y-4
+      pb-[calc(env(safe-area-inset-bottom)+7rem)]
+      scroll-pb-[calc(env(safe-area-inset-bottom)+7rem)]
+    "
+  >
     {questions.map((row, i) => (
       <div key={i} className="bg-gray-800 p-4 rounded-xl">
         <div className="flex items-start gap-3">
@@ -838,6 +849,9 @@ export default function Editor() {
         </div>
       </div>
     ))}
+
+    {/* Spacer so the last row clears the iOS Safari toolbar */}
+    <div aria-hidden className="h-[calc(env(safe-area-inset-bottom)+120px)]" />
   </div>
 </div>
 
