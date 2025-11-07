@@ -274,9 +274,76 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
     setAuthOpen(true);
   }
 
+  function openAccountModal() {
+    if (!user || isAnon) return;
+    setAccountError("");
+    setAccountConfirmOpen(false);
+    setAccountOpen(true);
+  }
+
+    async function performAccountDeletion() {
+    if (!user?.id || accountDeleting) return;
+
+    // Immediately hide the confirmation popup so it never hangs around
+    setAccountConfirmOpen(false);
+
+    try {
+      setAccountDeleting(true);
+      setAccountError("");
+
+      // Get current session + access token
+      const { data, error: sessionError } = await supabase.auth.getSession();
+      const session = data?.session;
+      const accessToken = session?.access_token;
+
+      if (sessionError || !accessToken) {
+        console.error("No valid session for delete-account", sessionError);
+        setAccountError(
+          "You need to be signed in to delete your account. Please refresh and try again."
+        );
+        return;
+      }
+
+      // Call delete-account Edge Function
+      const { error: fnError } = await supabase.functions.invoke(
+        "delete-account",
+        {
+          body: { accessToken },
+        }
+      );
+
+      if (fnError) {
+        console.error("delete-account function error", fnError);
+        setAccountError(
+          "Could not delete your account. Please try again, or email support@smart-quiz.app."
+        );
+        return;
+      }
+
+      // Success: sign out, close Account modal, redirect
+      await signout();
+      setAccountOpen(false);
+      window.location.href = "/";
+    } catch (err) {
+      console.error("Account delete failed:", err);
+      setAccountError(
+        "Could not delete your account. Please try again, or email support@smart-quiz.app."
+      );
+    } finally {
+      setAccountDeleting(false);
+    }
+  }
+
+
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [target, setTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+
+   // Account modal + delete-account flow
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [accountConfirmOpen, setAccountConfirmOpen] = useState(false);
+  const [accountDeleting, setAccountDeleting] = useState(false);
+  const [accountError, setAccountError] = useState("");
 
   const [genOpen, setGenOpen] = useState(false);
   const [gTitle, setGTitle] = useState("");
@@ -291,6 +358,9 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
   const [gNewOpen, setGNewOpen] = useState(false);
   const [gNewName, setGNewName] = useState("");
   const [gCreatingGroup, setGCreatingGroup] = useState(false);
+
+   // Animated "Generating..." dots for overlay
+  const [genDots, setGenDots] = useState(".");
 
   const location = useLocation();
 
@@ -430,6 +500,17 @@ const [filterGroupId, setFilterGroupId] = useState(() =>
   setGroupRevisitScores(mReview);
   setGroupAllScores(mAll);
 }
+
+useEffect(() => {
+    if (!generating) {
+      setGenDots(".");
+      return;
+    }
+    const id = setInterval(() => {
+      setGenDots((prev) => (prev.length >= 3 ? "." : prev + "."));
+    }, 400);
+    return () => clearInterval(id);
+  }, [generating]);
 
 
 // Load dashboard aggregates (groups, scores, etc.)
@@ -1216,7 +1297,16 @@ useEffect(() => {
                 <span className="text-gray-300 hidden md:inline max-w-[28ch] truncate">
                   {user.email}
                 </span>
-                <button onClick={handleSignOut} className={`${btnBase} ${btnGray}`}>
+                <button
+                  onClick={openAccountModal}
+                  className={`${btnBase} ${btnGray} whitespace-nowrap`}
+                >
+                  Account
+                </button>
+                <button
+                  onClick={handleSignOut}
+                  className={`${btnBase} ${btnGray} whitespace-nowrap`}
+                >
                   Sign out
                 </button>
               </>
@@ -1734,9 +1824,13 @@ useEffect(() => {
 
         {/* ---------------- Footer actions + “Last score” ------------------- */}
 {(() => {
+  const hasAnyQuizzes = (quizzes?.length ?? 0) > 0;
+  if (!hasAnyQuizzes) return null;
+
   const isAll = filterGroupId === "" || filterGroupId === ALL_GROUP_ID;
   const isNoGroup = filterGroupId === NO_GROUP;
-  const isConcreteGroup = !!(filterGroupId && filterGroupId !== NO_GROUP && currentGroup);
+  const isConcreteGroup =
+    !!(filterGroupId && filterGroupId !== NO_GROUP && currentGroup);
 
   return (isAll || isNoGroup || isConcreteGroup) ? (
     <div className="mt-8 flex justify-center">
@@ -1984,7 +2078,103 @@ useEffect(() => {
           </div>
         </div>
       )}
+{accountOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 grid place-items-center z-[96]"
+          aria-modal="true"
+          role="dialog"
+          onClick={() => {
+            if (!accountDeleting) {
+              setAccountOpen(false);
+              setAccountConfirmOpen(false);
+              setAccountError("");
+            }
+          }}
+        >
+          <div
+            className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-xl font-bold mb-4">Account</h2>
 
+            <button
+  className={`${btnBase} ${btnRed} mb-6 px-6 mx-auto block`}
+  onClick={() => {
+    if (!accountDeleting) {
+      setAccountConfirmOpen(true);
+    }
+  }}
+  disabled={accountDeleting}
+>
+  Delete Account
+</button>
+            <p className="text-gray-300 text-sm">
+              Feedback? -{" "}
+              <span className="text-gray-300 text-sm">support@smart-quiz.app</span>
+            </p>
+
+            {accountError && (
+              <p className="mt-3 text-sm text-red-400 break-words">
+                {accountError}
+              </p>
+            )}
+
+            <div className="mt-5 flex justify-end">
+              <button
+                className={`${btnBase} ${btnGray}`}
+                onClick={() => {
+                  if (!accountDeleting) {
+                    setAccountOpen(false);
+                    setAccountConfirmOpen(false);
+                    setAccountError("");
+                  }
+                }}
+                disabled={accountDeleting}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {accountConfirmOpen && (
+        <div
+          className="fixed inset-0 bg-black/70 grid place-items-center z-[97]"
+          aria-modal="true"
+          role="dialog"
+          onClick={() => {
+            if (!accountDeleting) setAccountConfirmOpen(false);
+          }}
+        >
+          <div
+            className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-xl font-bold mb-3">Delete account?</h2>
+            <p className="text-gray-300 mb-6 text-sm">
+              Are you sure you want to delete your account? This action will
+              delete all your quizzes.
+            </p>
+            <div className="flex flex-col sm:flex-row justify-end gap-2">
+              <button
+                className={`${btnBase} ${btnGray}`}
+                onClick={() => !accountDeleting && setAccountConfirmOpen(false)}
+                disabled={accountDeleting}
+              >
+                Cancel
+              </button>
+              <button
+                className={`${btnBase} ${btnRed}`}
+                onClick={performAccountDeletion}
+                disabled={accountDeleting}
+              >
+                {accountDeleting ? "Deleting…" : "Yes, delete my account"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {authOpen && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-[95]"
@@ -2527,6 +2717,22 @@ useEffect(() => {
           </div>
         </div>
       )}
+
+      {generating && (
+        <div className="fixed inset-0 z-[120] bg-black/70 flex items-center justify-center">
+          <div className="w-40 h-40 sm:w-48 sm:h-48 rounded-full bg-emerald-500 flex flex-col items-center justify-center shadow-2xl animate-pulse">
+            <div className="text-gray-900 font-semibold text-xl sm:text-2xl select-none">
+              Generating
+            </div>
+            <div className="flex gap-1 mt-1 text-gray-900 text-2xl leading-none select-none">
+              <span className="animate-bounce [animation-delay:0ms]">•</span>
+              <span className="animate-bounce [animation-delay:150ms]">•</span>
+              <span className="animate-bounce [animation-delay:300ms]">•</span>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

@@ -945,7 +945,7 @@ export default function Editor() {
         </div>
       )}
 
-      {/* Generate with AI (Regenerate) modal */}
+       {/* Generate with AI (Regenerate) modal */}
       {genOpen && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-[62]"
@@ -1004,7 +1004,6 @@ export default function Editor() {
                   Optional document to use as source (PDF / TXT / MD)
                 </label>
 
-                {/* Previously used file (if known) */}
                 {savedFileId && (
                   <div className="mb-2 text-sm text-gray-300">
                     <label className="inline-flex items-center gap-2">
@@ -1086,7 +1085,6 @@ export default function Editor() {
                   type="number"
                   inputMode="numeric"
                   min={1}
-                  // max is enforced manually to allow custom add cap; keep 999 here to not block typing
                   max={999}
                   className="w-full p-3 rounded bg-gray-900 text-white border border-gray-700"
                   value={gCountStr}
@@ -1100,7 +1098,6 @@ export default function Editor() {
                 )}
               </div>
 
-              {/* Mode toggles (mutually exclusive) */}
               <div className="sm:col-span-2 mt-2 border-t border-gray-700 pt-3">
                 <div className="flex flex-col gap-2">
                   <label className="inline-flex items-center gap-2 text-sm text-gray-200">
@@ -1140,6 +1137,21 @@ export default function Editor() {
               >
                 {generating ? "Working…" : "Regenerate"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {generating && (
+        <div className="fixed inset-0 z-[120] bg-black/70 flex items-center justify-center">
+          <div className="w-40 h-40 sm:w-48 sm:h-48 rounded-full bg-emerald-500 flex flex-col items-center justify-center shadow-2xl animate-pulse">
+            <div className="text-gray-900 font-semibold text-xl sm:text-2xl select-none">
+              Generating
+            </div>
+            <div className="flex gap-1 mt-1 text-gray-900 text-2xl leading-none select-none">
+              <span className="animate-bounce [animation-delay:0ms]">•</span>
+              <span className="animate-bounce [animation-delay:150ms]">•</span>
+              <span className="animate-bounce [animation-delay:300ms]">•</span>
             </div>
           </div>
         </div>
