@@ -1,6 +1,12 @@
 // src/pages/Play.jsx
 import { useEffect, useState, useRef } from "react";
-import { useParams, Link, useNavigate, useSearchParams, useLocation } from "react-router-dom";
+import {
+  useParams,
+  Link,
+  useNavigate,
+  useSearchParams,
+  useLocation,
+} from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
 import { getInitialGroupFromUrlOrStorage } from "../lib/groupFilter";
@@ -18,15 +24,18 @@ async function saveGroupRevisitScore(userId, { scope, groupId, percentExact }) {
     if (scope !== "all" && scope !== "group") return;
 
     const percentInt = Math.round(percentExact);
-    const gid = scope === "all"
-      ? ALL_GROUP_ID
-      : (groupId && groupId !== "null" && groupId !== "" ? groupId : NO_GROUP_ID);
+    const gid =
+      scope === "all"
+        ? ALL_GROUP_ID
+        : groupId && groupId !== "null" && groupId !== ""
+        ? groupId
+        : NO_GROUP_ID;
 
     const payload = {
       user_id: userId,
-      scope,                         // 'group' | 'all'
-      group_id: gid,                 // ALL_GROUP_ID for 'all', sentinel for “No group”
-      last_review_score: percentInt, // INTEGER (must exist in DB)
+      scope, // 'group' | 'all'
+      group_id: gid, // ALL_GROUP_ID for 'all', sentinel for “No group”
+      last_review_score: percentInt,
       updated_at: new Date().toISOString(),
     };
 
@@ -41,7 +50,6 @@ async function saveGroupRevisitScore(userId, { scope, groupId, percentExact }) {
       return;
     }
 
-    // Read back the exact row we just wrote (so you can see it in DevTools)
     const { data: row, error: readErr } = await supabase
       .from("group_scores")
       .select("user_id, scope, group_id, last_review_score, updated_at")
@@ -58,22 +66,24 @@ async function saveGroupRevisitScore(userId, { scope, groupId, percentExact }) {
 }
 
 // Rounded INT write + verify row (ALL-QUESTIONS score)
-// Requires a column: group_scores.last_all_score INT
 async function saveGroupAllScore(userId, { scope, groupId, percentExact }) {
   try {
     if (!userId || typeof percentExact !== "number") return;
     if (scope !== "all" && scope !== "group") return;
 
     const percentInt = Math.round(percentExact);
-    const gid = scope === "all"
-      ? ALL_GROUP_ID
-      : (groupId && groupId !== "null" && groupId !== "" ? groupId : NO_GROUP_ID);
+    const gid =
+      scope === "all"
+        ? ALL_GROUP_ID
+        : groupId && groupId !== "null" && groupId !== ""
+        ? groupId
+        : NO_GROUP_ID;
 
     const payload = {
       user_id: userId,
       scope,
       group_id: gid,
-      last_all_score: percentInt, // <-- make sure this column exists in DB
+      last_all_score: percentInt,
       updated_at: new Date().toISOString(),
     };
 
@@ -103,12 +113,8 @@ async function saveGroupAllScore(userId, { scope, groupId, percentExact }) {
   }
 }
 
-
-
-
 // Placeholder for forthcoming SQL change to store “All Questions” scores per Group/All
 async function saveGroupAllQuestionsScore(/* userId, { scope, groupId, percentExact } */) {
-  // Will write to group_scores.last_all_score (or similar) after the SQL step.
   console.warn("[group_scores] last_all_score not persisted yet – SQL migration pending.");
 }
 
@@ -124,7 +130,8 @@ function normalize(s) {
     .trim();
 }
 function lev(a, b) {
-  const m = a.length, n = b.length;
+  const m = a.length,
+    n = b.length;
   if (m === 0) return n;
   if (n === 0) return m;
   const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
@@ -177,7 +184,7 @@ function yearTokens(s) {
 }
 function numTokens(s) {
   const m = String(s || "").match(/-?\d+(\.\d+)?/g);
-  return m ? m.map(x => x.trim()) : [];
+  return m ? m.map((x) => x.trim()) : [];
 }
 function hexDecEqual(a, b) {
   const hexRe = /^(?:\$|0x)?[0-9a-f]+$/i;
@@ -187,25 +194,32 @@ function hexDecEqual(a, b) {
     if (/^\d+$/.test(t)) return parseInt(t, 10);
     return NaN;
   };
-  const va = toNum(a), vb = toNum(b);
+  const va = toNum(a),
+    vb = toNum(b);
   return Number.isFinite(va) && va === vb;
 }
 function isStrictFact(question, expected) {
   const q = norm(question);
   const hasYear = yearTokens(expected).length > 0;
   const hasAnyNumber = numTokens(expected).length > 0;
-  const qHints = /(when|what year|which year|date|how many|how much|what number|tempo|bpm|cc|control change|port|channel|track|bank|pattern|page|step)\b/;
-  const shortCanon = norm(expected).split(" ").filter(Boolean).length <= 3;
+  const qHints =
+    /(when|what year|which year|date|how many|how much|what number|tempo|bpm|cc|control change|port|channel|track|bank|pattern|page|step)\b/;
+  const shortCanon =
+    norm(expected).split(" ").filter(Boolean).length <= 3;
   const codeLike = /0x|\$|\bcc\b|\bctl\b|\bbpm\b|\bhz\b|\bkhz\b|\bdb\b|\bms\b|\bs\b|\d/.test(
     String(expected).toLowerCase()
   );
-  return hasYear || (hasAnyNumber && (qHints.test(q) || shortCanon || codeLike));
+  return (
+    hasYear || (hasAnyNumber && (qHints.test(q) || shortCanon || codeLike))
+  );
 }
 function strictFactCorrect(userAns, expected) {
-  if (norm(userAns) === norm(expected) || hexDecEqual(userAns, expected)) return true;
+  if (norm(userAns) === norm(expected) || hexDecEqual(userAns, expected))
+    return true;
   const expYears = yearTokens(expected);
   const usrYears = yearTokens(userAns);
-  if (expYears.length === 1) return usrYears.length === 1 && usrYears[0] === expYears[0];
+  if (expYears.length === 1)
+    return usrYears.length === 1 && usrYears[0] === expYears[0];
   const expNums = numTokens(expected);
   if (expNums.length > 0) {
     const usrNums = numTokens(userAns);
@@ -227,38 +241,43 @@ export default function Play() {
   const location = useLocation();
   const lastGroup = getInitialGroupFromUrlOrStorage(location.search);
 
-  const modeParam = (sp.get("mode") || "").toLowerCase(); // "review" | "all" (or "questions"/"full")
+  const modeParam = (sp.get("mode") || "").toLowerCase(); // "review" | "all"
   const wantsReview = modeParam === "review";
-  const wantsAllQuestions = modeParam === "all" || modeParam === "questions" || modeParam === "full";
+  const wantsAllQuestions =
+    modeParam === "all" || modeParam === "questions" || modeParam === "full";
 
   const isGroupMode = !!groupId;
   const isAllMode = location.pathname.startsWith("/play/all");
   const isSyntheticMode = isGroupMode || isAllMode;
-  
-  const backPath = (() => {
-  if (isGroupMode) {
-    const gid = groupId;
-    // Map the synthetic No-Group UUID (or empty-ish) to the Dashboard token "__none__"
-    const token =
-      !gid || gid === "null" || gid === "" || gid === NO_GROUP_ID ? NO_GROUP : gid;
-    return `/?group=${encodeURIComponent(token)}`;
-  }
-  if (isAllMode) {
-    return `/?group=${encodeURIComponent(ALL_GROUP_ID)}`;
-  }
-  // Single quiz: fall back to last stored/URL group
-  const last = getInitialGroupFromUrlOrStorage("");
-  return last ? `/?group=${encodeURIComponent(last)}` : "/";
-})();
 
+  const backPath = (() => {
+    if (isGroupMode) {
+      const gid = groupId;
+      const token =
+        !gid || gid === "null" || gid === "" || gid === NO_GROUP_ID
+          ? NO_GROUP
+          : gid;
+      return `/?group=${encodeURIComponent(token)}`;
+    }
+    if (isAllMode) {
+      return `/?group=${encodeURIComponent(ALL_GROUP_ID)}`;
+    }
+    const last = getInitialGroupFromUrlOrStorage("");
+    return last ? `/?group=${encodeURIComponent(last)}` : "/";
+  })();
 
   // For SINGLE quiz: default to main (questions) unless ?mode=review
-  // For SYNTHETIC: we respect the mode param; default to REVIEW if param is missing/invalid.
-  const isReviewMode = isSyntheticMode ? (wantsReview || !wantsAllQuestions) : wantsReview;
-  const isAllQuestionsMode = isSyntheticMode ? wantsAllQuestions : !isReviewMode;
+  // For SYNTHETIC: default to REVIEW if mode is missing/invalid.
+  const isReviewMode = isSyntheticMode
+    ? wantsReview || !wantsAllQuestions
+    : wantsReview;
+  const isAllQuestionsMode = isSyntheticMode
+    ? wantsAllQuestions
+    : !isReviewMode;
 
   const [quiz, setQuiz] = useState(null);
   const [index, setIndex] = useState(0);
+  const [furthestIndex, setFurthestIndex] = useState(0);
 
   // Per-question state
   const [answered, setAnswered] = useState([]);
@@ -273,7 +292,7 @@ export default function Play() {
   const [showResult, setShowResult] = useState(false);
   const [scorePct, setScorePct] = useState(0);
 
-  // Return jump
+  // Return jump (used with Go-to-Unanswered)
   const [returnIndex, setReturnIndex] = useState(null);
 
   // Input box (current visible text)
@@ -300,12 +319,12 @@ export default function Play() {
   const [peekOn, setPeekOn] = useState([]);
   const [peekStash, setPeekStash] = useState([]);
 
-  // Load quiz, group revisit/all, or ALL revisit/all
+  // Load quiz (single, group synthetic, or all synthetic)
   useEffect(() => {
     if (!user?.id) return;
 
     (async () => {
-      // --- ALL synthetic: /play/all?mode=review|all ---
+      // --- ALL synthetic ---
       if (isAllMode) {
         const { data: rows, error } = await supabase
           .from("quizzes")
@@ -315,14 +334,22 @@ export default function Play() {
 
         if (error) {
           console.error("[ALL] quizzes read error:", error);
-          setQuiz({ title: isReviewMode ? "All — Revisit" : "All — All Questions", questions: [], review_questions: [] });
+          setQuiz({
+            title: isReviewMode ? "All — Revisit" : "All — All Questions",
+            questions: [],
+            review_questions: [],
+          });
         }
 
         const merged = [];
         for (const row of rows || []) {
           const arr = isReviewMode
-            ? Array.isArray(row?.review_questions) ? row.review_questions : []
-            : Array.isArray(row?.questions) ? row.questions : [];
+            ? Array.isArray(row?.review_questions)
+              ? row.review_questions
+              : []
+            : Array.isArray(row?.questions)
+            ? row.questions
+            : [];
           for (const q of arr) {
             merged.push({
               prompt: String(q?.prompt ?? ""),
@@ -333,7 +360,9 @@ export default function Play() {
           }
         }
 
-        const title = isReviewMode ? "All — Revisit" : "All — All Questions";
+        const title = isReviewMode
+          ? "All — Revisit"
+          : "All — All Questions";
         const synthetic = isReviewMode
           ? { title, questions: [], review_questions: merged, file_id: null }
           : { title, questions: merged, review_questions: [], file_id: null };
@@ -342,6 +371,7 @@ export default function Play() {
 
         setQuiz(synthetic);
         setIndex(0);
+        setFurthestIndex(0);
         setAnswered(Array(len).fill(false));
         setInputs(Array(len).fill(""));
         setAttempted(Array(len).fill(false));
@@ -359,9 +389,10 @@ export default function Play() {
         return;
       }
 
-      // --- GROUP synthetic: /play/group/:groupId?mode=review|all ---
+      // --- GROUP synthetic ---
       if (isGroupMode) {
         const isNoGroupParam = groupId === NO_GROUP_ID;
+
         const { data: g, error: gErr } = await supabase
           .from("groups")
           .select("id,name")
@@ -383,8 +414,12 @@ export default function Play() {
         const merged = [];
         for (const row of qs || []) {
           const arr = isReviewMode
-            ? Array.isArray(row?.review_questions) ? row.review_questions : []
-            : Array.isArray(row?.questions) ? row.questions : [];
+            ? Array.isArray(row?.review_questions)
+              ? row.review_questions
+              : []
+            : Array.isArray(row?.questions)
+            ? row.questions
+            : [];
           for (const qq of arr) {
             merged.push({
               prompt: String(qq?.prompt ?? ""),
@@ -395,8 +430,11 @@ export default function Play() {
           }
         }
 
-        const groupLabel = g?.name ?? (isNoGroupParam ? "No Group" : "Group");
-        const title = isReviewMode ? `${groupLabel} — Revisit` : `${groupLabel} — All Questions`;
+        const groupLabel =
+          g?.name ?? (isNoGroupParam ? "No Group" : "Group");
+        const title = isReviewMode
+          ? `${groupLabel} — Revisit`
+          : `${groupLabel} — All Questions`;
         const synthetic = isReviewMode
           ? { title, questions: [], review_questions: merged, file_id: null }
           : { title, questions: merged, review_questions: [], file_id: null };
@@ -405,6 +443,7 @@ export default function Play() {
 
         setQuiz(synthetic);
         setIndex(0);
+        setFurthestIndex(0);
         setAnswered(Array(len).fill(false));
         setInputs(Array(len).fill(""));
         setAttempted(Array(len).fill(false));
@@ -422,7 +461,7 @@ export default function Play() {
         return;
       }
 
-      // --- SINGLE QUIZ: /play/:quizId (normal or ?mode=review)
+      // --- SINGLE QUIZ ---
       const { data, error } = await supabase
         .from("quizzes")
         .select("title, questions, review_questions, file_id")
@@ -435,11 +474,14 @@ export default function Play() {
         setQuiz({ title: "Quiz", questions: [], review_questions: [] });
       }
 
-      const arr = isReviewMode ? (data?.review_questions ?? []) : (data?.questions ?? []);
+      const arr = isReviewMode
+        ? data?.review_questions ?? []
+        : data?.questions ?? [];
       const len = arr.length;
 
       setQuiz(data || { title: "Quiz", questions: [], review_questions: [] });
       setIndex(0);
+      setFurthestIndex(0);
       setAnswered(Array(len).fill(false));
       setInputs(Array(len).fill(""));
       setAttempted(Array(len).fill(false));
@@ -466,7 +508,9 @@ export default function Play() {
   ]);
 
   // Helpers to access the active question set
-  const questionsArr = isReviewMode ? (quiz?.review_questions ?? []) : (quiz?.questions ?? []);
+  const questionsArr = isReviewMode
+    ? quiz?.review_questions ?? []
+    : quiz?.questions ?? [];
   const total = questionsArr.length;
   const current = total > 0 ? questionsArr[index] : null;
 
@@ -478,11 +522,15 @@ export default function Play() {
   const isPositiveFeedback = feedback.startsWith("✅");
   const canContinue = /press\s*c\s*to\s*continue/i.test(feedback);
 
-  // When switching questions, restore saved input & CLEAR feedback unless this Q is already correct
+  // When switching questions: restore saved input & feedback
   useEffect(() => {
     if (index == null) return;
-    setInput((arr) => (Array.isArray(arr) ? arr[index] || "" : inputs[index] || ""));
-    setFeedback(answered[index] ? "✅ Correct! Press C to continue." : "");
+    setInput((arr) =>
+      Array.isArray(arr) ? arr[index] || "" : inputs[index] || ""
+    );
+    setFeedback(
+      answered[index] ? "✅ Correct! Press C to continue." : ""
+    );
     setShowReviewPrompt(false);
     setAddedToReview(false);
     setShowRemovePrompt(false);
@@ -490,10 +538,89 @@ export default function Play() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [index]);
 
-  // --- Unanswered earlier question detection ---
-  const firstUnansweredBefore = attempted.slice(0, index).findIndex((v) => !v);
-  const showGoToUnanswered = firstUnansweredBefore !== -1;
+  // Track furthest index we've ever reached (for "back in stack" detection)
+  useEffect(() => {
+    setFurthestIndex((prev) => (index > prev ? index : prev));
+  }, [index]);
 
+       // --- Unanswered question helpers (frontier-based behavior) ---
+  function collectUnansweredIndices(arr) {
+    const res = [];
+    for (let i = 0; i < arr.length; i++) {
+      if (!arr[i]) res.push(i);
+    }
+    return res;
+  }
+
+  const unansweredIndices = collectUnansweredIndices(attempted);
+  const hasUnanswered = unansweredIndices.length > 0;
+  const frontier = hasUnanswered ? unansweredIndices[0] : -1; // first unanswered
+
+  const showGoToUnanswered = (() => {
+    // No unanswered = nothing to jump to
+    if (frontier === -1) return false;
+
+    // 1) If we're *on* the frontier question, this IS the normal flow spot.
+    //    "Next" (or answering it) is how you progress. No jump button.
+    if (index === frontier) return false;
+
+    // 2) If all questions up through current index are attempted,
+    //    and the frontier is EXACTLY the next question,
+    //    then we're still in normal forward flow:
+    //    - fresh quiz: answered Q1, frontier=Q2, at index=0
+    //    - or after fixing a frontier and its next is the new frontier
+    //    In both cases, "Next" walks directly into the right place.
+    let allUpToIndexAttempted = true;
+    for (let i = 0; i <= index; i++) {
+      if (!attempted[i]) {
+        allUpToIndexAttempted = false;
+        break;
+      }
+    }
+    if (allUpToIndexAttempted && frontier === index + 1) {
+      return false;
+    }
+
+    const visitedFrontier = furthestIndex >= frontier;
+
+    // 3) If we're PAST the frontier while it's still unanswered,
+    //    there's a hole behind us -> show the jump.
+    //    Example: X X X _ X X [you here] -> frontier is the _, jump back.
+    if (index > frontier) {
+      return true;
+    }
+
+    // 4) If we've already reached/passed the frontier at some point,
+    //    and are now sitting BEFORE it, we left the normal spot -> show jump.
+    //    Example: answered up to 4, frontier=5, you once were at 5/6,
+    //    now you're back on 2 -> let them jump to 5.
+    if (index < frontier && visitedFrontier) {
+      return true;
+    }
+
+    // 5) Otherwise we're in clean forward flow:
+    //    - haven't reached the frontier yet,
+    //    - or we're just naturally approaching it.
+    //    No jump button.
+    return false;
+  })();
+
+  function jumpToUnanswered() {
+    if (frontier === -1) return;
+    setIndex(frontier);
+    requestAnimationFrame(() => areaRef.current?.focus());
+  }
+
+  // After a correct answer, continue in simple forward order.
+  // We no longer try to "bounce back"; the Go To button always
+  // takes you to the current frontier explicitly.
+  function continueIfCorrect() {
+    if (!canContinue) return;
+    setFeedback("");
+    setIndex((i) => Math.min(i + 1, total - 1));
+    areaRef.current?.blur();
+  }
+  
   function handleChange(val) {
     setInput(val);
     setInputs((arr) => {
@@ -505,7 +632,7 @@ export default function Play() {
 
   // Save latest per-quiz score (rounded for display)
   async function saveLatestScore(pctRounded, { review = false } = {}) {
-    if (isSyntheticMode) return; // no per-quiz score to store
+    if (isSyntheticMode) return;
     try {
       const { data: existing } = await supabase
         .from("quiz_scores")
@@ -520,90 +647,122 @@ export default function Play() {
         user_id: user.id,
         quiz_id: quizId,
         updated_at: now,
-        last_score: review ? (existing?.last_score ?? null) : pctRounded,
-        last_review_score: review ? pctRounded : (existing?.last_review_score ?? null),
+        last_score: review
+          ? existing?.last_score ?? null
+          : pctRounded,
+        last_review_score: review
+          ? pctRounded
+          : existing?.last_review_score ?? null,
       };
 
-      await supabase.from("quiz_scores").upsert(payload, { onConflict: "user_id,quiz_id" });
+      await supabase
+        .from("quiz_scores")
+        .upsert(payload, { onConflict: "user_id,quiz_id" });
     } catch {
       /* ignore */
     }
   }
 
-  // Replace your maybeFinish with this version
-async function maybeFinish(attemptedNext, firstTryNext) {
-  if (!attemptedNext.every(Boolean)) return;
+  async function maybeFinish(attemptedNext, firstTryNext) {
+    if (!attemptedNext.every(Boolean)) return;
 
-  const points = firstTryNext.filter(Boolean).length;
-  const pctExact = total ? (points / total) * 100 : 0;   // exact for storage
-  const pctRounded = Math.round(pctExact);               // rounded for UI
+    const points = firstTryNext.filter(Boolean).length;
+    const pctExact = total ? (points / total) * 100 : 0;
+    const pctRounded = Math.round(pctExact);
 
-  setScorePct(pctRounded);
-  setShowResult(true);
+    setScorePct(pctRounded);
+    setShowResult(true);
 
-  // Per-quiz last score (no-op for synthetic modes inside saveLatestScore)
-  await saveLatestScore(pctRounded, { review: isReviewMode });
+    await saveLatestScore(pctRounded, { review: isReviewMode });
 
-  // Group/All — Revisit scores
-  if (isSyntheticMode && isReviewMode) {
-    if (isGroupMode) {
-      const gid = groupId || NO_GROUP_ID;
-      await saveGroupRevisitScore(user?.id, { scope: "group", groupId: gid, percentExact: pctExact });
-    } else if (isAllMode) {
-      await saveGroupRevisitScore(user?.id, { scope: "all", groupId: ALL_GROUP_ID, percentExact: pctExact });
+    if (isSyntheticMode && isReviewMode) {
+      if (isGroupMode) {
+        const gid = groupId || NO_GROUP_ID;
+        await saveGroupRevisitScore(user?.id, {
+          scope: "group",
+          groupId: gid,
+          percentExact: pctExact,
+        });
+      } else if (isAllMode) {
+        await saveGroupRevisitScore(user?.id, {
+          scope: "all",
+          groupId: ALL_GROUP_ID,
+          percentExact: pctExact,
+        });
+      }
+    }
+
+    if (!isReviewMode && isSyntheticMode) {
+      if (isGroupMode) {
+        const gid = groupId || NO_GROUP_ID;
+        await saveGroupAllScore(user?.id, {
+          scope: "group",
+          groupId: gid,
+          percentExact: pctExact,
+        });
+      } else if (isAllMode) {
+        await saveGroupAllScore(user?.id, {
+          scope: "all",
+          groupId: ALL_GROUP_ID,
+          percentExact: pctExact,
+        });
+      }
     }
   }
 
-  // Group/All — All-questions scores (synthetic, non-review)
-  if (!isReviewMode && isSyntheticMode) {
-    if (isGroupMode) {
-      const gid = groupId || NO_GROUP_ID;
-      await saveGroupAllScore(user?.id, { scope: "group", groupId: gid, percentExact: pctExact });
-    } else if (isAllMode) {
-      await saveGroupAllScore(user?.id, { scope: "all", groupId: ALL_GROUP_ID, percentExact: pctExact });
+  async function submitQuizNow() {
+    const points = firstTryCorrect.filter(Boolean).length;
+    const pctExact = total ? (points / total) * 100 : 0;
+    const pctRounded = Math.round(pctExact);
+
+    setScorePct(pctRounded);
+    setShowResult(true);
+
+    await saveLatestScore(pctRounded, { review: isReviewMode });
+
+    if (isSyntheticMode && isReviewMode) {
+      if (isGroupMode) {
+        const gid = groupId || NO_GROUP_ID;
+        await saveGroupRevisitScore(user?.id, {
+          scope: "group",
+          groupId: gid,
+          percentExact: pctExact,
+        });
+      } else if (isAllMode) {
+        await saveGroupRevisitScore(user?.id, {
+          scope: "all",
+          groupId: ALL_GROUP_ID,
+          percentExact: pctExact,
+        });
+      }
+    }
+
+    if (!isReviewMode && isSyntheticMode) {
+      if (isGroupMode) {
+        const gid = groupId || NO_GROUP_ID;
+        await saveGroupAllScore(user?.id, {
+          scope: "group",
+          groupId: gid,
+          percentExact: pctExact,
+        });
+      } else if (isAllMode) {
+        await saveGroupAllScore(user?.id, {
+          scope: "all",
+          groupId: ALL_GROUP_ID,
+          percentExact: pctExact,
+        });
+      }
     }
   }
-}
-
-// Replace your submitQuizNow with this version
-async function submitQuizNow() {
-  const points = firstTryCorrect.filter(Boolean).length;
-  const pctExact = total ? (points / total) * 100 : 0;   // exact for storage
-  const pctRounded = Math.round(pctExact);               // rounded for UI
-
-  setScorePct(pctRounded);
-  setShowResult(true);
-
-  // Per-quiz last score (no-op for synthetic modes inside saveLatestScore)
-  await saveLatestScore(pctRounded, { review: isReviewMode });
-
-  // Group/All — Revisit scores
-  if (isSyntheticMode && isReviewMode) {
-    if (isGroupMode) {
-      const gid = groupId || NO_GROUP_ID;
-      await saveGroupRevisitScore(user?.id, { scope: "group", groupId: gid, percentExact: pctExact });
-    } else if (isAllMode) {
-      await saveGroupRevisitScore(user?.id, { scope: "all", groupId: ALL_GROUP_ID, percentExact: pctExact });
-    }
-  }
-
-  // Group/All — All-questions scores (synthetic, non-review)
-  if (!isReviewMode && isSyntheticMode) {
-    if (isGroupMode) {
-      const gid = groupId || NO_GROUP_ID;
-      await saveGroupAllScore(user?.id, { scope: "group", groupId: gid, percentExact: pctExact });
-    } else if (isAllMode) {
-      await saveGroupAllScore(user?.id, { scope: "all", groupId: ALL_GROUP_ID, percentExact: pctExact });
-    }
-  }
-}
 
   // --- review helpers (add/remove) ---
   function alreadyInReview(prompt) {
-    if (isSyntheticMode && isReviewMode) return true; // by definition
+    if (isSyntheticMode && isReviewMode) return true;
     const rv = quiz?.review_questions ?? [];
     const key = (prompt || "").trim().toLowerCase();
-    return rv.some((q) => (q?.prompt || "").trim().toLowerCase() === key);
+    return rv.some(
+      (q) => (q?.prompt || "").trim().toLowerCase() === key
+    );
   }
 
   async function addCurrentToReview() {
@@ -616,22 +775,29 @@ async function submitQuizNow() {
     const rv = quiz?.review_questions ?? [];
     const newArr = [
       ...rv,
-      { prompt: String(current.prompt ?? ""), answer: String(current.answer ?? "") },
+      {
+        prompt: String(current.prompt ?? ""),
+        answer: String(current.answer ?? ""),
+      },
     ];
     const { error } = await supabase
       .from("quizzes")
-      .update({ review_questions: newArr, updated_at: new Date().toISOString() })
+      .update({
+        review_questions: newArr,
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", quizId)
       .eq("user_id", user.id);
 
     if (!error) {
-      setQuiz((prev) => (prev ? { ...prev, review_questions: newArr } : prev));
+      setQuiz((prev) =>
+        prev ? { ...prev, review_questions: newArr } : prev
+      );
       setAddedToReview(true);
       setShowReviewPrompt(false);
     }
   }
 
-  // Legacy alias
   function addCurrentFromReview() {
     return addCurrentToReview();
   }
@@ -651,23 +817,32 @@ async function submitQuizNow() {
         .maybeSingle();
       if (readErr) return;
 
-      const srcRv = Array.isArray(src?.review_questions) ? src.review_questions : [];
+      const srcRv = Array.isArray(src?.review_questions)
+        ? src.review_questions
+        : [];
       const pruned = srcRv.filter(
-        (q) => (q?.prompt || "").trim().toLowerCase() !== key
+        (q) =>
+          (q?.prompt || "").trim().toLowerCase() !== key
       );
 
       const { error: updErr } = await supabase
         .from("quizzes")
-        .update({ review_questions: pruned, updated_at: new Date().toISOString() })
+        .update({
+          review_questions: pruned,
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", srcId)
         .eq("user_id", user.id);
       if (updErr) return;
 
       setQuiz((prev) => {
         if (!prev) return prev;
-        const list = Array.isArray(prev.review_questions) ? prev.review_questions.slice() : [];
+        const list = Array.isArray(prev.review_questions)
+          ? prev.review_questions.slice()
+          : [];
         const removedIdx = index;
-        if (removedIdx >= 0 && removedIdx < list.length) list.splice(removedIdx, 1);
+        if (removedIdx >= 0 && removedIdx < list.length)
+          list.splice(removedIdx, 1);
         return { ...prev, review_questions: list };
       });
 
@@ -675,39 +850,22 @@ async function submitQuizNow() {
       setRemovedFromReview(true);
       setShowRemovePrompt(false);
 
-      setAnswered((arr) => {
+      const shrink = (arr) => {
         const next = arr.slice();
-        if (removedIdx >= 0 && removedIdx < next.length) next.splice(removedIdx, 1);
+        if (removedIdx >= 0 && removedIdx < next.length)
+          next.splice(removedIdx, 1);
         return next;
-      });
-      setInputs((arr) => {
-        const next = arr.slice();
-        if (removedIdx >= 0 && removedIdx < next.length) next.splice(removedIdx, 1);
-        return next;
-      });
-      setAttempted((arr) => {
-        const next = arr.slice();
-        if (removedIdx >= 0 && removedIdx < next.length) next.splice(removedIdx, 1);
-        return next;
-      });
-      setFirstTryCorrect((arr) => {
-        const next = arr.slice();
-        if (removedIdx >= 0 && removedIdx < next.length) next.splice(removedIdx, 1);
-        return next;
-      });
-      setPeekOn((arr) => {
-        const next = arr.slice();
-        if (removedIdx >= 0 && removedIdx < next.length) next.splice(removedIdx, 1);
-        return next;
-      });
-      setPeekStash((arr) => {
-        const next = arr.slice();
-        if (removedIdx >= 0 && removedIdx < next.length) next.splice(removedIdx, 1);
-        return next;
-      });
+      };
+
+      setAnswered(shrink);
+      setInputs(shrink);
+      setAttempted(shrink);
+      setFirstTryCorrect(shrink);
+      setPeekOn(shrink);
+      setPeekStash(shrink);
 
       setIndex((prev) => {
-        const newLen = (questionsArr.length - 1);
+        const newLen = questionsArr.length - 1;
         if (newLen <= 0) return 0;
         const candidate = Math.min(removedIdx, newLen - 1);
         return candidate < 0 ? 0 : candidate;
@@ -719,51 +877,41 @@ async function submitQuizNow() {
     // Normal (single-quiz) review removal
     const rv = quiz?.review_questions ?? [];
     const key = (current.prompt || "").trim().toLowerCase();
-    const newArr = rv.filter((q) => (q?.prompt || "").trim().toLowerCase() !== key);
+    const newArr = rv.filter(
+      (q) =>
+        (q?.prompt || "").trim().toLowerCase() !== key
+    );
 
     const { error } = await supabase
       .from("quizzes")
-      .update({ review_questions: newArr, updated_at: new Date().toISOString() })
+      .update({
+        review_questions: newArr,
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", quizId)
       .eq("user_id", user.id);
 
     if (!error) {
-      setQuiz((prev) => (prev ? { ...prev, review_questions: newArr } : prev));
+      setQuiz((prev) =>
+        prev ? { ...prev, review_questions: newArr } : prev
+      );
       setRemovedFromReview(true);
       setShowRemovePrompt(false);
 
       const removedIdx = index;
+      const shrink = (arr) => {
+        const next = arr.slice();
+        if (removedIdx >= 0 && removedIdx < next.length)
+          next.splice(removedIdx, 1);
+        return next;
+      };
 
-      setAnswered((arr) => {
-        const next = arr.slice();
-        if (removedIdx >= 0 && removedIdx < next.length) next.splice(removedIdx, 1);
-        return next;
-      });
-      setInputs((arr) => {
-        const next = arr.slice();
-        if (removedIdx >= 0 && removedIdx < next.length) next.splice(removedIdx, 1);
-        return next;
-      });
-      setAttempted((arr) => {
-        const next = arr.slice();
-        if (removedIdx >= 0 && removedIdx < next.length) next.splice(removedIdx, 1);
-        return next;
-      });
-      setFirstTryCorrect((arr) => {
-        const next = arr.slice();
-        if (removedIdx >= 0 && removedIdx < next.length) next.splice(removedIdx, 1);
-        return next;
-      });
-      setPeekOn((arr) => {
-        const next = arr.slice();
-        if (removedIdx >= 0 && removedIdx < next.length) next.splice(removedIdx, 1);
-        return next;
-      });
-      setPeekStash((arr) => {
-        const next = arr.slice();
-        if (removedIdx >= 0 && removedIdx < next.length) next.splice(removedIdx, 1);
-        return next;
-      });
+      setAnswered(shrink);
+      setInputs(shrink);
+      setAttempted(shrink);
+      setFirstTryCorrect(shrink);
+      setPeekOn(shrink);
+      setPeekStash(shrink);
 
       setIndex((prev) => {
         if (newArr.length === 0) return 0;
@@ -782,44 +930,54 @@ async function submitQuizNow() {
     const question = String(current.prompt ?? "");
     let isCorrect = false;
 
-    if (strict) {
-      isCorrect = userAns === expected;
+    const treatAsStrict = strict; // <-- ONLY the toggle controls strictness now
+
+  if (treatAsStrict) {
+    isCorrect = strictFactCorrect(userAns, expected);
+    if (!isCorrect) {
+      setFeedback(
+        "Incorrect ❌ (exact value needed) Press c to continue"
+      );
+    }
+  } else {
+    const local = localGrade(userAns, expected);
+    if (local.pass) {
+      isCorrect = true;
     } else {
-      if (isStrictFact(question, expected)) {
-        isCorrect = strictFactCorrect(userAns, expected);
-        if (!isCorrect) setFeedback("Incorrect ❌ (this one requires the exact value)");
-      } else {
-        const local = localGrade(userAns, expected);
-        if (local.pass) {
-          isCorrect = true;
-        } else {
-          try {
-            const { data: sessionRes } = await supabase.auth.getSession();
-            const jwt = sessionRes?.session?.access_token;
-            const res = await fetch(
-              `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/grade-answer`,
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
-                },
-                body: JSON.stringify({ question, expected, user_answer: userAns }),
-              }
-            );
-            if (res.ok) {
-              const out = await res.json();
-              isCorrect = !!out.correct;
-              if (!isCorrect) setFeedback("Incorrect ❌ Press c to continue");
-            } else {
-              setFeedback("Incorrect ❌ Press c to continue");
-            }
-          } catch {
+      try {
+        const { data: sessionRes } = await supabase.auth.getSession();
+        const jwt = sessionRes?.session?.access_token;
+
+        const res = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/grade-answer`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+            },
+            body: JSON.stringify({
+              question,
+              expected,
+              user_answer: userAns,
+            }),
+          }
+        );
+
+        if (res.ok) {
+          const out = await res.json();
+          isCorrect = !!out.correct;
+          if (!isCorrect) {
             setFeedback("Incorrect ❌ Press c to continue");
           }
+        } else {
+          setFeedback("Incorrect ❌ Press c to continue");
         }
+      } catch {
+        setFeedback("Incorrect ❌ Press c to continue");
       }
     }
+  }
 
     const attemptedNext = attempted.slice();
     const firstTryNext = firstTryCorrect.slice();
@@ -849,17 +1007,19 @@ async function submitQuizNow() {
         setRemovedFromReview(false);
       }
     } else {
-      const canOfferAdd = !isSyntheticMode && !isReviewMode && !alreadyInReview(current.prompt);
+      const canOfferAdd =
+        !isSyntheticMode &&
+        !isReviewMode &&
+        !alreadyInReview(current.prompt);
       setShowReviewPrompt(canOfferAdd);
       setAddedToReview(false);
       setShowRemovePrompt(false);
       setRemovedFromReview(false);
 
-      if (strict || isStrictFact(question, expected)) {
-        setFeedback("Incorrect ❌ (exact value needed) Press c to continue");
-      } else if (!/Press c to continue/i.test(feedback)) {
+      if (!treatAsStrict && !/Press c to continue/i.test(feedback)) {
         setFeedback("Incorrect ❌ Press c to continue");
       }
+      // if treatAsStrict, the strict block above already set the exact-value message
     }
 
     maybeFinish(attemptedNext, firstTryNext);
@@ -900,8 +1060,7 @@ async function submitQuizNow() {
       }
     }
 
-    if (!isC) return;
-    if (!canContinue) return;
+    if (!isC || !canContinue) return;
     const tag = (e.target?.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea") return;
     e.preventDefault();
@@ -942,12 +1101,6 @@ async function submitQuizNow() {
   function goNext() {
     if (!isLast) setIndex((i) => i + 1);
   }
-  function jumpToFirstUnanswered() {
-    if (firstUnansweredBefore === -1) return;
-    setReturnIndex(index);
-    setIndex(firstUnansweredBefore);
-    requestAnimationFrame(() => areaRef.current?.focus());
-  }
 
   function retake() {
     const len = questionsArr.length;
@@ -956,6 +1109,7 @@ async function submitQuizNow() {
     setAttempted(Array(len).fill(false));
     setFirstTryCorrect(Array(len).fill(false));
     setIndex(0);
+    setFurthestIndex(0);
     setReturnIndex(null);
     setInput("");
     setFeedback("");
@@ -998,18 +1152,24 @@ async function submitQuizNow() {
   }
 
   // --- UI helpers / styles ---
-  const pressAnim = "transition-transform duration-100 active:scale-95";
-  const btnBase = "px-4 py-2 rounded text-sm sm:text-base disabled:opacity-50 disabled:cursor-not-allowed";
+  const pressAnim =
+    "transition-transform duration-100 active:scale-95";
+  const btnBase =
+    "px-4 py-2 rounded text-sm sm:text-base disabled:opacity-50 disabled:cursor-not-allowed";
   const btnGray = `bg-gray-700 hover:bg-gray-600 ${pressAnim}`;
   const btnIndigo = `bg-indigo-600 hover:bg-indigo-500 ${pressAnim}`;
 
   if (!quiz) return null;
 
   const originalQuizLink = isSyntheticMode
-    ? (current?.__srcQuizId ? `/play/${current.__srcQuizId}` : "#")
+    ? current?.__srcQuizId
+      ? `/play/${current.__srcQuizId}`
+      : "#"
     : `/play/${quizId}`;
 
-  const originalQuizDisabled = isSyntheticMode ? !current?.__srcQuizId : false;
+  const originalQuizDisabled = isSyntheticMode
+    ? !current?.__srcQuizId
+    : false;
 
   return (
     <div
@@ -1021,8 +1181,14 @@ async function submitQuizNow() {
         {/* --- Desktop / tablet --- */}
         <div className="hidden sm:grid sm:grid-cols-3 sm:items-center">
           <h1 className="text-lg sm:text-xl font-bold truncate pr-3">
-            {(quiz.title || "Quiz")}
-            {isSyntheticMode ? (isReviewMode ? " — Review" : " — All Questions") : (isReviewMode ? " — Review" : "")}
+            {quiz.title || "Quiz"}
+            {isSyntheticMode
+              ? isReviewMode
+                ? " — Review"
+                : " — All Questions"
+              : isReviewMode
+              ? " — Review"
+              : ""}
           </h1>
           <div className="flex items-center justify-center">
             <img
@@ -1033,9 +1199,13 @@ async function submitQuizNow() {
             />
           </div>
           <div className="justify-self-end">
-            <Link to={backPath} className={`${btnBase} ${btnGray}`} title="Go back to dashboard">
-  Back
-</Link>
+            <Link
+              to={backPath}
+              className={`${btnBase} ${btnGray}`}
+              title="Go back to dashboard"
+            >
+              Back
+            </Link>
           </div>
         </div>
 
@@ -1051,12 +1221,21 @@ async function submitQuizNow() {
           </div>
           <div className="flex items-center justify-between">
             <h1 className="text-lg font-bold truncate pr-3">
-              {(quiz.title || "Quiz")}
-              {isSyntheticMode ? (isReviewMode ? " — Review" : " — All Questions") : (isReviewMode ? " — Review" : "")}
+              {quiz.title || "Quiz"}
+              {isSyntheticMode
+                ? isReviewMode
+                  ? " — Review"
+                  : " — All Questions"
+                : isReviewMode
+                ? " — Review"
+                : ""}
             </h1>
-            <Link to={backPath} className={`${btnBase} ${btnGray}`}>
-  Back
-</Link>
+            <Link
+              to={backPath}
+              className={`${btnBase} ${btnGray}`}
+            >
+              Back
+            </Link>
           </div>
         </div>
       </header>
@@ -1067,7 +1246,9 @@ async function submitQuizNow() {
             <>
               <div className="mx-auto w-full max-w-[740px]">
                 <p className="mb-3 sm:mb-4 leading-snug">
-                  <span className="mr-2">{index + 1}/{questionsArr.length}</span>
+                  <span className="mr-2">
+                    {index + 1}/{questionsArr.length}
+                  </span>
                   {current.prompt}
                 </p>
 
@@ -1081,22 +1262,29 @@ async function submitQuizNow() {
                         type="checkbox"
                         className="h-4 w-4"
                         checked={strict}
-                        onChange={(e) => setStrict(e.target.checked)}
-                        title="Enable strict mode, only accept the exact answer."
+                        onChange={(e) =>
+                          setStrict(e.target.checked)
+                        }
                       />
-                      <span className="text-gray-300">Strict mode</span>
+                      <span className="text-gray-300">
+                        Strict mode
+                      </span>
                     </label>
 
                     {/* Desktop actions row */}
                     <div className="hidden sm:flex items-center gap-2">
-                      {/* First action: label depends on mode */}
                       {isSyntheticMode ? (
                         <Link
                           to={originalQuizLink}
                           onClick={(e) => {
-                            if (originalQuizDisabled) e.preventDefault();
+                            if (originalQuizDisabled)
+                              e.preventDefault();
                           }}
-                          className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} ${originalQuizDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
+                          className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} ${
+                            originalQuizDisabled
+                              ? "opacity-50 cursor-not-allowed"
+                              : ""
+                          }`}
                           title="Go to the original quiz for this question"
                         >
                           Play Main Quiz
@@ -1119,7 +1307,6 @@ async function submitQuizNow() {
                         </Link>
                       )}
 
-                      {/* Add/Remove Review */}
                       {!isSyntheticMode && (
                         <>
                           {isReviewMode ? (
@@ -1127,13 +1314,11 @@ async function submitQuizNow() {
                               type="button"
                               className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray}`}
                               onClick={removeCurrentFromReview}
-                              disabled={!current || !alreadyInReview(current?.prompt)}
-                              title={
-                                !current
-                                  ? "No question"
-                                  : alreadyInReview(current?.prompt)
-                                  ? "Remove this from your review group"
-                                  : "Not in review group"
+                              disabled={
+                                !current ||
+                                !alreadyInReview(
+                                  current?.prompt
+                                )
                               }
                             >
                               Remove from Review Group
@@ -1153,11 +1338,11 @@ async function submitQuizNow() {
                               type="button"
                               className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray}`}
                               onClick={addCurrentToReview}
-                              disabled={!current || alreadyInReview(current?.prompt)}
-                              title={
-                                alreadyInReview(current?.prompt)
-                                  ? "Already added to review group"
-                                  : "Add this question to your review group"
+                              disabled={
+                                !current ||
+                                alreadyInReview(
+                                  current?.prompt
+                                )
                               }
                             >
                               Add To Review Group
@@ -1166,14 +1351,12 @@ async function submitQuizNow() {
                         </>
                       )}
 
-                      {/* In synthetic revisit (group/all), always allow removing from SOURCE */}
                       {isSyntheticMode && isReviewMode && (
                         <button
                           type="button"
                           className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray}`}
                           onClick={removeCurrentFromReview}
                           disabled={!current}
-                          title="Remove this from its quiz’s review group"
                         >
                           Remove from Review Group
                         </button>
@@ -1183,9 +1366,15 @@ async function submitQuizNow() {
                         type="button"
                         className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray}`}
                         onClick={toggleDisplayAnswer}
-                        title={isPeeking ? "Show your original answer" : "Show the correct answer"}
+                        title={
+                          isPeeking
+                            ? "Show your original answer"
+                            : "Show the correct answer"
+                        }
                       >
-                        {isPeeking ? "Display My Answer" : "Display answer"}
+                        {isPeeking
+                          ? "Display My Answer"
+                          : "Display answer"}
                       </button>
                     </div>
                   </div>
@@ -1196,10 +1385,14 @@ async function submitQuizNow() {
                       <Link
                         to={originalQuizLink}
                         onClick={(e) => {
-                          if (originalQuizDisabled) e.preventDefault();
+                          if (originalQuizDisabled)
+                            e.preventDefault();
                         }}
-                        className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal ${originalQuizDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
-                        title="Go to the original quiz for this question"
+                        className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal ${
+                          originalQuizDisabled
+                            ? "opacity-50 cursor-not-allowed"
+                            : ""
+                        }`}
                       >
                         Play Main Quiz
                       </Link>
@@ -1207,7 +1400,6 @@ async function submitQuizNow() {
                       <Link
                         to={`/play/${quizId}`}
                         className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
-                        title="Go to the main quiz (not the revisit set)"
                       >
                         Play Main Quiz
                       </Link>
@@ -1215,26 +1407,22 @@ async function submitQuizNow() {
                       <Link
                         to={`/play/${quizId}?mode=review`}
                         className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
-                        title="Practice only the questions in your review group"
                       >
                         Play Revisit Quiz
                       </Link>
                     )}
 
-                    {/* Add/Remove Review */}
                     {!isSyntheticMode ? (
                       isReviewMode ? (
                         <button
                           type="button"
                           className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
                           onClick={removeCurrentFromReview}
-                          disabled={!current || !alreadyInReview(current?.prompt)}
-                          title={
-                            !current
-                              ? "No question"
-                              : alreadyInReview(current?.prompt)
-                              ? "Remove this from your review group"
-                              : "Not in review group"
+                          disabled={
+                            !current ||
+                            !alreadyInReview(
+                              current?.prompt
+                            )
                           }
                         >
                           Remove from Review Group
@@ -1244,40 +1432,42 @@ async function submitQuizNow() {
                           type="button"
                           className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
                           onClick={addCurrentToReview}
-                          disabled={!current || alreadyInReview(current?.prompt)}
-                          title={
-                            alreadyInReview(current?.prompt)
-                              ? "Already added to review group"
-                              : "Add this question to your review group"
+                          disabled={
+                            !current ||
+                            alreadyInReview(
+                              current?.prompt
+                            )
                           }
                         >
                           Add To Review Group
                         </button>
                       )
+                    ) : isReviewMode ? (
+                      <button
+                        type="button"
+                        className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
+                        onClick={removeCurrentFromReview}
+                        disabled={!current}
+                      >
+                        Remove from Review Group
+                      </button>
                     ) : (
-                      isReviewMode ? (
-                        <button
-                          type="button"
-                          className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
-                          onClick={removeCurrentFromReview}
-                          disabled={!current}
-                          title="Remove this from its quiz’s review group"
-                        >
-                          Remove from Review Group
-                        </button>
-                      ) : (
-                        // In synthetic ALL-QUESTIONS mode there is no review add/remove
-                        <div className="min-h-14" />
-                      )
+                      <div className="min-h-14" />
                     )}
 
                     <button
                       type="button"
                       className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
                       onClick={toggleDisplayAnswer}
-                      title={isPeeking ? "Show your original answer" : "Show the correct answer"}
+                      title={
+                        isPeeking
+                          ? "Show your original answer"
+                          : "Show the correct answer"
+                      }
                     >
-                      {isPeeking ? "Display My Answer" : "Display answer"}
+                      {isPeeking
+                        ? "Display My Answer"
+                        : "Display answer"}
                     </button>
                   </div>
                 </div>
@@ -1287,9 +1477,7 @@ async function submitQuizNow() {
                   <form onSubmit={submit}>
                     <textarea
                       ref={areaRef}
-                      className="w-full h-56 p-4 rounded-lg bg-white text-gray-900 border border-gray-300
-           focus:outline-none focus:ring-2 focus:ring-emerald-600 text-base sm:text-xl
-           placeholder:text-gray-500"
+                      className="w-full h-56 p-4 rounded-lg bg-white text-gray-900 border border-gray-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-base sm:text-xl placeholder:text-gray-500"
                       value={input}
                       onChange={(e) => handleChange(e.target.value)}
                       placeholder="Type your answer and press Enter…"
@@ -1320,7 +1508,7 @@ async function submitQuizNow() {
 
                       <button
                         type="button"
-                        onClick={(e) => submit(e)}
+                        onClick={submit}
                         className={`col-span-2 w-full ${btnBase} ${btnGray} h-12 flex items-center justify-center`}
                         aria-label="Submit answer"
                         title="Submit (same as pressing Enter)"
@@ -1333,9 +1521,8 @@ async function submitQuizNow() {
                   {/* Desktop side Enter */}
                   <button
                     type="button"
-                    onClick={(e) => submit(e)}
-                    className={`hidden lg:flex ${btnBase} ${btnGray} h-12 items-center justify-center
-absolute top-1/2 -translate-y-1/2 left-full ml-3`}
+                    onClick={submit}
+                    className={`hidden lg:flex ${btnBase} ${btnGray} h-12 items-center justify-center absolute top-1/2 -translate-y-1/2 left-full ml-3`}
                     aria-label="Submit answer"
                     title="Submit (same as pressing Enter)"
                   >
@@ -1345,7 +1532,13 @@ absolute top-1/2 -translate-y-1/2 left-full ml-3`}
 
                 {/* NAV BUTTONS */}
                 <div className="mt-0">
-                  <div className={`hidden sm:grid ${showGoToUnanswered ? "sm:grid-cols-3" : "sm:grid-cols-2"} gap-3`}>
+                  <div
+                    className={`hidden sm:grid ${
+                      showGoToUnanswered
+                        ? "sm:grid-cols-3"
+                        : "sm:grid-cols-2"
+                    } gap-3`}
+                  >
                     <button
                       type="button"
                       disabled={isFirst}
@@ -1359,7 +1552,7 @@ absolute top-1/2 -translate-y-1/2 left-full ml-3`}
                       <button
                         type="button"
                         className={`w-full ${btnBase} ${btnGray} h-12 sm:h-14 flex items-center justify-center`}
-                        onClick={jumpToFirstUnanswered}
+                        onClick={jumpToUnanswered}
                       >
                         Go to Unanswered Question
                       </button>
@@ -1390,7 +1583,11 @@ absolute top-1/2 -translate-y-1/2 left-full ml-3`}
                   {/* Feedback + prompts */}
                   {feedback && (
                     <p
-                      className={`mt-3 text-base sm:text-lg text-center ${isPositiveFeedback ? "text-green-400" : "text-red-400"}`}
+                      className={`mt-3 text-base sm:text-lg text-center ${
+                        isPositiveFeedback
+                          ? "text-green-400"
+                          : "text-red-400"
+                      }`}
                       aria-live="polite"
                     >
                       {feedback}
@@ -1399,27 +1596,39 @@ absolute top-1/2 -translate-y-1/2 left-full ml-3`}
 
                   {showReviewPrompt && !addedToReview && (
                     <p className="mt-2 text-white text-center text-base sm:text-lg">
-                      Add question to review group? Press <span className="font-semibold">Y</span> for yes.
+                      Add question to review group? Press{" "}
+                      <span className="font-semibold">Y</span> for yes.
                     </p>
                   )}
                   {!showReviewPrompt && addedToReview && (
-                    <p className="mt-2 text-white text-center text-base sm:text-lg">Added to review group!</p>
-                  )}
-
-                  {isReviewMode && showRemovePrompt && !removedFromReview && (
                     <p className="mt-2 text-white text-center text-base sm:text-lg">
-                      Remove question from review group? Press <span className="font-semibold">Y</span> for yes.
+                      Added to review group!
                     </p>
                   )}
-                  {isReviewMode && !showRemovePrompt && removedFromReview && (
-                    <p className="mt-2 text-white text-center text-base sm:text-lg">Removed question from review group.</p>
-                  )}
+
+                  {isReviewMode &&
+                    showRemovePrompt &&
+                    !removedFromReview && (
+                      <p className="mt-2 text-white text-center text-base sm:text-lg">
+                        Remove question from review group? Press{" "}
+                        <span className="font-semibold">Y</span> for yes.
+                      </p>
+                    )}
+                  {isReviewMode &&
+                    !showRemovePrompt &&
+                    removedFromReview && (
+                      <p className="mt-2 text-white text-center text-base sm:text-lg">
+                        Removed question from review group.
+                      </p>
+                    )}
                 </div>
               </div>
             </>
           ) : (
             <>
-              <p className="text-gray-300 text-center">No questions yet. Add some in the editor.</p>
+              <p className="text-gray-300 text-center">
+                No questions yet. Add some in the editor.
+              </p>
               {(isReviewMode || isSyntheticMode) && (
                 <div className="mt-4 flex justify-center">
                   {isSyntheticMode ? (
@@ -1452,14 +1661,32 @@ absolute top-1/2 -translate-y-1/2 left-full ml-3`}
           <div className="bg-gray-800 text-white rounded-2xl p-5 sm:p-6 max-w-md w-full max-h-[85vh] overflow-y-auto">
             <h2 className="text-xl sm:text-2xl font-bold mb-2">
               {isSyntheticMode
-                ? (isReviewMode ? "Revisit Score" : "All Questions Score")
-                : (isReviewMode ? "Revisit Score" : "Your Score")} {hasConfetti ? "🎉" : ""}
+                ? isReviewMode
+                  ? "Revisit Score"
+                  : "All Questions Score"
+                : isReviewMode
+                ? "Revisit Score"
+                : "Your Score"}{" "}
+              {hasConfetti ? "🎉" : ""}
             </h2>
             <p className="text-base sm:text-lg mb-6">
-              You scored <span className="font-semibold">{scorePct}%</span> on this {isSyntheticMode ? (isReviewMode ? "revisit set" : "all-questions set") : (isReviewMode ? "revisit set" : "quiz")}.
+              You scored{" "}
+              <span className="font-semibold">{scorePct}%</span> on this{" "}
+              {isSyntheticMode
+                ? isReviewMode
+                  ? "revisit set"
+                  : "all-questions set"
+                : isReviewMode
+                ? "revisit set"
+                : "quiz"}
+              .
             </p>
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2">
-              <button type="button" className={`${btnBase} ${btnGray} w-full sm:w-auto`} onClick={retake}>
+              <button
+                type="button"
+                className={`${btnBase} ${btnGray} w-full sm:w-auto`}
+                onClick={retake}
+              >
                 Retake
               </button>
               <button

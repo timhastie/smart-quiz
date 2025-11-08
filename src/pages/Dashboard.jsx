@@ -1219,6 +1219,10 @@ useEffect(() => {
   groupAllScores,
 ]);
 
+  const hasAnyQuizzes = (quizzes?.length ?? 0) > 0;
+  const isFirstQuizState = !hasAnyQuizzes;
+
+
   const railRef = useRef(null);
   const CARD_W = 520;
   const [canLeft, setCanLeft] = useState(false);
@@ -1332,13 +1336,17 @@ useEffect(() => {
   <div className="flex items-stretch gap-2">
     <button
       onClick={async () => {
+        if (isFirstQuizState) return; // inline form already visible
         if (filterGroupId && filterGroupId !== NO_GROUP) setGGroupId(filterGroupId);
         else setGGroupId("");
         const allowed = await ensureCanCreate();
         if (!allowed) return;
         setGenOpen(true);
       }}
-      className={`flex-none whitespace-nowrap ${btnBase} ${btnGreen} h-11 px-3 py-2 text-[13px]`}
+      disabled={isFirstQuizState}
+      className={`flex-none whitespace-nowrap ${btnBase} ${btnGreen} h-11 px-3 py-2 text-[13px] ${
+        isFirstQuizState ? "opacity-60 cursor-not-allowed" : ""
+      }`}
     >
       + Generate Quiz with AI
     </button>
@@ -1399,6 +1407,7 @@ useEffect(() => {
         <div className="mb-6 hidden sm:flex flex-wrap items-stretch gap-3 w-full">
           <button
             onClick={async () => {
+              if (isFirstQuizState) return; // inline form already visible
               if (filterGroupId && filterGroupId !== NO_GROUP)
                 setGGroupId(filterGroupId);
               else setGGroupId("");
@@ -1406,11 +1415,13 @@ useEffect(() => {
               if (!allowed) return;
               setGenOpen(true);
             }}
-            className={`whitespace-normal text-left leading-tight ${btnBase} ${btnGreen} ${actionH}`}
+            disabled={isFirstQuizState}
+            className={`whitespace-normal text-left leading-tight ${btnBase} ${btnGreen} ${actionH} ${
+              isFirstQuizState ? "opacity-60 cursor-not-allowed" : ""
+            }`}
           >
             + Generate Quiz with AI
           </button>
-
           <button
             onClick={createQuiz}
             className={`whitespace-normal text-left leading-tight ${btnBase} ${btnGray} ${actionH}`}
@@ -1467,163 +1478,333 @@ useEffect(() => {
           )}
         </div>
 
-        {/* ----------------------- QUIZ LIST / CAROUSEL ---------------------- */}
-        {visibleQuizzes.length === 0 ? (
-          <div className="text-gray-400">
-            No quizzes yet. Create one or generate with AI.
-          </div>
+                {/* ----------------------- QUIZ LIST / CAROUSEL ---------------------- */}
+        {!hasAnyQuizzes ? (
+          /* Inline “Generate with AI” panel for brand-new users */
+          <section className="mt-4 max-w-3xl mx-auto bg-gray-800/70 border border-gray-700 rounded-2xl p-5 sm:p-6 shadow-sm">
+            <h2 className="text-xl sm:text-2xl font-semibold mb-2">
+              Generate a quiz with AI
+            </h2>
+            <p className="text-sm text-gray-300 mb-4">
+              Use this form to instantly create your first AI quiz.
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="sm:col-span-2">
+                <label
+                  className="block text-sm text-gray-300 mb-1"
+                  htmlFor="inline-gen-title"
+                >
+                  Name
+                </label>
+                <input
+                  id="inline-gen-title"
+                  className="field w-full placeholder:text-gray-400"
+                  placeholder="Bash Top 10"
+                  value={gTitle}
+                  onChange={(e) => setGTitle(e.target.value)}
+                  disabled={generating}
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label
+                  className="block text-sm text-gray-300 mb-1"
+                  htmlFor="inline-gen-topic"
+                >
+                  Prompt
+                </label>
+                <textarea
+                  id="inline-gen-topic"
+                  className="field-textarea w-full min-h-[8rem] resize-y placeholder:text-gray-400"
+                  placeholder="Create 10 questions that test the 10 most-used Bash commands."
+                  value={gTopic}
+                  onChange={(e) => setGTopic(e.target.value)}
+                  disabled={generating}
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="inline-flex items-center gap-2 text-sm text-gray-200">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={gNoRepeat}
+                    onChange={(e) => setGNoRepeat(e.target.checked)}
+                    disabled={generating}
+                  />
+                  <span>Do not repeat previous questions</span>
+                </label>
+              </div>
+
+              <div className="sm:col-span-2">
+                <label
+                  className="block text-sm text-gray-300 mb-1"
+                  htmlFor="inline-gen-file"
+                >
+                  Optional document to use as source (PDF / TXT / MD)
+                </label>
+                <input
+                  id="inline-gen-file"
+                  type="file"
+                  accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+                  className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700"
+                  onChange={(e) => setGFile(e.target.files?.[0] ?? null)}
+                  disabled={generating}
+                />
+                {gFile && (
+                  <div className="mt-1 text-xs text-gray-300">
+                    Selected: {gFile.name}{" "}
+                    <button
+                      type="button"
+                      className="underline"
+                      onClick={() => setGFile(null)}
+                      disabled={generating}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="sm:col-span-1">
+                <label
+                  className="block text-sm text-gray-300 mb-1"
+                  htmlFor="inline-gen-group"
+                >
+                  Add to Group
+                </label>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <select
+                    id="inline-gen-group"
+                    className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700"
+                    value={gGroupId}
+                    onChange={(e) => setGGroupId(e.target.value)}
+                    disabled={generating}
+                  >
+                    <option value="">No group</option>
+                    {groups.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className={`${btnBase} ${btnGray}`}
+                    onClick={() => {
+                      setGNewName("");
+                      setGNewOpen(true);
+                    }}
+                    disabled={generating}
+                  >
+                    New group +
+                  </button>
+                </div>
+              </div>
+
+              <div className="sm:col-span-1">
+                <label
+                  className="block text-sm text-gray-300 mb-1"
+                  htmlFor="inline-gen-count"
+                >
+                  # of questions
+                </label>
+                <input
+                  id="inline-gen-count"
+                  className="field w-full sm:w-20 text-left pl-4"
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={gCount}
+                  onChange={(e) =>
+                    setGCount(Number(e.target.value) || 10)
+                  }
+                  disabled={generating}
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                className={`${btnBase} ${btnGreen}`}
+                onClick={generateQuiz}
+                disabled={generating}
+              >
+                {generating ? "Generating…" : "Generate"}
+              </button>
+            </div>
+          </section>
         ) : (
           <>
-           {/* --- MOBILE vertical list --- */}
-<div className="sm:hidden">
-  <div className="relative">
-    <div
-      className="w-full pt-2 max-h-[72vh] overflow-y-auto overscroll-contain"
+            {/* --- MOBILE vertical list --- */}
+            <div className="sm:hidden">
+              <div className="relative">
+                 <div
+      className="w-full pt-2 max-h-[72vh] overflow-y-auto overscroll-auto"
       aria-label="Your quizzes (scrollable list)"
     >
-      <ul className="grid grid-cols-1 gap-3">
-        {visibleQuizzes.map((q) => {
-          const score = scoresByQuiz[q.id];
-          const rvCount = q.review_questions?.length ?? 0;
-          const reviewDisabled = rvCount === 0;
+                  <ul className="grid grid-cols-1 gap-3">
+                    {visibleQuizzes.map((q) => {
+                      const score = scoresByQuiz[q.id];
+                      const rvCount = q.review_questions?.length ?? 0;
+                      const reviewDisabled = rvCount === 0;
 
-          return (
-            <li
-              key={q.id}
-              className="w-full max-w-[580px] bg-gray-800 rounded-2xl p-4 shadow-sm border border-gray-800 flex flex-col overflow-hidden h-[360px]"
-            >
-              {/* Top: meta + preview */}
-              <div className="flex-1 grid grid-cols-1 gap-3 min-h-0 overflow-hidden">
-                {/* LEFT: title + meta */}
-                <div className="min-w-0">
-                  <div className="flex items-start gap-3">
-                    <input
-                      type="checkbox"
-                      className="h-5 w-5 accent-emerald-500 mt-1 shrink-0"
-                      checked={selectedIds.has(q.id)}
-                      onChange={() => toggleSelected(q.id)}
-                      aria-label={`Select ${q.title || "Untitled Quiz"}`}
-                    />
-                    <div className="min-w-0">
-                      <div
-                        className="text-xl font-semibold leading-tight break-words"
-                        title={q.title || "Untitled Quiz"}
-                      >
-                        {q.title || "Untitled Quiz"}
-                      </div>
-
-                      <div className="mt-2 text-xs text-gray-300 space-y-0.5">
-                        <div>{q.questions?.length ?? 0} questions</div>
-                        <div>
-                          Last score:{" "}
-                          {score?.last != null ? (
-                            <span
-                              className={
-                                score.last >= 90 ? "text-green-400 font-semibold" : ""
-                              }
-                            >
-                              {score.last}%
-                            </span>
-                          ) : (
-                            "—"
-                          )}
-                        </div>
-                        <div>
-                          Revisit score:{" "}
-                          {score?.review != null ? (
-                            <span
-                              className={
-                                score.review >= 90 ? "text-green-400 font-semibold" : ""
-                              }
-                            >
-                              {score.review}%
-                            </span>
-                          ) : (
-                            "—"
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* RIGHT: Questions preview */}
-                <div className="relative bg-gray-900/30 border border-gray-700 rounded-xl p-3 overflow-hidden">
-                  <ol className="text-[13px] leading-5 list-decimal pl-5 pr-3 pb-7 space-y-1.5 max-h-[160px] overflow-hidden">
-                    {(Array.isArray(q.questions) ? q.questions : []).map((it, idx) => {
-                      const p = (it?.prompt || "").toString().trim();
-                      if (!p) return null;
                       return (
-                        <li key={idx} className="break-words">
-                          {p}
+                        <li
+                          key={q.id}
+                          className="w-full max-w-[580px] bg-gray-800 rounded-2xl p-4 shadow-sm border border-gray-800 flex flex-col overflow-hidden h-[360px]"
+                        >
+                          {/* Top: meta + preview */}
+                          <div className="flex-1 grid grid-cols-1 gap-3 min-h-0 overflow-hidden">
+                            {/* LEFT: title + meta */}
+                            <div className="min-w-0">
+                              <div className="flex items-start gap-3">
+                                <input
+                                  type="checkbox"
+                                  className="h-5 w-5 accent-emerald-500 mt-1 shrink-0"
+                                  checked={selectedIds.has(q.id)}
+                                  onChange={() => toggleSelected(q.id)}
+                                  aria-label={`Select ${q.title || "Untitled Quiz"}`}
+                                />
+                                <div className="min-w-0">
+                                  <div
+                                    className="text-xl font-semibold leading-tight break-words"
+                                    title={q.title || "Untitled Quiz"}
+                                  >
+                                    {q.title || "Untitled Quiz"}
+                                  </div>
+
+                                  <div className="mt-2 text-xs text-gray-300 space-y-0.5">
+                                    <div>{q.questions?.length ?? 0} questions</div>
+                                    <div>
+                                      Last score:{" "}
+                                      {score?.last != null ? (
+                                        <span
+                                          className={
+                                            score.last >= 90
+                                              ? "text-green-400 font-semibold"
+                                              : ""
+                                          }
+                                        >
+                                          {score.last}%
+                                        </span>
+                                      ) : (
+                                        "—"
+                                      )}
+                                    </div>
+                                    <div>
+                                      Revisit score:{" "}
+                                      {score?.review != null ? (
+                                        <span
+                                          className={
+                                            score.review >= 90
+                                              ? "text-green-400 font-semibold"
+                                              : ""
+                                          }
+                                        >
+                                          {score.review}%
+                                        </span>
+                                      ) : (
+                                        "—"
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* RIGHT: Questions preview */}
+                            <div className="relative bg-gray-900/30 border border-gray-700 rounded-xl p-3 overflow-hidden">
+                              <ol className="text-[13px] leading-5 list-decimal pl-5 pr-3 pb-7 space-y-1.5 max-h-[160px] overflow-hidden">
+                                {(Array.isArray(q.questions) ? q.questions : []).map(
+                                  (it, idx) => {
+                                    const p = (it?.prompt || "").toString().trim();
+                                    if (!p) return null;
+                                    return (
+                                      <li key={idx} className="break-words">
+                                        {p}
+                                      </li>
+                                    );
+                                  }
+                                )}
+                              </ol>
+                              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-gray-900/95 to-transparent" />
+                              <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end pr-3 pb-1.5 select-none">
+                                <span>…</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Bottom actions */}
+                          <div className="mt-3 grid grid-cols-4 gap-2">
+                            <Link
+                              to={`/play/${q.id}`}
+                              className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
+                              aria-label="Play quiz"
+                              title="Play"
+                            >
+                              <Play className="h-5 w-5" />
+                            </Link>
+
+                            <Link
+                              to={
+                                reviewDisabled ? "#" : `/play/${q.id}?mode=review`
+                              }
+                              onClick={(e) => {
+                                if (reviewDisabled) e.preventDefault();
+                              }}
+                              className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center ${
+                                reviewDisabled
+                                  ? "opacity-50 cursor-not-allowed"
+                                  : ""
+                              }`}
+                              aria-label={
+                                reviewDisabled
+                                  ? "No Revisit questions yet"
+                                  : "Practice Revisit"
+                              }
+                              title={
+                                reviewDisabled
+                                  ? "No Revisit questions yet"
+                                  : "Practice Revisit"
+                              }
+                            >
+                              <History className="h-5 w-5" />
+                            </Link>
+
+                            <Link
+                              to={`/edit/${q.id}`}
+                              className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
+                              aria-label="Edit quiz"
+                              title="Edit"
+                            >
+                              <SquarePen className="h-5 w-5" />
+                            </Link>
+
+                            <button
+                              onClick={() => {
+                                setTarget({
+                                  id: q.id,
+                                  title: q.title || "Untitled Quiz",
+                                  group_id: q.group_id ?? null,
+                                });
+                                setConfirmOpen(true);
+                              }}
+                              className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
+                              aria-label="Delete quiz"
+                              title="Delete"
+                            >
+                              <Trash2 className="h-5 w-5" />
+                            </button>
+                          </div>
                         </li>
                       );
                     })}
-                  </ol>
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-gray-900/95 to-transparent" />
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end pr-3 pb-1.5 select-none">
-                    <span>…</span>
-                  </div>
+                  </ul>
                 </div>
               </div>
-
-              {/* Bottom actions */}
-              <div className="mt-3 grid grid-cols-4 gap-2">
-                <Link
-                  to={`/play/${q.id}`}
-                  className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
-                  aria-label="Play quiz"
-                  title="Play"
-                >
-                  <Play className="h-5 w-5" />
-                </Link>
-
-                <Link
-                  to={reviewDisabled ? "#" : `/play/${q.id}?mode=review`}
-                  onClick={(e) => {
-                    if (reviewDisabled) e.preventDefault();
-                  }}
-                  className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center ${
-                    reviewDisabled ? "opacity-50 cursor-not-allowed" : ""
-                  }`}
-                  aria-label={reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"}
-                  title={reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"}
-                >
-                  <History className="h-5 w-5" />
-                </Link>
-
-                <Link
-                  to={`/edit/${q.id}`}
-                  className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
-                  aria-label="Edit quiz"
-                  title="Edit"
-                >
-                  <SquarePen className="h-5 w-5" />
-                </Link>
-
-                <button
-                  onClick={() => {
-                    setTarget({
-                      id: q.id,
-                      title: q.title || "Untitled Quiz",
-                      group_id: q.group_id ?? null,
-                    });
-                    setConfirmOpen(true);
-                  }}
-                  className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
-                  aria-label="Delete quiz"
-                  title="Delete"
-                >
-                  <Trash2 className="h-5 w-5" />
-                </button>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  </div>
-</div>
+            </div>
 
             {/* --- DESKTOP/TABLET horizontal carousel --- */}
             <div className="relative hidden sm:block overflow-x-clip">
@@ -1770,7 +1951,9 @@ useEffect(() => {
                               if (reviewDisabled) e.preventDefault();
                             }}
                             className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center ${
-                              reviewDisabled ? "opacity-50 cursor-not-allowed" : ""
+                              reviewDisabled
+                                ? "opacity-50 cursor-not-allowed"
+                                : ""
                             }`}
                             aria-label={
                               reviewDisabled
@@ -1819,6 +2002,7 @@ useEffect(() => {
             </div>
           </>
         )}
+
 
         {dbg("FOOTER check", { filterGroupId, isEmpty: filterGroupId === "", isNoGroup: filterGroupId === NO_GROUP, hasCurrent: !!currentGroup })}
 
@@ -1900,19 +2084,27 @@ useEffect(() => {
             </div>
 
             {/* RIGHT: actions (icons only; larger) */}
-            <div className="flex flex-col sm:flex-row md:flex-row md:flex-nowrap items-stretch gap-3">
+            <div className="flex flex-col sm:flex-row md:flex-row md:flex-nowrap items-center sm:items-stretch gap-3">
               {isConcreteGroup ? (
                 <>
                   <Link
-                    to={groupReviewCount > 0 ? `/play/group/${currentGroup.id}?mode=review` : "#"}
-                    onClick={(e) => groupReviewCount === 0 && e.preventDefault()}
-                    className={`${btnBase} ${btnGray} inline-flex items-center justify-center min-h-[3.5rem] sm:min-h-[3.75rem] px-5 ${
-                      groupReviewCount === 0 ? "opacity-50 cursor-not-allowed" : ""
+                    to={
+                      groupReviewCount > 0
+                        ? `/play/group/${currentGroup.id}?mode=review`
+                        : "#"
+                    }
+                    onClick={(e) => {
+                      if (groupReviewCount === 0) e.preventDefault();
+                    }}
+                    className={`${btnBase} ${btnGray} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl ${
+                      groupReviewCount === 0
+                        ? "opacity-50 cursor-not-allowed"
+                        : ""
                     }`}
                     title={
                       groupReviewCount === 0
                         ? "No Revisit questions in this group yet"
-                        : `Play “${currentGroup.name}” Revisit Questions`
+                        : `Play "${currentGroup.name}" Revisit Questions`
                     }
                     aria-label={`Play ${currentGroup.name} Revisit Questions`}
                   >
@@ -1920,15 +2112,23 @@ useEffect(() => {
                   </Link>
 
                   <Link
-                    to={groupAllCount > 0 ? `/play/group/${currentGroup.id}?mode=all` : "#"}
-                    onClick={(e) => groupAllCount === 0 && e.preventDefault()}
-                    className={`${btnBase} ${btnGreen} inline-flex items-center justify-center min-h-[3.5rem] sm:min-h-[3.75rem] px-5 ${
-                      groupAllCount === 0 ? "opacity-50 cursor-not-allowed" : ""
+                    to={
+                      groupAllCount > 0
+                        ? `/play/group/${currentGroup.id}?mode=all`
+                        : "#"
+                    }
+                    onClick={(e) => {
+                      if (groupAllCount === 0) e.preventDefault();
+                    }}
+                    className={`${btnBase} ${btnGreen} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl ${
+                      groupAllCount === 0
+                        ? "opacity-50 cursor-not-allowed"
+                        : ""
                     }`}
                     title={
                       groupAllCount === 0
                         ? "No questions in this group yet"
-                        : `Play “${currentGroup.name}” All Questions`
+                        : `Play "${currentGroup.name}" All Questions`
                     }
                     aria-label={`Play ${currentGroup.name} All Questions`}
                   >
@@ -1937,7 +2137,7 @@ useEffect(() => {
 
                   <button
                     onClick={openEditGroup}
-                    className={`${btnBase} ${btnGray} inline-flex items-center justify-center min-h-[3.5rem] sm:min-h-[3.75rem] px-5`}
+                    className={`${btnBase} ${btnGray} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl`}
                     title="Edit this group’s name"
                     aria-label="Edit group name"
                   >
@@ -1946,8 +2146,8 @@ useEffect(() => {
 
                   <button
                     onClick={() => setDeleteGroupOpen(true)}
-                    className={`${btnBase} ${btnRed} inline-flex items-center justify-center min-h-[3.5rem] sm:min-h-[3.75rem] px-5`}
-                    title={`Delete “${currentGroup.name}” and all its quizzes`}
+                    className={`${btnBase} ${btnRed} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl`}
+                    title={`Delete "${currentGroup.name}" and all its quizzes`}
                     aria-label={`Delete ${currentGroup.name} group`}
                   >
                     <Trash2 className="h-8 w-8" strokeWidth={2} />
@@ -1956,15 +2156,23 @@ useEffect(() => {
               ) : isNoGroup ? (
                 <>
                   <Link
-                    to={noGroupReviewCount > 0 ? `/play/group/${NO_GROUP_ID}?mode=review` : "#"}
-                    onClick={(e) => noGroupReviewCount === 0 && e.preventDefault()}
-                    className={`${btnBase} ${btnGray} inline-flex items-center justify-center min-h-[3.5rem] sm:min-h-[3.75rem] px-5 ${
-                      noGroupReviewCount === 0 ? "opacity-50 cursor-not-allowed" : ""
+                    to={
+                      noGroupReviewCount > 0
+                        ? `/play/group/${NO_GROUP_ID}?mode=review`
+                        : "#"
+                    }
+                    onClick={(e) => {
+                      if (noGroupReviewCount === 0) e.preventDefault();
+                    }}
+                    className={`${btnBase} ${btnGray} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl ${
+                      noGroupReviewCount === 0
+                        ? "opacity-50 cursor-not-allowed"
+                        : ""
                     }`}
                     title={
                       noGroupReviewCount === 0
                         ? "No Revisit questions in No group yet"
-                        : "Play “No group” Revisit Questions"
+                        : 'Play "No group" Revisit Questions'
                     }
                     aria-label="Play No group Revisit Questions"
                   >
@@ -1972,15 +2180,23 @@ useEffect(() => {
                   </Link>
 
                   <Link
-                    to={noGroupAllCount > 0 ? `/play/group/${NO_GROUP_ID}?mode=all` : "#"}
-                    onClick={(e) => noGroupAllCount === 0 && e.preventDefault()}
-                    className={`${btnBase} ${btnGreen} inline-flex items-center justify-center min-h-[3.5rem] sm:min-h-[3.75rem] px-5 ${
-                      noGroupAllCount === 0 ? "opacity-50 cursor-not-allowed" : ""
+                    to={
+                      noGroupAllCount > 0
+                        ? `/play/group/${NO_GROUP_ID}?mode=all`
+                        : "#"
+                    }
+                    onClick={(e) => {
+                      if (noGroupAllCount === 0) e.preventDefault();
+                    }}
+                    className={`${btnBase} ${btnGreen} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl ${
+                      noGroupAllCount === 0
+                        ? "opacity-50 cursor-not-allowed"
+                        : ""
                     }`}
                     title={
                       noGroupAllCount === 0
                         ? "No questions in No group yet"
-                        : "Play “No group” All Questions"
+                        : 'Play "No group" All Questions'
                     }
                     aria-label="Play No group All Questions"
                   >
@@ -1991,10 +2207,18 @@ useEffect(() => {
                 <>
                   {/* Treat "" and ALL_GROUP_ID as All */}
                   <Link
-                    to={allReviewCount > 0 ? `/play/all?mode=review` : "#"}
-                    onClick={(e) => allReviewCount === 0 && e.preventDefault()}
-                    className={`${btnBase} ${btnGray} inline-flex items-center justify-center min-h-[3.5rem] sm:min-h-[3.75rem] px-6 ${
-                      allReviewCount === 0 ? "opacity-50 cursor-not-allowed" : ""
+                    to={
+                      allReviewCount > 0
+                        ? `/play/all?mode=review`
+                        : "#"
+                    }
+                    onClick={(e) => {
+                      if (allReviewCount === 0) e.preventDefault();
+                    }}
+                    className={`${btnBase} ${btnGray} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-6 rounded-2xl ${
+                      allReviewCount === 0
+                        ? "opacity-50 cursor-not-allowed"
+                        : ""
                     }`}
                     title={
                       allReviewCount === 0
@@ -2007,10 +2231,18 @@ useEffect(() => {
                   </Link>
 
                   <Link
-                    to={allAllCount > 0 ? `/play/all?mode=all` : "#"}
-                    onClick={(e) => allAllCount === 0 && e.preventDefault()}
-                    className={`${btnBase} ${btnGreen} inline-flex items-center justify-center min-h-[3.5rem] sm:min-h-[3.75rem] px-6 ${
-                      allAllCount === 0 ? "opacity-50 cursor-not-allowed" : ""
+                    to={
+                      allAllCount > 0
+                        ? `/play/all?mode=all`
+                        : "#"
+                    }
+                    onClick={(e) => {
+                      if (allAllCount === 0) e.preventDefault();
+                    }}
+                    className={`${btnBase} ${btnGreen} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-6 rounded-2xl ${
+                      allAllCount === 0
+                        ? "opacity-50 cursor-not-allowed"
+                        : ""
                     }`}
                     title={
                       allAllCount === 0
