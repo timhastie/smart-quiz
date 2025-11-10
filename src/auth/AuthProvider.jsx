@@ -149,7 +149,10 @@ export function AuthProvider({ children }) {
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
-      options: { redirectTo },
+      options: {
+        redirectTo,
+        flowType: "pkce",
+      },
     });
     if (error) throw error;
     return { started: true };
