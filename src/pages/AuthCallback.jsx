@@ -24,6 +24,21 @@ export default function AuthCallback() {
         const hashAccessToken = hashParams.get("access_token");
         const hashRefreshToken = hashParams.get("refresh_token");
 
+        // Persist hash tokens (for debugging across reloads)
+        try {
+          if (hashAccessToken || hashRefreshToken) {
+            localStorage.setItem(
+              "last_hash_tokens",
+              JSON.stringify({
+                accessTokenPreview: hashAccessToken
+                  ? hashAccessToken.slice(0, 12) + "…"
+                  : null,
+                hasRefresh: !!hashRefreshToken,
+              })
+            );
+          }
+        } catch {}
+
         console.log("[AuthCallback] URL params:", Object.fromEntries(url.searchParams.entries()));
 
         if (error) {
@@ -46,27 +61,58 @@ export default function AuthCallback() {
         }
 
         if (code) {
-          const { error: exchErr } = await supabase.auth.exchangeCodeForSession(code);
-          if (exchErr) {
-            console.error("[AuthCallback] exchangeCodeForSession error:", exchErr);
-            setMsg(exchErr.message || "Could not finish sign-in.");
+          console.log("[AuthCallback] Exchanging code for session…");
+          const pkceTimeout = setTimeout(() => {
+            console.error("[AuthCallback] exchangeCodeForSession timeout after 8s");
+            setMsg("Timed out finishing sign-in.");
+            alert("Timed out finishing sign-in. Please try again.");
+          }, 8000);
+          try {
+            const { error: exchErr } = await supabase.auth.exchangeCodeForSession(code);
+            clearTimeout(pkceTimeout);
+            if (exchErr) {
+              console.error("[AuthCallback] exchangeCodeForSession error:", exchErr);
+              setMsg(exchErr.message || "Could not finish sign-in.");
+              alert(exchErr.message || "Could not finish sign-in.");
+              return;
+            }
+          } catch (err) {
+            clearTimeout(pkceTimeout);
+            console.error("[AuthCallback] exchangeCodeForSession threw:", err);
+            setMsg(err.message || "Could not finish sign-in.");
+            alert(err.message || "Could not finish sign-in.");
             return;
           }
         } else {
           console.log("[AuthCallback] Using implicit tokens from hash.");
-          const { data: setData, error: setErr } = await supabase.auth.setSession({
-            access_token: hashAccessToken,
-            refresh_token: hashRefreshToken,
-          });
-          if (setErr) {
-            console.error("[AuthCallback] setSession error:", setErr);
-            setMsg(setErr.message || "Could not finish sign-in.");
+          const implicitTimeout = setTimeout(() => {
+            console.error("[AuthCallback] setSession timeout after 8s");
+            setMsg("Timed out finishing sign-in.");
+            alert("Timed out finishing sign-in. Please try again.");
+          }, 8000);
+          try {
+            const { data: setData, error: setErr } = await supabase.auth.setSession({
+              access_token: hashAccessToken,
+              refresh_token: hashRefreshToken,
+            });
+            clearTimeout(implicitTimeout);
+            if (setErr) {
+              console.error("[AuthCallback] setSession error:", setErr);
+              setMsg(setErr.message || "Could not finish sign-in.");
+              alert(setErr.message || "Could not finish sign-in.");
+              return;
+            }
+            console.log("[AuthCallback] setSession succeeded:", setData);
+            const { data: sessionCheck } = await supabase.auth.getSession();
+            console.log("[AuthCallback] getSession after setSession:", sessionCheck);
+            window.history.replaceState({}, document.title, window.location.pathname);
+          } catch (err) {
+            clearTimeout(implicitTimeout);
+            console.error("[AuthCallback] setSession threw:", err);
+            setMsg(err.message || "Could not finish sign-in.");
+            alert(err.message || "Could not finish sign-in.");
             return;
           }
-          console.log("[AuthCallback] setSession succeeded:", setData);
-          const { data: sessionCheck } = await supabase.auth.getSession();
-          console.log("[AuthCallback] getSession after setSession:", sessionCheck);
-          window.history.replaceState({}, document.title, window.location.pathname);
         }
 
         setMsg("Signed in. Redirecting…");
