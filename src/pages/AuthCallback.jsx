@@ -21,6 +21,8 @@ export default function AuthCallback() {
           url.searchParams.get("token") ||
           url.searchParams.get("auth_code");
 
+        console.log("[AuthCallback] URL params:", Object.fromEntries(url.searchParams.entries()));
+
         if (error) {
           const diagnostic = `Auth error: ${error}${errorDesc ? ` — ${errorDesc}` : ""}`;
           setMsg(diagnostic);
@@ -33,7 +35,10 @@ export default function AuthCallback() {
           return;
         }
         if (!code) {
+          const dbg = `[AuthCallback] Missing auth code in ${url.toString()}`;
+          console.error(dbg);
           setMsg("Missing auth code.");
+          alert("Missing auth code — see console for details.");
           return;
         }
 

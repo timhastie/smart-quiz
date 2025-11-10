@@ -136,7 +136,11 @@ export function AuthProvider({ children }) {
       localStorage.setItem("guest_to_adopt", guestId);
     }
     const redirectTo =
-      typeof window !== "undefined" ? buildRedirectURL(guestId) : undefined;
+      typeof window !== "undefined"
+        ? `${window.location.origin}/auth/callback${guestId ? `?guest=${guestId}` : ""}`
+        : undefined;
+
+    console.log("[AuthProvider] Starting OAuth", { provider, redirectTo, guestId });
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
