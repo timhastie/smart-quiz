@@ -75,44 +75,7 @@ export default function AuthCallback() {
           }
         }
 
-        // 2) Determine old guest id: prefer URL param, fallback to localStorage
-        const guestFromUrl = url.searchParams.get("guest");
-        const guestFromLS = localStorage.getItem("guest_to_adopt");
-        const oldId = guestFromUrl || guestFromLS;
-        console.log("[AuthCallback] guestFromUrl:", guestFromUrl, "guestFromLS:", guestFromLS);
-
-        // 2a) Guard: if the id is stale (no quizzes), skip adopting
-        let shouldAdopt = !!oldId;
-        if (oldId) {
-          const { count: oldQuizCount, error: cntErr } = await supabase
-            .from("quizzes")
-            .select("id", { count: "exact", head: true })
-            .eq("user_id", oldId);
-
-          if (cntErr) {
-          console.warn("Could not check old guest quizzes:", cntErr);
-        } else if ((oldQuizCount ?? 0) === 0) {
-            console.log("No quizzes found for old guest id -> skipping adopt");
-            shouldAdopt = false;
-          }
-        }
-
-        if (shouldAdopt) {
-          const { error: adoptErr } = await supabase.rpc("adopt_guest", { p_old_user: oldId });
-          if (adoptErr) {
-            console.error("adopt_guest failed:", adoptErr);
-            setMsg(
-              "Signed in, but we couldn't automatically move your guest data. You can keep using the app."
-            );
-          } else {
-            setMsg("Account confirmed! Your guest quizzes were moved to this account. Redirecting…");
-          }
-          // clean up local marker either way
-          localStorage.removeItem("guest_to_adopt");
-        } else {
-          setMsg("Signed in. Redirecting…");
-        }
-
+        setMsg("Signed in. Redirecting…");
         console.log("[AuthCallback] Redirecting home…");
         // 3) Redirect home (or change to your preferred landing page)
         nav("/", { replace: true });
