@@ -48,53 +48,54 @@ export function AuthProvider({ children }) {
   //    - Otherwise create an anonymous session (except on /auth/callback).
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    let mounted = true;
+  let mounted = true;
 
-    async function ensureSession() {
-      try {
-        const { data: sess, error } = await supabase.auth.getSession();
-        if (error) {
-          console.error("[AuthProvider] getSession error:", error);
-        }
-        if (mounted && sess?.session?.user) {
-          setUser(sess.session.user);
+  async function ensureSession() {
+    try {
+      const { data: sess, error } = await supabase.auth.getSession();
+      if (error) {
+        console.error("[Auth] getSession error:", error);
+      }
+
+      // If we already have a user session, use it
+      if (mounted && sess?.session?.user) {
+        setUser(sess.session.user);
+        return;
+      }
+
+      // ❗ IMPORTANT:
+      // Only auto-create an anonymous user if we are NOT on /auth/callback
+      if (!onAuthCallbackPath()) {
+        console.log("[Auth] No session → creating anonymous user");
+        const { data: anonRes, error: anonErr } =
+          await supabase.auth.signInAnonymously();
+        if (anonErr) {
+          console.error("[Auth] Anonymous sign-in failed:", anonErr);
+          if (mounted) setUser(null);
           return;
         }
-
-        // No session -> start anonymous (but NOT on /auth/callback)
-        if (!onAuthCallbackPath()) {
-          const { data: anonRes, error: anonErr } =
-            await supabase.auth.signInAnonymously();
-          if (anonErr) {
-            console.error("Anonymous sign-in failed:", anonErr);
-            if (mounted) setUser(null);
-            return;
-          }
-          if (mounted) setUser(anonRes?.user ?? null);
-        }
-      } finally {
-        if (mounted) setReady(true);
+        if (mounted) setUser(anonRes?.user ?? null);
+      } else {
+        console.log(
+          "[Auth] On /auth/callback with no session yet → let AuthCallback handle it"
+        );
       }
+    } finally {
+      if (mounted) setReady(true);
     }
+  }
 
-    ensureSession();
+  ensureSession();
 
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      (_evt, session) => {
-        if (!mounted) return;
-        setUser(session?.user ?? null);
-      }
-    );
+  const { data: listener } = supabase.auth.onAuthStateChange((_evt, session) => {
+    if (mounted) setUser(session?.user ?? null);
+  });
 
-    return () => {
-      mounted = false;
-      try {
-        listener?.subscription?.unsubscribe();
-      } catch {
-        // ignore
-      }
-    };
-  }, []);
+  return () => {
+    mounted = false;
+    listener?.subscription?.unsubscribe?.();
+  };
+}, []);
 
   // ---------------------------------------------------------------------------
   // 2) One-time adopt after login (fallback when callback didn't have ?guest=)
@@ -172,72 +173,81 @@ export function AuthProvider({ children }) {
   //        just signInWithOAuth (standard).
   // ---------------------------------------------------------------------------
   async function oauthOrLink(provider) {
-    const {
-      data: { user: current } = {},
-    } = await supabase.auth.getUser();
+  console.log("[Auth] oauthOrLink start:", provider);
 
-    // Case A: guest session -> try to upgrade / merge
-    if (current && isAnonymous(current)) {
-      const guestId = current.id;
-      // mark for adopt_guest fallback
-      try {
-        localStorage.setItem("guest_to_adopt", guestId);
-      } catch {
-        // ignore storage issues
-      }
-      const redirectTo = buildRedirectURL(guestId);
+  const { data: { user: current } = {}, error: getUserErr } =
+    await supabase.auth.getUser();
 
-      // 1) Try direct linkIdentity
-      const { error: linkErr } = await supabase.auth.linkIdentity({
-        provider,
-        options: { redirectTo },
-      });
+  if (getUserErr) {
+    console.error("[Auth] getUser failed before oauthOrLink:", getUserErr);
+  }
 
-      if (!linkErr) {
-        // Success: the anonymous user now HAS that provider; same user id.
-        // AuthCallback will complete the flow; quizzes already belong to this id.
-        return { linked: true };
-      }
+  // Helper: where should we send them back?
+  // If we're a guest, include our id so callback can adopt.
+  const guestId = current?.is_anonymous ? current.id : null;
+  const redirectTo = buildRedirectURL(guestId);
 
-      const msg = (linkErr?.message || "").toLowerCase();
+  // CASE A: current user is anonymous -> try to link
+  if (current?.is_anonymous) {
+    console.log("[Auth] Anonymous user, trying linkIdentity with redirectTo:", redirectTo);
 
-      // 2) If that provider identity already belongs to another account,
-      //    fall back to normal OAuth sign-in so user lands in that account,
-      //    and use guestId for adopt_guest merge.
-      if (
-        msg.includes("identity is already linked to another user") ||
-        msg.includes("already linked to another user")
-      ) {
-        const { error: signErr } = await supabase.auth.signInWithOAuth({
-          provider,
-          options: { redirectTo },
-        });
-        if (signErr) throw signErr;
-        return { fallbackSignedIn: true };
-      }
-
-      // 3) Any other link error: bubble up so UI can show it.
-      throw linkErr;
-    }
-
-    // Case B: not anonymous (existing user or none) -> regular OAuth sign-in
-    // If there happens to be a guest_to_adopt lying around, include it so
-    // callback can clean it up / merge as needed (harmless if unused).
-    let guestId = null;
-    try {
-      guestId = localStorage.getItem("guest_to_adopt") || null;
-    } catch {
-      guestId = null;
-    }
-    const redirectTo = buildRedirectURL(guestId);
-
-    const { error } = await supabase.auth.signInWithOAuth({
+    const { error } = await supabase.auth.linkIdentity({
       provider,
       options: { redirectTo },
     });
-    if (error) throw error;
-    return { signedIn: true };
+
+    if (!error) {
+      console.log("[Auth] linkIdentity started OK (will redirect)");
+      return { mode: "link", ok: true };
+    }
+
+    console.warn("[Auth] linkIdentity error:", error);
+
+    // If this Google account is already linked to some other user,
+    // Supabase may send identity_already_exists / identity_already_linked.
+    const msg =
+      error?.code || error?.message || error?.error_description || "";
+
+    const alreadyLinked =
+      msg.includes("identity_already_exists") ||
+      msg.includes("identity already exists") ||
+      msg.includes("identity is already linked");
+
+    if (alreadyLinked) {
+      console.log(
+        "[Auth] Identity already linked; falling back to signInWithOAuth into existing account."
+      );
+      // Important: STILL use redirectTo with our guest id so callback can adopt.
+      const { error: signErr } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: { redirectTo },
+      });
+      if (signErr) {
+        console.error(
+          "[Auth] signInWithOAuth after identity_already_exists failed:",
+          signErr
+        );
+        throw signErr;
+      }
+      return { mode: "existing", ok: true };
+    }
+
+    // Some other failure
+    throw error;
   }
+
+  // CASE B: already a real user -> normal OAuth sign-in (or re-auth)
+  console.log("[Auth] Non-anon user; starting plain signInWithOAuth");
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider,
+    options: { redirectTo: buildRedirectURL(null) },
+  });
+  if (error) {
+    console.error("[Auth] signInWithOAuth error:", error);
+    throw error;
+  }
+  return { mode: "signin", ok: true };
+}
 
   // ---------------------------------------------------------------------------
   // 5) Sign out -> start fresh anonymous session again
@@ -273,7 +283,7 @@ export function AuthProvider({ children }) {
         ready,
         signupOrLink,
         signin,
-        oauthOrLink,
+        oauthOrLink, // <-- export this (name must match what Dashboard uses)
         signout,
       }}
     >

@@ -94,6 +94,7 @@ GlobalWorkerOptions.workerSrc = workerSrc;
 export default function Dashboard() {
   const nav = useNavigate();
   const { user, ready, signout, signupOrLink, signin, oauthOrLink } = useAuth();
+  
 
 const [allRevisitScore, setAllRevisitScore] = useState(null);
 const [groupRevisitScores, setGroupRevisitScores] = useState(new Map());
