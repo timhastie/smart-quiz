@@ -48,7 +48,7 @@ export default function AuthCallback() {
           return;
         }
 
-        if (!code && !(hashAccessToken && hashRefreshToken)) {
+        if (!code && !hashRefreshToken) {
           const dbg = `[AuthCallback] Missing auth code or tokens in ${url.toString()}`;
           console.error(dbg);
           setMsg("Missing auth code.");
@@ -56,36 +56,59 @@ export default function AuthCallback() {
           return;
         }
 
-        console.log(
-          "[AuthCallback] Starting getSessionFromUrl",
-          JSON.stringify({ hasCode: Boolean(code), hasHashAccess: Boolean(hashAccessToken) })
-        );
+        if (code) {
+          console.log("[AuthCallback] Exchanging PKCE code for session…");
+          const pkceTimeout = setTimeout(() => {
+            console.warn("[AuthCallback] exchangeCodeForSession still pending after 8s");
+            setMsg("Still finishing sign-in…");
+          }, 8000);
 
-        const waitWarn = setTimeout(() => {
-          console.warn("[AuthCallback] getSessionFromUrl still pending after 8s");
-          setMsg("Still finishing sign-in…");
-        }, 8000);
+          const { error: exchErr } = await supabase.auth.exchangeCodeForSession(code);
+          clearTimeout(pkceTimeout);
+          if (exchErr) {
+            console.error("[AuthCallback] exchangeCodeForSession error:", exchErr);
+            setMsg(exchErr.message || "Could not finish sign-in.");
+            alert(exchErr.message || "Could not finish sign-in.");
+            return;
+          }
+          console.log("[AuthCallback] exchangeCodeForSession succeeded");
+        } else {
+          console.log(
+            "[AuthCallback] Using refreshSession for hash tokens",
+            JSON.stringify({
+              hasAccess: Boolean(hashAccessToken),
+              hasRefresh: Boolean(hashRefreshToken),
+            })
+          );
+          const refreshTimeout = setTimeout(() => {
+            console.warn("[AuthCallback] refreshSession still pending after 8s");
+            setMsg("Still finishing sign-in…");
+          }, 8000);
 
-        const { data, error: sessionErr } = await supabase.auth.getSessionFromUrl({
-          storeSession: true,
-        });
-        clearTimeout(waitWarn);
+          const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession({
+            refresh_token: hashRefreshToken,
+          });
+          clearTimeout(refreshTimeout);
 
-        if (sessionErr) {
-          console.error("[AuthCallback] getSessionFromUrl error:", sessionErr);
-          setMsg(sessionErr.message || "Could not finish sign-in.");
-          alert(sessionErr.message || "Could not finish sign-in.");
-          return;
+          if (refreshErr) {
+            console.error("[AuthCallback] refreshSession error:", refreshErr);
+            setMsg(refreshErr.message || "Could not finish sign-in.");
+            alert(refreshErr.message || "Could not finish sign-in.");
+            return;
+          }
+
+          if (!refreshData?.session?.user) {
+            console.error("[AuthCallback] refreshSession returned no user", refreshData);
+            setMsg("No session returned. Please try again.");
+            alert("Finished sign-in but no session was returned. Please try again.");
+            return;
+          }
+
+          console.log(
+            "[AuthCallback] refreshSession succeeded for user:",
+            refreshData.session.user.id
+          );
         }
-
-        if (!data?.session?.user) {
-          console.error("[AuthCallback] No user returned from getSessionFromUrl", data);
-          setMsg("No session returned. Please try again.");
-          alert("Finished sign-in but no session was returned. Please try again.");
-          return;
-        }
-
-        console.log("[AuthCallback] Session established for user:", data.session.user.id);
 
         // Clean up the URL so refreshes don’t retry the callback flow.
         window.history.replaceState({}, document.title, "/");
