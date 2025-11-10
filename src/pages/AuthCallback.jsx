@@ -1,4 +1,3 @@
-// src/pages/AuthCallback.jsx
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
@@ -40,11 +39,12 @@ export default function AuthCallback() {
         const code = params.get("code");
 
         if (code) {
-          // PKCE flow
+          // ---------- PKCE FLOW ----------
           setMsg("Finishing sign-in…");
           console.log("[AuthCallback] Exchanging PKCE code for session…");
 
-          const { error: exchErr } = await supabase.auth.exchangeCodeForSession(code);
+          const { data, error: exchErr } =
+            await supabase.auth.exchangeCodeForSession(code);
 
           if (exchErr) {
             console.error("[AuthCallback] exchangeCodeForSession error:", exchErr);
@@ -54,9 +54,12 @@ export default function AuthCallback() {
             return;
           }
 
-          console.log("[AuthCallback] PKCE exchange succeeded");
+          console.log(
+            "[AuthCallback] PKCE exchange succeeded for user:",
+            data?.session?.user?.id
+          );
         } else {
-          // Implicit-style tokens in hash
+          // ---------- FALLBACK: IMPLICIT TOKENS (if any) ----------
           const access_token = hashParams.get("access_token");
           const refresh_token = hashParams.get("refresh_token");
 
@@ -66,7 +69,7 @@ export default function AuthCallback() {
               "[AuthCallback] Using implicit tokens from hash to set session"
             );
 
-            const { error: setErr } = await supabase.auth.setSession({
+            const { data, error: setErr } = await supabase.auth.setSession({
               access_token,
               refresh_token,
             });
@@ -80,7 +83,10 @@ export default function AuthCallback() {
               return;
             }
 
-            console.log("[AuthCallback] Implicit session stored");
+            console.log(
+              "[AuthCallback] Implicit session stored for user:",
+              data?.session?.user?.id
+            );
           } else {
             console.error(
               "[AuthCallback] Missing auth code and no usable tokens in hash"
@@ -90,9 +96,8 @@ export default function AuthCallback() {
           }
         }
 
-        // Clean URL so refresh doesn’t re-run callback
+        // ---------- SUCCESS: clean URL + go home ----------
         window.history.replaceState({}, document.title, "/");
-
         setMsg("Signed in. Redirecting…");
         nav("/", { replace: true });
       } catch (e) {
