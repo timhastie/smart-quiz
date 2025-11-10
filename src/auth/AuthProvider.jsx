@@ -130,13 +130,13 @@ export function AuthProvider({ children }) {
 
   async function oauthOrLink(provider) {
     const { data: { user: current } = {} } = await supabase.auth.getUser();
-    let redirectTo = buildRedirectURL(null);
 
     if (current?.is_anonymous) {
-      const oldGuestId = current.id;
-      localStorage.setItem("guest_to_adopt", oldGuestId);
-      redirectTo = buildRedirectURL(oldGuestId);
+      localStorage.setItem("guest_to_adopt", current.id);
     }
+
+    const redirectTo =
+      typeof window !== "undefined" ? window.location.origin : undefined;
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
