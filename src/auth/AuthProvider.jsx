@@ -5,8 +5,9 @@ import { supabase } from "../lib/supabase";
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
 
-// Build the callback URL; include the guest id when we have one
+// Build the callback URL; include the guest id when we have one.
 function buildRedirectURL(guestId) {
+  if (typeof window === "undefined") return "/auth/callback";
   const url = new URL(`${window.location.origin}/auth/callback`);
   if (guestId) url.searchParams.set("guest", guestId);
   return url.toString();
@@ -102,7 +103,8 @@ export function AuthProvider({ children }) {
   // ---------------------------------------------------------------------------
   useEffect(() => {
     if (!ready || !user) return;
-    const oldId = localStorage.getItem("guest_to_adopt");
+    if (typeof window === "undefined") return;
+    const oldId = window.localStorage.getItem("guest_to_adopt");
     if (!oldId) return;
     if (isAnonymous(user)) return; // only adopt once we are non-anon
 
@@ -115,7 +117,7 @@ export function AuthProvider({ children }) {
           console.warn("adopt_guest (post-login) failed:", error);
           return;
         }
-        localStorage.removeItem("guest_to_adopt");
+        window.localStorage.removeItem("guest_to_adopt");
       } catch (e) {
         console.warn("adopt_guest (post-login) threw:", e);
       }

@@ -1,153 +1,218 @@
-// src/auth/AuthCallback.jsx
+// src/pages/AuthCallback.jsx
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
+
+function isAnonymousUser(user) {
+  if (!user) return false;
+  const providers = Array.isArray(user.app_metadata?.providers)
+    ? user.app_metadata.providers
+    : [];
+  return (
+    user.is_anonymous === true ||
+    user.user_metadata?.is_anonymous === true ||
+    user.app_metadata?.provider === "anonymous" ||
+    providers.includes("anonymous") ||
+    (Array.isArray(user.identities) &&
+      user.identities.some((i) => i?.provider === "anonymous")) ||
+    (!user.email && (providers.length === 0 || providers.includes("anonymous")))
+  );
+}
 
 export default function AuthCallback() {
   const nav = useNavigate();
   const [msg, setMsg] = useState("Completing sign-in…");
 
   useEffect(() => {
-    (async () => {
+    let cancelled = false;
+
+    async function handleCallback() {
       try {
+        if (typeof window === "undefined") return;
+
         const url = new URL(window.location.href);
-        const search = url.search;
-        const hash = url.hash;
+        const searchParams = url.searchParams;
+        const hashParams = new URLSearchParams(
+          (window.location.hash || "").replace(/^#/, "")
+        );
 
-        const error = url.searchParams.get("error");
-        const errorDesc =
-          url.searchParams.get("error_description") ||
-          url.searchParams.get("error_code") ||
-          "";
-        const rawCode =
-          url.searchParams.get("code") ||
-          url.searchParams.get("token") ||
-          url.searchParams.get("auth_code") ||
-          "";
-        const guestFromUrl = url.searchParams.get("guest") || "";
-        const guestFromLS = localStorage.getItem("guest_to_adopt") || "";
+        const combinedError = `${searchParams.get("error") || ""} ${
+          searchParams.get("error_description") || ""
+        } ${hashParams.get("error") || ""} ${
+          hashParams.get("error_description") || ""
+        }`.toLowerCase();
+        const identityAlreadyLinked =
+          combinedError.includes("identity") &&
+          combinedError.includes("already") &&
+          combinedError.includes("linked");
 
-        console.log("[AuthCallback] URL params:", {
-          search,
-          hash,
-          error,
-          errorDesc,
-          rawCode,
-          guestFromUrl,
-          guestFromLS,
-        });
+        if (!identityAlreadyLinked) {
+          const error =
+            searchParams.get("error") || hashParams.get("error") || null;
+          const errorDesc =
+            searchParams.get("error_description") ||
+            hashParams.get("error_description") ||
+            "";
 
-        // 1) Handle explicit OAuth error
-        if (error) {
-          const full = `Auth error: ${error}${
-            errorDesc ? ` — ${decodeURIComponent(errorDesc)}` : ""
-          }`;
-          console.error("[AuthCallback] OAuth error:", full);
-          setMsg(full);
+          if (error) {
+            const readable = `Auth error: ${error}${
+              errorDesc ? ` — ${decodeURIComponent(errorDesc)}` : ""
+            }`;
+            console.error("[AuthCallback] OAuth error:", readable);
+            if (!cancelled) setMsg(readable);
+            return;
+          }
+        } else {
+          console.warn(
+            "[AuthCallback] Identity already linked message present; continuing with fallback session."
+          );
+        }
+
+        const code =
+          searchParams.get("code") ||
+          searchParams.get("token") ||
+          searchParams.get("auth_code") ||
+          null;
+        const accessToken = hashParams.get("access_token");
+        const refreshToken = hashParams.get("refresh_token");
+        const hasImplicitTokens = accessToken && refreshToken;
+
+        if (code) {
+          console.log("[AuthCallback] Exchanging PKCE code for session…");
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) {
+            console.error("[AuthCallback] exchangeCodeForSession error:", error);
+            if (!cancelled)
+              setMsg(error.message || "Could not finish sign-in.");
+            return;
+          }
+        } else if (hasImplicitTokens) {
+          console.log("[AuthCallback] Building session from implicit tokens.");
+          const privGet =
+            typeof supabase.auth._getSessionFromURL === "function"
+              ? supabase.auth._getSessionFromURL.bind(supabase.auth)
+              : null;
+          const privSave =
+            typeof supabase.auth._saveSession === "function"
+              ? supabase.auth._saveSession.bind(supabase.auth)
+              : null;
+          const privNotify =
+            typeof supabase.auth._notifyAllSubscribers === "function"
+              ? supabase.auth._notifyAllSubscribers.bind(supabase.auth)
+              : null;
+
+          if (!privGet || !privSave || !privNotify) {
+            console.error(
+              "[AuthCallback] Supabase helpers missing for implicit flow."
+            );
+            if (!cancelled)
+              setMsg("Could not finish sign-in (client mismatch).");
+            return;
+          }
+
+          const { data, error } = await privGet(
+            Object.fromEntries(hashParams.entries()),
+            "implicit"
+          );
+          if (error) {
+            console.error("[AuthCallback] implicit helper error:", error);
+            if (!cancelled)
+              setMsg(error.message || "Could not finish sign-in.");
+            return;
+          }
+
+          const session = data?.session;
+          if (!session?.user) {
+            console.error("[AuthCallback] implicit helper returned no user", data);
+            if (!cancelled)
+              setMsg("No session returned. Please try again.");
+            return;
+          }
+
+          await privSave(session);
+          await privNotify("SIGNED_IN", session);
+          console.log(
+            "[AuthCallback] implicit session stored for user:",
+            session.user.id
+          );
+        } else {
+          console.log(
+            "[AuthCallback] No code/hash tokens; checking if session already exists."
+          );
+          const { data } = await supabase.auth.getSession();
+          if (!data?.session?.user) {
+            console.error("[AuthCallback] No session found after redirect.");
+            if (!cancelled)
+              setMsg("Missing auth code in callback. Please try again.");
+            return;
+          }
+        }
+
+        const { data: finalSession, error: finalErr } =
+          await supabase.auth.getSession();
+        if (finalErr) {
+          console.error("[AuthCallback] final getSession error:", finalErr);
+          if (!cancelled)
+            setMsg(finalErr.message || "Could not finish sign-in.");
           return;
         }
 
-        // 2) Establish a session
-
-        if (rawCode) {
-          console.log("[AuthCallback] Exchanging auth code for session…");
-          const { data, error: exchErr } =
-            await supabase.auth.exchangeCodeForSession(rawCode);
-          if (exchErr) {
-            console.error("[AuthCallback] exchangeCodeForSession failed:", exchErr);
-            setMsg(exchErr.message || "Could not finish sign-in.");
-            return;
-          }
-          console.log("[AuthCallback] PKCE session:", {
-            userId: data?.session?.user?.id,
-            email: data?.session?.user?.email,
-          });
-        } else {
-          console.log(
-            "[AuthCallback] No code param; checking existing session (implicit/hash or already set)…"
-          );
-          const { data: s, error: sErr } = await supabase.auth.getSession();
-          if (sErr) {
-            console.error("[AuthCallback] getSession error:", sErr);
-            setMsg("Could not read session after sign-in.");
-            return;
-          }
-          if (!s.session?.user) {
-            console.warn(
-              "[AuthCallback] No session found after callback; remaining as guest."
-            );
-            setMsg("Missing auth code.");
-            return;
-          }
-          console.log("[AuthCallback] Using existing session:", {
-            id: s.session.user.id,
-            email: s.session.user.email,
-            providers: s.session.user.app_metadata?.providers,
-          });
-        }
-
-        // 3) Now we should have a logged-in user
-        const { data: ures, error: uErr } = await supabase.auth.getUser();
-        if (uErr || !ures?.user) {
-          console.error("[AuthCallback] getUser after session failed:", uErr);
-          setMsg("Signed in, but could not load your account.");
+        const user = finalSession?.session?.user;
+        if (!user) {
+          console.error("[AuthCallback] Session established but no user found.");
+          if (!cancelled)
+            setMsg("Signed in, but we could not load your account.");
           return;
         }
-        const authed = ures.user;
 
-        const oldId = (guestFromUrl || guestFromLS || "").trim();
-        console.log("[AuthCallback] Final user:", {
-          id: authed.id,
-          email: authed.email,
-          oldGuestId: oldId,
-        });
+        const guestFromQuery = searchParams.get("guest");
+        let guestToAdopt = guestFromQuery || "";
+        if (!guestToAdopt && typeof window !== "undefined") {
+          guestToAdopt = window.localStorage.getItem("guest_to_adopt") || "";
+        }
 
-        const providers = authed.app_metadata?.providers || [];
-        const isAnon =
-          authed.is_anonymous === true ||
-          authed.user_metadata?.is_anonymous === true ||
-          authed.app_metadata?.provider === "anonymous" ||
-          (Array.isArray(providers) && providers.includes("anonymous"));
-
-        // 4) If we came from a guest account, adopt its quizzes
-        if (oldId && !isAnon && oldId !== authed.id) {
-          console.log(
-            "[AuthCallback] Running adopt_guest from",
-            oldId,
-            "→",
-            authed.id
-          );
-          const { error: adoptErr } = await supabase.rpc("adopt_guest", {
-            p_old_user: oldId,
+        if (guestToAdopt && !isAnonymousUser(user) && guestToAdopt !== user.id) {
+          console.log("[AuthCallback] Running adopt_guest", {
+            from: guestToAdopt,
+            to: user.id,
           });
-          if (adoptErr) {
-            console.error("[AuthCallback] adopt_guest failed:", adoptErr);
-            setMsg(
-              "Signed in, but we couldn't automatically move your guest quizzes. You can keep using the app."
-            );
-          } else {
-            console.log("[AuthCallback] adopt_guest succeeded.");
-            setMsg(
-              "Signed in! Your guest quizzes were moved to your account. Redirecting…"
-            );
+          if (!cancelled) setMsg("Moving your quizzes to this account…");
+          try {
+            const { error } = await supabase.rpc("adopt_guest", {
+              p_old_user: guestToAdopt,
+            });
+            if (error) {
+              console.warn("[AuthCallback] adopt_guest error:", error);
+            } else if (typeof window !== "undefined") {
+              window.localStorage.removeItem("guest_to_adopt");
+            }
+          } catch (adoptErr) {
+            console.warn("[AuthCallback] adopt_guest threw:", adoptErr);
           }
-          localStorage.removeItem("guest_to_adopt");
-        } else {
+        }
+
+        if (!cancelled) {
           setMsg("Signed in. Redirecting…");
+          window.history.replaceState({}, document.title, "/");
+          nav("/", { replace: true });
         }
-
-        console.log("[AuthCallback] Navigation -> /");
-        nav("/", { replace: true });
-      } catch (e) {
-        console.error("[AuthCallback] Unexpected error:", e);
-        setMsg("Unexpected error finishing sign-in.");
+      } catch (err) {
+        console.error("[AuthCallback] Unexpected error:", err);
+        if (!cancelled)
+          setMsg(err?.message || "Unexpected error finishing sign-in.");
       }
-    })();
+    }
+
+    handleCallback();
+
+    return () => {
+      cancelled = true;
+    };
   }, [nav]);
 
   return (
     <div className="min-h-screen grid place-items-center bg-slate-950 text-slate-100 px-4 py-10">
-      <div className="px-6 py-4 rounded-2xl bg-slate-900/80 border border-slate-700/80 max-w-xl text-center text-lg">
+      <div className="px-6 py-4 rounded-2xl bg-slate-900/80 border border-slate-700/70 max-w-xl text-center text-lg">
         {msg}
       </div>
     </div>
