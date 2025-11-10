@@ -128,6 +128,24 @@ export function AuthProvider({ children }) {
     return supabase.auth.signInWithPassword({ email, password });
   }
 
+  async function oauthSignIn(provider) {
+    const { data: { user: current } = {} } = await supabase.auth.getUser();
+    let guestId = null;
+    if (current?.is_anonymous) {
+      guestId = current.id;
+      localStorage.setItem("guest_to_adopt", guestId);
+    }
+    const redirectTo =
+      typeof window !== "undefined" ? buildRedirectURL(guestId) : undefined;
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: { redirectTo },
+    });
+    if (error) throw error;
+    return { started: true };
+  }
+
   const signout = async () => {
     setReady(false);
     await supabase.auth.signOut();
@@ -142,7 +160,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthCtx.Provider value={{ user, ready, signupOrLink, signin, signout }}>
+    <AuthCtx.Provider value={{ user, ready, signupOrLink, signin, oauthSignIn, signout }}>
       {children}
     </AuthCtx.Provider>
   );
