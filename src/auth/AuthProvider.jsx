@@ -130,23 +130,20 @@ export function AuthProvider({ children }) {
 
   async function oauthOrLink(provider) {
     const { data: { user: current } = {} } = await supabase.auth.getUser();
-    const redirectTo = buildRedirectURL(null);
+    let redirectTo = buildRedirectURL(null);
 
     if (current?.is_anonymous) {
-      const { error } = await supabase.auth.linkIdentity({
-        provider,
-        options: { redirectTo },
-      });
-      if (error) throw error;
-      return { linked: true };
-    } else {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider,
-        options: { redirectTo },
-      });
-      if (error) throw error;
-      return { signedIn: true };
+      const oldGuestId = current.id;
+      localStorage.setItem("guest_to_adopt", oldGuestId);
+      redirectTo = buildRedirectURL(oldGuestId);
     }
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: { redirectTo },
+    });
+    if (error) throw error;
+    return { signedIn: true };
   }
 
   const signout = async () => {
