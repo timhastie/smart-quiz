@@ -13,8 +13,8 @@ export const supabase = createClient(url, key, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    // Let Supabase process /auth/callback URLs itself so the flow stays consistent across browsers.
-    detectSessionInUrl: true,
+    // We process the OAuth callback ourselves in AuthCallback.jsx so disable Supabase's auto-handler.
+    detectSessionInUrl: false,
 
     // Force a simple, Safari-friendly storage implementation.
     // (Supabase falls back automatically, but we make it explicit.)
