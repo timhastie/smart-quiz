@@ -21,6 +21,12 @@ export default function AuthCallback() {
           url.searchParams.get("token") ||
           url.searchParams.get("auth_code");
 
+        const hash = new URLSearchParams(
+          (window.location.hash || "").replace(/^#/, "")
+        );
+        const hashAccessToken = hash.get("access_token");
+        const hashRefreshToken = hash.get("refresh_token");
+
         console.log("[AuthCallback] URL params:", Object.fromEntries(url.searchParams.entries()));
 
         if (error) {
@@ -35,19 +41,37 @@ export default function AuthCallback() {
           return;
         }
         if (!code) {
-          const dbg = `[AuthCallback] Missing auth code in ${url.toString()}`;
-          console.error(dbg);
-          setMsg("Missing auth code.");
-          alert("Missing auth code — see console for details.");
-          return;
-        }
-
-        // 1) Finish the Supabase auth exchange (PKCE)
-        const { error: exchErr } = await supabase.auth.exchangeCodeForSession(code);
-        if (exchErr) {
-          console.error("[AuthCallback] exchangeCodeForSession error:", exchErr);
-          setMsg(exchErr.message || "Could not finish sign-in.");
-          return;
+          if (hashAccessToken && hashRefreshToken) {
+            console.log("[AuthCallback] Using implicit tokens from hash.");
+            const { error: setErr } = await supabase.auth.setSession({
+              access_token: hashAccessToken,
+              refresh_token: hashRefreshToken,
+            });
+            if (setErr) {
+              console.error(
+                "[AuthCallback] setSession error from hash tokens:",
+                setErr
+              );
+              setMsg(setErr.message || "Could not finish sign-in.");
+              return;
+            }
+            // clean hash from URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+          } else {
+            const dbg = `[AuthCallback] Missing auth code in ${url.toString()}`;
+            console.error(dbg);
+            setMsg("Missing auth code.");
+            alert("Missing auth code — see console for details.");
+            return;
+          }
+        } else {
+          // 1) Finish the Supabase auth exchange (PKCE)
+          const { error: exchErr } = await supabase.auth.exchangeCodeForSession(code);
+          if (exchErr) {
+            console.error("[AuthCallback] exchangeCodeForSession error:", exchErr);
+            setMsg(exchErr.message || "Could not finish sign-in.");
+            return;
+          }
         }
 
         // 2) Determine old guest id: prefer URL param, fallback to localStorage
