@@ -5,11 +5,9 @@ import { supabase } from "../lib/supabase";
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
 
-// Build the callback URL; include the guest id when we have one
-function buildRedirectURL(guestId) {
-  const url = new URL(`${window.location.origin}/auth/callback`);
-  if (guestId) url.searchParams.set("guest", guestId);
-  return url.toString();
+// Build the callback URL; we keep it static so Supabase allow-list matches exactly.
+function buildRedirectURL() {
+  return `${window.location.origin}/auth/callback`;
 }
 
 function onAuthCallbackPath() {
@@ -104,7 +102,7 @@ export function AuthProvider({ children }) {
     if (current?.is_anonymous) {
       const oldGuestId = current.id;
       localStorage.setItem("guest_to_adopt", oldGuestId); // same-device fallback
-      const emailRedirectTo = buildRedirectURL(oldGuestId); // cross-device
+      const emailRedirectTo = buildRedirectURL(); // cross-device
 
       const { error } = await supabase.auth.signUp({
         email,
@@ -118,7 +116,7 @@ export function AuthProvider({ children }) {
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: buildRedirectURL(null) },
+      options: { emailRedirectTo: buildRedirectURL() },
     });
     if (error) throw error;
     return { signedUp: true };
@@ -136,9 +134,7 @@ export function AuthProvider({ children }) {
       localStorage.setItem("guest_to_adopt", guestId);
     }
     const redirectTo =
-      typeof window !== "undefined"
-        ? `${window.location.origin}/auth/callback${guestId ? `?guest=${guestId}` : ""}`
-        : undefined;
+      typeof window !== "undefined" ? buildRedirectURL() : undefined;
 
     console.log("[AuthProvider] Starting OAuth", { provider, redirectTo, guestId });
 
