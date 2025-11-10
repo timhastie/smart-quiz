@@ -5,103 +5,47 @@ import { supabase } from "../lib/supabase";
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
 
-// Our single, canonical callback URL (must match Supabase/Google config)
-function getCallbackUrl() {
-  if (typeof window === "undefined") return "";
-  return `${window.location.origin}/auth/callback`;
+// Where Supabase should send users back
+function buildRedirectURL() {
+  try {
+    return `${window.location.origin}/auth/callback`;
+  } catch {
+    return "/auth/callback";
+  }
 }
 
-function isOnCallbackPath() {
-  if (typeof window === "undefined") return false;
-  return window.location.pathname.startsWith("/auth/callback");
+function getPathname() {
+  try {
+    return window.location.pathname || "/";
+  } catch {
+    return "/";
+  }
+}
+
+function onAuthCallbackPath() {
+  return getPathname().startsWith("/auth/callback");
 }
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [ready, setReady] = useState(false);
 
-  // ---- Initial bootstrap ----
+  // ---- Auth state subscription (single source of truth) ----
   useEffect(() => {
     let mounted = true;
 
-    async function bootstrap() {
-      const path = typeof window !== "undefined" ? window.location.pathname : "";
-      console.log("[AuthProvider] bootstrap start, path:", path);
-
-      try {
-        // 1) See if we already have a session (e.g. after AuthCallback ran)
-        const { data, error } = await supabase.auth.getSession();
-        if (!mounted) return;
-
-        if (error) {
-          console.error("[AuthProvider] getSession error:", error);
-        }
-
-        const existingUser = data?.session?.user || null;
-        if (existingUser) {
-          console.log("[AuthProvider] existing session user:", existingUser.id);
-          setUser(existingUser);
-          setReady(true);
-          return;
-        }
-
-        // 2) No session yet.
-        //    If we're currently on /auth/callback, AuthCallback will handle it.
-        if (isOnCallbackPath()) {
-          console.log(
-            "[AuthProvider] on /auth/callback with no session yet → wait for AuthCallback + onAuthStateChange"
-          );
-          // Don't mark ready yet; AuthCallback will notify SIGNED_IN shortly.
-          return;
-        }
-
-        // 3) Normal pages with no session → start an anonymous session
-        const { data: anonRes, error: anonErr } = await supabase.auth.signInAnonymously();
-        if (!mounted) return;
-
-        if (anonErr) {
-          console.error("[AuthProvider] anonymous sign-in failed:", anonErr);
-          setUser(null);
-        } else {
-          console.log("[AuthProvider] started anonymous session:", anonRes?.user?.id);
-          setUser(anonRes?.user ?? null);
-        }
-
-        setReady(true);
-      } catch (e) {
-        if (!mounted) return;
-        console.error("[AuthProvider] bootstrap unexpected error:", e);
-        // Even on error, avoid hanging the UI forever.
-        setReady(true);
-      }
-    }
-
-    bootstrap();
-
-    // ---- Auth state listener ----
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      const uid = session?.user?.id || null;
+      console.log("[AuthProvider] onAuthStateChange:", event, "user:", uid);
+
       if (!mounted) return;
 
-      const uid = session?.user?.id || null;
-      console.log("[AuthProvider] onAuthStateChange:", event, "user=", uid);
-
-      // Always reflect latest user
+      // session may be null on SIGNED_OUT etc.
       setUser(session?.user ?? null);
 
-      // Make sure "ready" is true once we know something definitive.
-      // This especially helps Safari / callback races.
-      switch (event) {
-        case "SIGNED_IN":
-        case "SIGNED_OUT":
-        case "USER_UPDATED":
-        case "TOKEN_REFRESHED":
-          if (!ready) {
-            console.log("[AuthProvider] marking ready after", event);
-          }
-          setReady(true);
-          break;
-        default:
-          break;
+      // If we're not on /auth/callback, auth changes mean we're safe to unblock the UI
+      if (!onAuthCallbackPath()) {
+        setReady(true);
       }
     });
 
@@ -109,15 +53,85 @@ export function AuthProvider({ children }) {
       mounted = false;
       try {
         sub?.subscription?.unsubscribe();
-      } catch (e) {
-        console.warn("[AuthProvider] unsubscribe error:", e);
-      }
+      } catch {}
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // (We intentionally don't include `ready` in deps to avoid re-subscribing.)
 
-  // ---- Helper: detect anonymous user ----
+  // ---- Bootstrap existing session OR create anon (except on /auth/callback) ----
+  useEffect(() => {
+    let mounted = true;
+
+    async function bootstrap() {
+      const path = getPathname();
+      console.log("[AuthProvider] bootstrap start, path:", path);
+
+      // On /auth/callback we let <AuthCallback /> drive everything.
+      if (onAuthCallbackPath()) {
+        console.log(
+          "[AuthProvider] on /auth/callback -> skip bootstrap (waiting for AuthCallback)"
+        );
+        return; // DO NOT setReady here; AuthCallback will.
+      }
+
+      try {
+        // Safari-safe: race getSession() against a timeout so it can't hang forever.
+        const timeoutMs = 4000;
+        const timeout = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("getSession timeout")), timeoutMs)
+        );
+
+        const { data, error } = await Promise.race([
+          supabase.auth.getSession(),
+          timeout,
+        ]);
+
+        if (error) {
+          console.warn("[AuthProvider] getSession error:", error);
+        } else if (data?.session?.user) {
+          console.log(
+            "[AuthProvider] bootstrap found existing user:",
+            data.session.user.id
+          );
+          if (mounted) setUser(data.session.user);
+          return;
+        } else {
+          console.log("[AuthProvider] bootstrap: no existing session");
+        }
+      } catch (e) {
+        console.warn("[AuthProvider] getSession failed/timeout:", e?.message || e);
+      }
+
+      // If we reach here: no usable session. Start anonymous session.
+      try {
+        const { data: anonRes, error: anonErr } =
+          await supabase.auth.signInAnonymously();
+        if (anonErr) {
+          console.error("[AuthProvider] anonymous sign-in failed:", anonErr);
+          if (mounted) setUser(null);
+        } else {
+          console.log(
+            "[AuthProvider] started anonymous session:",
+            anonRes?.user?.id || null
+          );
+          if (mounted) setUser(anonRes?.user ?? null);
+        }
+      } catch (e) {
+        console.error("[AuthProvider] anonymous sign-in threw:", e);
+        if (mounted) setUser(null);
+      } finally {
+        if (mounted) setReady(true);
+        console.log("[AuthProvider] bootstrap complete");
+      }
+    }
+
+    bootstrap();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // ---- helper to detect anon users (for adopt_guest) ----
   function isAnonymous(u) {
     if (!u) return false;
     const prov = u.app_metadata?.provider || null;
@@ -135,7 +149,7 @@ export function AuthProvider({ children }) {
     );
   }
 
-  // ---- One-time guest adoption after real login ----
+  // ---- adopt_guest: once we become a real user, merge previous guest ----
   useEffect(() => {
     if (!ready || !user) return;
 
@@ -146,11 +160,13 @@ export function AuthProvider({ children }) {
 
     const oldId = localStorage.getItem("guest_to_adopt");
     if (!oldId) return;
-    if (isAnonymous(user)) return; // only adopt once we are a non-anon user
+    if (isAnonymous(user)) return;
 
     (async () => {
-      console.log("[AuthProvider] adopting guest", oldId);
-      const { error } = await supabase.rpc("adopt_guest", { p_old_user: oldId });
+      console.log("[AuthProvider] adopting guest", oldId, "->", user.id);
+      const { error } = await supabase.rpc("adopt_guest", {
+        p_old_user: oldId,
+      });
       if (!error) {
         console.log("[AuthProvider] adopt_guest success, clearing marker");
         localStorage.removeItem("guest_to_adopt");
@@ -158,19 +174,20 @@ export function AuthProvider({ children }) {
         console.warn("[AuthProvider] adopt_guest failed:", error);
       }
     })();
-  }, [ready, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ready, user?.id]);
 
-  // ---- Email/password signup ----
+  // ---- public auth helpers ----
+
+  // Always sign up (email/password)
   async function signupOrLink(email, password) {
     const {
       data: { user: current } = {},
     } = await supabase.auth.getUser();
 
-    const emailRedirectTo = getCallbackUrl();
-
     if (current?.is_anonymous) {
       const oldGuestId = current.id;
       localStorage.setItem("guest_to_adopt", oldGuestId);
+      const emailRedirectTo = buildRedirectURL();
 
       const { error } = await supabase.auth.signUp({
         email,
@@ -184,7 +201,7 @@ export function AuthProvider({ children }) {
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo },
+      options: { emailRedirectTo: buildRedirectURL() },
     });
     if (error) throw error;
     return { signedUp: true };
@@ -194,7 +211,6 @@ export function AuthProvider({ children }) {
     return supabase.auth.signInWithPassword({ email, password });
   }
 
-  // ---- OAuth sign-in (Google, etc.) ----
   async function oauthSignIn(provider) {
     const {
       data: { user: current } = {},
@@ -207,7 +223,7 @@ export function AuthProvider({ children }) {
     }
 
     const redirectTo =
-      typeof window !== "undefined" ? getCallbackUrl() : undefined;
+      typeof window !== "undefined" ? buildRedirectURL() : undefined;
 
     console.log("[AuthProvider] Starting OAuth", {
       provider,
@@ -217,18 +233,14 @@ export function AuthProvider({ children }) {
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
-      options: {
-        redirectTo,
-      },
+      options: { redirectTo },
     });
-
     if (error) throw error;
     return { started: true };
   }
 
-  // ---- Sign out (with safe anon fallback) ----
   const signout = async () => {
-    console.log("[AuthProvider] signout start");
+    console.log("[AuthProvider] signout called");
     setReady(false);
 
     try {
@@ -237,30 +249,28 @@ export function AuthProvider({ children }) {
       console.error("[AuthProvider] signOut error:", e);
     }
 
+    // Start a fresh anonymous session so the app is usable post-logout.
     try {
-      // After sign-out, try to start a fresh anon session (except on /auth/callback)
-      if (!isOnCallbackPath()) {
-        const { data: anonRes, error: anonErr } =
-          await supabase.auth.signInAnonymously();
-        if (anonErr) {
-          console.error(
-            "[AuthProvider] anon sign-in after signOut failed:",
-            anonErr
-          );
-          setUser(null);
-        } else {
-          console.log(
-            "[AuthProvider] anon session after signOut:",
-            anonRes?.user?.id
-          );
-          setUser(anonRes?.user ?? null);
-        }
-      } else {
+      const { data: anonRes, error: anonErr } =
+        await supabase.auth.signInAnonymously();
+      if (anonErr) {
+        console.error(
+          "[AuthProvider] anon session after signout failed:",
+          anonErr
+        );
         setUser(null);
+      } else {
+        console.log(
+          "[AuthProvider] anon session after signout:",
+          anonRes?.user?.id || null
+        );
+        setUser(anonRes?.user ?? null);
       }
+    } catch (e) {
+      console.error("[AuthProvider] anon after signout threw:", e);
+      setUser(null);
     } finally {
       setReady(true);
-      console.log("[AuthProvider] signout complete");
     }
   };
 
