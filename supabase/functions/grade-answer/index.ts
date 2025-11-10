@@ -1,10 +1,9 @@
-// supabase/functions/generate-quiz/index.ts
-// CORS-enabled generate-quiz with novelty controls, optional in-place regeneration,
-// RAG retrieval from file_chunks via RPC `match_file_chunks`
-import OpenAI from "npm:openai";
-import { createClient } from "npm:@supabase/supabase-js";
+// supabase/functions/grade-answer/index.ts
+// Heuristic-first grading with LLM fallback that favors semantically correct answers.
 
-/* ---- Lazy OpenAI so module load never crashes if secret is missing ---- */
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import OpenAI from "npm:openai@4.56.0";
+
 let _openai: OpenAI | null = null;
 function getOpenAI() {
   if (_openai) return _openai;
@@ -14,376 +13,221 @@ function getOpenAI() {
   return _openai;
 }
 
-/* ----------------------- HTTP helpers / CORS ----------------------- */
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*", // tighten for prod
+  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
 };
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders },
   });
+
 const text = (body: string, status = 200) =>
   new Response(body, { status, headers: { ...corsHeaders } });
 
-/* ------------------------------ Types ------------------------------ */
-type QA = { prompt: string; answer: string };
+type GradeRequest = {
+  question?: string;
+  expected?: string;
+  user_answer?: string;
+};
 
-/* ---------------------------- Novelty utils ---------------------------- */
 function normalize(s: string) {
   return s
     .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\b(the|a|an)\b/g, "")
     .replace(/\s+/g, " ")
-    .replace(/[^\p{L}\p{N}\s]/gu, "")
     .trim();
 }
-const STOP = new Set([
-  "the","a","an","to","of","in","on","at","for","with","and","or","is","are","be","this","that","these","those","as","by","from","into","over","under","up","down","all",
-]);
-function tokenize(s: string) {
-  return normalize(s).split(" ").filter((w) => w && !STOP.has(w));
+
+function lev(a: string, b: string) {
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp: number[][] = Array.from({ length: m + 1 }, () =>
+    new Array(n + 1).fill(0)
+  );
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return dp[m][n];
 }
-function jaccard(a: string, b: string) {
-  const A = new Set(tokenize(a));
-  const B = new Set(tokenize(b));
+
+function tokenJaccard(a: string, b: string) {
+  const A = new Set(a.split(" ").filter(Boolean));
+  const B = new Set(b.split(" ").filter(Boolean));
   if (A.size === 0 && B.size === 0) return 1;
   let inter = 0;
   for (const t of A) if (B.has(t)) inter++;
-  const uni = A.size + B.size - inter;
-  return uni === 0 ? 0 : inter / uni;
-}
-function isNearDuplicate(a: string, b: string, threshold = 0.9) {
-  return jaccard(a, b) >= threshold;
+  return inter / (A.size + B.size - inter || 1);
 }
 
-/* ------------------------------- RAG -------------------------------- */
-async function fetchTopChunks(opts: {
-  supa: ReturnType<typeof createClient>;
-  userId: string;
-  fileId: string;
-  topic: string;
-  title: string;
-  n: number;
-  k?: number;
-}): Promise<string[]> {
-  const { supa, userId, fileId, topic, title, n, k = 15 } = opts;
-  const queryText = `Generate ${n} quiz questions about: ${topic || title || "the uploaded document"}`;
+const CONCEPT_GROUPS = [
+  {
+    id: "protect",
+    keywords: [
+      "protect",
+      "protection",
+      "guard",
+      "guardian",
+      "defend",
+      "defense",
+      "safeguard",
+      "security",
+    ],
+  },
+  {
+    id: "meat-diet",
+    keywords: [
+      "meat",
+      "prey",
+      "preys",
+      "flesh",
+      "carnivore",
+      "carnivores",
+      "carnivorous",
+      "meat eater",
+      "meat-eating",
+      "other animals",
+    ],
+  },
+];
 
-  const emb = await getOpenAI().embeddings.create({
-    model: "text-embedding-3-small",
-    input: queryText,
-  });
-  const vec = emb.data[0].embedding as unknown as number[];
+function conceptTags(str: string) {
+  const tags = new Set<string>();
+  const tokens = new Set(str.split(" ").filter(Boolean));
+  const haystack = ` ${str} `;
 
-  try {
-    const { data, error } = await supa.rpc("match_file_chunks", {
-      p_user_id: userId,
-      p_file_id: fileId,
-      p_query_embedding: vec,
-      p_match_count: k,
-    });
-    if (error || !data?.length) return [];
-    return data.map((r: any) => String(r.content || "")).filter(Boolean);
-  } catch {
-    return [];
+  for (const concept of CONCEPT_GROUPS) {
+    for (const raw of concept.keywords) {
+      const keyword = raw.trim();
+      if (!keyword) continue;
+      if (keyword.includes(" ")) {
+        if (haystack.includes(` ${keyword} `)) {
+          tags.add(concept.id);
+          break;
+        }
+      } else if (tokens.has(keyword)) {
+        tags.add(concept.id);
+        break;
+      }
+    }
   }
+
+  return tags;
 }
 
-/* ---------------------------- LLM generate ---------------------------- */
-async function llmGenerate(
-  n: number,
-  prompt: string,
-  priorPromptsForContext: string[],
-  docContext: string
-): Promise<QA[]> {
-  const sys = `You generate quiz questions.
-Return ONLY a JSON array of objects with keys "prompt" and "answer".
-No markdown, no code fences, no commentary.`;
+function heuristicGrade(expectedRaw: string, userRaw: string) {
+  const e = normalize(expectedRaw);
+  const u = normalize(userRaw);
+  if (!e || !u) return { pass: false, why: "empty" };
+  if (e === u) return { pass: true, why: "exact" };
 
-  const priorSlice = priorPromptsForContext.slice(0, 200);
-  const priorText =
-    priorSlice.length > 0
-      ? `Here are prior prompts for context (avoid repeating them verbatim; prefer new angles and extended coverage):\n${JSON.stringify(
-          priorSlice
-        )}`
-      : "";
+  const d = lev(u, e);
+  const maxEdits = Math.max(1, Math.floor(Math.min(u.length, e.length) * 0.2));
+  if (d <= maxEdits) return { pass: true, why: `lev<=${maxEdits}` };
 
-  const docText = docContext
-    ? `\nUse ONLY the following document excerpts as your source material.\n---DOC CONTEXT START---\n${docContext}\n---DOC CONTEXT END---\n`
-    : "";
+  const j = tokenJaccard(u, e);
+  if (j >= 0.66) return { pass: true, why: `jaccard-${j.toFixed(2)}` };
 
-  const userMsg =
-    `Create ${n} question/answer pairs about: ${prompt}\n` +
-    `Make questions varied and pedagogically useful (from fundamentals to extensions).\n` +
-    `Answers must be exact strings a learner can type (no prose).\n` +
-    `Example element: { "prompt": "Print dog", "answer": "console.log('dog')" }\n\n` +
-    priorText +
-    docText;
+  const userConcepts = conceptTags(u);
+  const expectedConcepts = conceptTags(e);
+  for (const tag of userConcepts) {
+    if (expectedConcepts.has(tag)) {
+      return { pass: true, why: `concept-${tag}` };
+    }
+  }
 
-  const resp = await getOpenAI().chat.completions.create({
+  return { pass: false, why: "heuristic-fail" };
+}
+
+async function llmGrade(question: string, expected: string, userAnswer: string) {
+  const client = getOpenAI();
+  const sys =
+    `You grade short quiz answers.\n` +
+    `Respond with JSON: {"correct": boolean, "reason": string}.\n` +
+    `If the learner's answer expresses the same fact, intent, or concept, mark it correct even if wording differs.\n` +
+    `Match question intent. Example: Question "What is the primary diet of lions?" should treat answers "meat", "other animals", or "carnivorous" as correct because they all indicate meat-eating.\n` +
+    `Be generous when the answer clearly includes the required idea (e.g., "protect and mate" satisfies a question asking for protection as the main role).\n` +
+    `Only mark incorrect when the answer omits the key idea or states a contradictory fact.`;
+
+  const user = JSON.stringify({ question, expected, user_answer: userAnswer });
+
+  const resp = await client.chat.completions.create({
     model: "gpt-4o-mini",
-    temperature: 0.2,
+    temperature: 0,
     messages: [
       { role: "system", content: sys },
-      { role: "user", content: userMsg },
+      { role: "user", content: `Grade this:\n${user}` },
     ],
   });
 
-  const raw = resp.choices[0].message?.content?.trim() ?? "[]";
+  const raw = resp.choices?.[0]?.message?.content?.trim() ?? "";
   const jsonText = raw.replace(/^```json\s*|\s*```$/g, "");
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(jsonText);
+    const parsed = JSON.parse(jsonText);
+    return {
+      correct: Boolean(parsed?.correct),
+      reason: typeof parsed?.reason === "string" ? parsed.reason : "LLM evaluation",
+    };
   } catch {
-    throw new Error("Model did not return valid JSON.");
+    return { correct: false, reason: "LLM parse failure" };
   }
-  if (!Array.isArray(parsed)) throw new Error("Invalid JSON shape.");
-
-  const cleaned = (parsed as any[])
-    .slice(0, n)
-    .map((q) => ({
-      prompt: String(q?.prompt ?? "").slice(0, 500),
-      answer: String(q?.answer ?? "").slice(0, 500),
-    }))
-    .filter((q) => q.prompt && q.answer);
-
-  return cleaned;
 }
 
-/* ------------------------------ Handler ------------------------------ */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
+  if (req.method !== "POST") return text("Method not allowed", 405);
+
   try {
-    if (req.method !== "POST") return text("Method not allowed", 405);
+    const { question, expected, user_answer }: GradeRequest = await req.json();
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseAnon = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const supa = createClient(supabaseUrl, supabaseAnon, {
-      global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
-    });
-
-    // Auth
-    const { data: userRes, error: userErr } = await supa.auth.getUser();
-    if (userErr || !userRes?.user) return text("Unauthorized", 401);
-    const user = userRes.user;
-
-    // Body
-    const {
-      title,
-      topic,
-      count,
-      group_id,
-      file_id,
-      replace_quiz_id,     // update instead of insert
-      no_repeat,           // default true
-      avoid_prompts,       // optional novelty avoid list
-      source_file_name,    // <-- NEW: human-readable file name to persist
-    } = await req.json();
-
-    const n = Math.max(1, Math.min(Number(count) || 10, 30));
-    const safeTitle = String(title || "Generated Quiz").slice(0, 120);
-    const prompt = String(topic || "Create programming quiz questions.").slice(0, 2000);
-    const wantNoRepeat = no_repeat !== false; // default true
-
-    // Fast trial-cap precheck only if inserting new quiz
-    if (!replace_quiz_id) {
-      const isAnon =
-        user?.app_metadata?.provider === "anonymous" ||
-        user?.user_metadata?.is_anonymous === true ||
-        (Array.isArray(user?.identities) &&
-          user.identities.some((i: any) => i?.provider === "anonymous"));
-
-      if (isAnon) {
-        const { count: quizCount, error: cErr } = await supa
-          .from("quizzes")
-          .select("id", { count: "exact", head: true });
-        if (!cErr && (quizCount ?? 0) >= 2) {
-          return text(
-            "Free trial limit reached. Create an account to make more quizzes.",
-            403
-          );
-        }
-      }
+    if (!expected || typeof expected !== "string") {
+      return text("Missing expected answer", 400);
+    }
+    if (!user_answer || typeof user_answer !== "string") {
+      return json({ correct: false, reason: "No answer provided" }, 200);
     }
 
-    // Validate/resolve target group
-    let targetGroupId: string | null = null;
-    if (group_id) {
-      const { data: g, error: gErr } = await supa
-        .from("groups")
-        .select("id")
-        .eq("id", group_id)
-        .eq("user_id", user.id)
-        .maybeSingle();
-      if (!gErr && g?.id) targetGroupId = g.id;
+    // Heuristic pass
+    const heur = heuristicGrade(expected, user_answer);
+    if (heur.pass) {
+      return json({ correct: true, reason: heur.why }, 200);
     }
 
-    // Gather prior prompts for novelty (server-side)
-    let priorPrompts: string[] = [];
-    if (wantNoRepeat && targetGroupId) {
-      const { data: priorQs } = await supa
-        .from("quizzes")
-        .select("questions")
-        .eq("user_id", user.id)
-        .eq("group_id", targetGroupId);
-
-      const allQA = (priorQs ?? []).flatMap((r: any) =>
-        Array.isArray(r?.questions) ? r.questions : []
+    // LLM fallback
+    try {
+      const llm = await llmGrade(
+        question ?? "",
+        expected ?? "",
+        user_answer ?? ""
       );
-      priorPrompts = allQA
-        .map((qa: any) => String(qa?.prompt ?? "").trim())
-        .filter(Boolean);
+      return json(llm, 200);
+    } catch (err) {
+      console.error("LLM grading failed:", err);
+      return json({ correct: false, reason: "LLM unavailable" }, 200);
     }
-
-    // Merge any client-provided avoid list
-    if (Array.isArray(avoid_prompts) && avoid_prompts.length) {
-      priorPrompts = [
-        ...priorPrompts,
-        ...avoid_prompts.map((p: any) => String(p || "").trim()).filter(Boolean),
-      ];
-      // de-dup
-      const seen = new Set<string>();
-      priorPrompts = priorPrompts.filter((p) => {
-        const k = p.toLowerCase();
-        if (seen.has(k)) return false;
-        seen.add(k);
-        return true;
-      });
-    }
-
-    // RAG (optional)
-    let docContext = "";
-    if (file_id) {
-      try {
-        const chunks = await fetchTopChunks({
-          supa,
-          userId: user.id,
-          fileId: String(file_id),
-          topic: prompt,
-          title: safeTitle,
-          n,
-          k: 15,
-        });
-        const joined = chunks.join("\n\n");
-        docContext = joined.length > 12000 ? joined.slice(0, 12000) : joined;
-      } catch {
-        docContext = "";
-      }
-    }
-
-    // Generate
-    let generated = await llmGenerate(n, prompt, priorPrompts, docContext);
-
-    if (wantNoRepeat && priorPrompts.length > 0) {
-      // exact
-      const priorSeen = new Set(priorPrompts.map(normalize));
-      let unique = generated.filter((qa) => !priorSeen.has(normalize(qa.prompt)));
-      // near
-      unique = unique.filter((qa) => {
-        for (const p of priorPrompts) {
-          if (isNearDuplicate(qa.prompt, p, 0.9)) return false;
-        }
-        return true;
-      });
-
-      // Refill once if short
-      if (unique.length < n) {
-        const need = n - unique.length;
-        const expandedAvoid = [...priorPrompts, ...unique.map((x) => x.prompt)];
-        const refill = await llmGenerate(
-          need,
-          prompt + " (add new or extended questions that are not already covered above)",
-          expandedAvoid,
-          docContext
-        );
-        const combinedSeen = new Set(expandedAvoid.map(normalize));
-        const refillFiltered = refill.filter((qa) => {
-          const norm = normalize(qa.prompt);
-          if (combinedSeen.has(norm)) return false;
-          for (const p of expandedAvoid) if (isNearDuplicate(qa.prompt, p, 0.9)) return false;
-          return true;
-        });
-        generated = [...unique, ...refillFiltered].slice(0, n);
-      } else {
-        generated = unique.slice(0, n);
-      }
-    } else {
-      generated = generated.slice(0, n);
-    }
-
-    if (generated.length === 0) return text("No usable questions.", 400);
-
-    const now = new Date().toISOString();
-
-    // UPDATE (regenerate in place)
-    if (replace_quiz_id) {
-      // ensure ownership
-      const { data: owned, error: ownErr } = await supa
-        .from("quizzes")
-        .select("id")
-        .eq("id", replace_quiz_id)
-        .eq("user_id", user.id)
-        .maybeSingle();
-      if (ownErr || !owned?.id) return text("Not found", 404);
-
-      const { error: upErr } = await supa
-        .from("quizzes")
-        .update({
-          title: safeTitle,
-          questions: generated,
-          group_id: targetGroupId,
-          file_id: file_id || null,
-          source_file_name: source_file_name || null, // <-- NEW
-          source_prompt: prompt,
-          updated_at: now,
-        })
-        .eq("id", replace_quiz_id)
-        .eq("user_id", user.id);
-
-      if (upErr) {
-        console.error("DB update failed:", upErr);
-        return text(`Failed to update quiz: ${upErr.message}`, 500);
-      }
-      return json(
-        { id: replace_quiz_id, group_id: targetGroupId, file_id, source_file_name },
-        200
-      );
-    }
-
-    // INSERT (new quiz)
-    const { data, error } = await supa
-      .from("quizzes")
-      .insert({
-        user_id: user.id,
-        title: safeTitle,
-        questions: generated,
-        group_id: targetGroupId,
-        file_id: file_id || null,
-        source_file_name: source_file_name || null, // <-- NEW
-        source_prompt: prompt,
-        created_at: now,
-        updated_at: now,
-      })
-      .select("id, group_id, file_id, source_file_name")
-      .single();
-
-    if (error) {
-      if ((error as any).code === "42501") {
-        return text("Free trial limit reached. Create an account to make more quizzes.", 403);
-      }
-      console.error("DB insert failed:", error);
-      return text(`Failed to insert quiz: ${error.message}`, 500);
-    }
-
-    return json({ id: data.id, group_id: data.group_id, file_id: data.file_id, source_file_name: data.source_file_name }, 200);
   } catch (e: any) {
-    console.error("Unhandled:", e);
+    console.error("grade-answer error:", e);
     return text(`Server error: ${e?.message ?? e}`, 500);
   }
 });

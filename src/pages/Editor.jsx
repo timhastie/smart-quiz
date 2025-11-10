@@ -62,11 +62,11 @@ export default function Editor() {
   const fileInputRef = useRef(null);
 
   // ----- UI button helpers (match Dashboard look) -----
-  const pressAnim = "transition-transform duration-100 active:scale-95";
-  const btnBase = "px-3 py-2 rounded disabled:opacity-60 disabled:cursor-not-allowed";
-  const btnGray = `bg-gray-700 hover:bg-gray-600 ${pressAnim}`;
-  const btnGreen = `bg-emerald-500 hover:bg-emerald-600 font-semibold ${pressAnim}`;
-  const btnRed = `bg-red-500 hover:bg-red-600 ${pressAnim}`;
+  const pressAnim = "transition-all duration-150 active:scale-[0.97]";
+  const btnBase = "px-4 py-2 rounded-2xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed";
+  const btnGray = `bg-white/10 hover:bg-white/20 text-white ${pressAnim}`;
+  const btnGreen = `bg-emerald-500/90 hover:bg-emerald-400 text-slate-950 ${pressAnim}`;
+  const btnRed = `bg-rose-500/80 hover:bg-rose-500 text-white ${pressAnim}`;
 
   // ---------- selection state for multi-delete ----------
   const [selected, setSelected] = useState(new Set()); // indices
@@ -663,66 +663,49 @@ export default function Editor() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
-      {/* Header */}
-     <header className="border-b border-gray-800 px-6 sm:px-8 lg:px-12 py-3 sm:py-4">
-  {/* --- Desktop / tablet (unchanged) --- */}
-  <div className="hidden sm:grid sm:grid-cols-3 sm:items-center">
-    {/* Left: page title */}
-    <h1 className="text-xl font-bold justify-self-start">Edit Quiz</h1>
+    <div className="min-h-screen text-slate-100 pb-16">
+      <header className="sticky top-0 z-30 border-b border-white/5 bg-slate-950/80 backdrop-blur-md">
+        <div className="max-w-4xl mx-auto px-6 py-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <img
+              src="/smartquizlogo.png"
+              alt="Smart-Quiz logo"
+              className="h-9 sm:h-10 w-auto -ml-2 object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,0.35)]"
+              draggable="false"
+            />
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-white/60">
+                Editor
+              </p>
+              <h1 className="text-2xl font-semibold tracking-tight">Edit Quiz</h1>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link to="/" className={`${btnBase} ${btnGray}`}>
+              Back
+            </Link>
+            <button onClick={save} className={`${btnBase} ${btnGreen}`}>
+              Save
+            </button>
+          </div>
+        </div>
+      </header>
 
-    {/* Center: logo */}
-    <div className="flex items-center justify-center">
-      <img
-        src="/smartquizlogo.png"
-        alt="Smart-Quiz logo"
-        className="h-12 sm:h-10 md:h-16 w-auto my-2 sm:my-3 object-contain select-none pointer-events-none"
-        draggable="false"
-      />
-    </div>
-
-    {/* Right: actions */}
-    <div className="flex items-center gap-2 justify-self-end">
-      <Link to="/" className={`${btnBase} ${btnGray}`}>Back</Link>
-      <button onClick={save} className={`${btnBase} ${btnGreen}`}>Save</button>
-    </div>
-  </div>
-
-  {/* --- Mobile only --- */}
-  <div className="sm:hidden">
-    {/* Row 1: centered logo with a bit of extra bottom space */}
-    <div className="flex items-center justify-center mb-3">
-      <img
-        src="/smartquizlogo.png"
-        alt="Smart-Quiz logo"
-        className="h-12 w-auto my-1 object-contain select-none pointer-events-none"
-        draggable="false"
-      />
-    </div>
-    {/* Row 2: title left, actions right */}
-    <div className="flex items-center justify-between">
-      <h1 className="text-xl font-bold">Edit Quiz</h1>
-      <div className="flex items-center gap-2">
-        <Link to="/" className={`${btnBase} ${btnGray}`}>Back</Link>
-        <button onClick={save} className={`${btnBase} ${btnGreen}`}>Save</button>
-      </div>
-    </div>
-  </div>
-</header>
-
-      <main className="max-w-3xl mx-auto p-4 sm:p-6 space-y-6">
+      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-0 py-8 space-y-6">
         {msg && (
-          <div className="rounded-lg border border-emerald-800 bg-emerald-900/30 text-emerald-300 px-3 py-2 text-sm sm:text-base">
+          <div className="surface-panel border border-emerald-500/40 text-emerald-200 px-4 py-3 text-sm sm:text-base">
             {msg}
           </div>
         )}
 
         {/* Title + Group row */}
-        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1.4fr)_minmax(260px,1fr)] gap-3 items-start">
+        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1.4fr)_minmax(260px,1fr)] gap-4 items-start">
           <div>
-            <label className="block text-xs sm:text-sm text-gray-300 mb-1">Title</label>
+            <label className="block text-xs uppercase tracking-wide text-white/60 mb-1">
+              Title
+            </label>
             <input
-              className="w-full p-3 rounded bg-white text-gray-900 border border-gray-300 placeholder:text-gray-500 text-base sm:text-lg"
+              className="field w-full text-base sm:text-lg"
               placeholder="Quiz title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -738,52 +721,53 @@ export default function Editor() {
             </div>
           </div>
 
-         <div>
-  <label className="block text-xs sm:text-sm text-gray-300 mb-1">Group</label>
-  <div className="flex gap-2">
-    <select
-      className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 disabled:opacity-60 text-base"
-      value={groupId}
-      onChange={handleGroupChange}
-      disabled={savingGroup}
-    >
-      <option value="">No group</option>
-      {groups.map((g) => (
-        <option key={g.id} value={g.id}>
-          {g.name}
-        </option>
-      ))}
-    </select>
-    <button
-      className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 whitespace-nowrap text-sm sm:text-base"
-      onClick={() => setNewOpen(true)}
-      disabled={savingGroup}
-    >
-      New group +
-    </button>
-  </div>
+          <div>
+            <label className="block text-xs uppercase tracking-wide text-white/60 mb-1">
+              Group
+            </label>
+            <div className="flex gap-2">
+              <select
+                className="w-full"
+                value={groupId}
+                onChange={handleGroupChange}
+                disabled={savingGroup}
+              >
+                <option value="">No group</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                className={`${btnBase} ${btnGray} whitespace-nowrap`}
+                onClick={() => setNewOpen(true)}
+                disabled={savingGroup}
+              >
+                New group +
+              </button>
+            </div>
 
-  {/* Actions row under group: left = Unselect all, right = Delete selected */}
-  {selectedCount > 0 && (
-    <div className="mt-3 flex items-center justify-between">
-      <button
-        onClick={clearSelection}
-        className={`${btnBase} ${btnGray} px-4 py-2`}
-        title="Unselect all selected questions"
-      >
-        Unselect all
-      </button>
+            {selectedCount > 0 && (
+              <div className="mt-3 flex items-center justify-between">
+                <button
+                  onClick={clearSelection}
+                  className={`${btnBase} ${btnGray}`}
+                  title="Unselect all selected questions"
+                >
+                  Unselect all
+                </button>
 
-      <button
-        onClick={deleteSelected}
-        className={`${btnBase} ${btnRed} px-4 py-2 font-semibold`}
-        title="Delete selected questions"
-      >
-        Delete selected ({selectedCount})
-      </button>
-    </div>
-  )}
-</div>
+                <button
+                  onClick={deleteSelected}
+                  className={`${btnBase} ${btnRed}`}
+                  title="Delete selected questions"
+                >
+                  Delete selected ({selectedCount})
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
        {/* Questions — vertically scrollable container (desktop & mobile) */}
@@ -801,7 +785,7 @@ export default function Editor() {
     "
   >
     {questions.map((row, i) => (
-      <div key={i} className="bg-gray-800 p-4 rounded-xl">
+      <div key={i} className="surface-panel p-4">
         <div className="flex items-start gap-3">
           <input
             type="checkbox"
@@ -811,21 +795,21 @@ export default function Editor() {
             onChange={() => toggleSelect(i)}
           />
           <div className="flex-1">
-            <label className="block text-xs sm:text-sm text-gray-300 mb-1">
+            <label className="block text-xs uppercase tracking-wide text-white/60 mb-1">
               Question {i + 1}
             </label>
             <textarea
-              className="w-full p-3 rounded bg-white text-gray-900 border border-gray-300 placeholder:text-gray-500 mb-3 text-base sm:text-lg"
+              className="field-textarea w-full mb-3 text-base sm:text-lg"
               placeholder={`Question ${i + 1} prompt`}
               value={row.prompt}
               onChange={(e) => updateRow(i, "prompt", e.target.value)}
               rows={3}
             />
-            <label className="block text-xs sm:text-sm text-gray-300 mb-1">
+            <label className="block text-xs uppercase tracking-wide text-white/60 mb-1">
               Exact answer
             </label>
             <textarea
-              className="w-full p-3 rounded bg-white text-gray-900 border border-gray-300 placeholder:text-gray-500 text-base sm:text-lg"
+              className="field-textarea w-full text-base sm:text-lg"
               placeholder="Exact correct answer"
               value={row.answer}
               onChange={(e) => updateRow(i, "answer", e.target.value)}
@@ -834,13 +818,13 @@ export default function Editor() {
             <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-2">
               <button
                 onClick={save}
-                className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm sm:text-base"
+                className={`w-full sm:w-auto ${btnBase} ${btnGray}`}
               >
                 Save
               </button>
               <button
                 onClick={() => removeRow(i)}
-                className="w-full sm:w-auto px-3 py-2 rounded bg-red-500 hover:bg-red-600 text-sm sm:text-base"
+                className={`w-full sm:w-auto ${btnBase} ${btnRed}`}
               >
                 Delete
               </button>
@@ -857,7 +841,7 @@ export default function Editor() {
 
         <button
           onClick={addRow}
-          className="w-full sm:w-auto px-4 py-2 rounded bg-gray-700 hover:bg-gray-600"
+          className={`w-full sm:w-auto ${btnBase} ${btnGray}`}
         >
           + Add Question
         </button>
@@ -870,7 +854,7 @@ export default function Editor() {
           onClick={() => setNewOpen(false)}
         >
           <div
-            className="w-full max-w-sm bg-gray-800 text-white rounded-2xl p-5 sm:p-6 shadow-xl max-h-[85vh] overflow-y-auto"
+            className="w-full max-w-sm surface-card p-5 sm:p-6 max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               if (creatingGroup) return;
@@ -884,7 +868,7 @@ export default function Editor() {
           >
             <h2 className="text-lg sm:text-xl font-bold mb-3">Create new group</h2>
             <input
-              className="w-full p-3 rounded bg-gray-900 text-white border border-gray-700 mb-4"
+              className="field w-full mb-4"
               placeholder="Group name"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
@@ -892,14 +876,14 @@ export default function Editor() {
             />
             <div className="flex flex-col sm:flex-row justify-end gap-2">
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600"
+                className={`w-full sm:w-auto ${btnBase} ${btnGray}`}
                 onClick={() => setNewOpen(false)}
                 disabled={creatingGroup}
               >
                 Cancel
               </button>
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60"
+                className={`w-full sm:w-auto ${btnBase} ${btnGreen}`}
                 onClick={createGroup}
                 disabled={creatingGroup || !newName.trim()}
               >
@@ -917,24 +901,24 @@ export default function Editor() {
           onClick={() => !cleaning && setCleanupOpen(false)}
         >
           <div
-            className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-5 sm:p-6 shadow-xl max-h-[85vh] overflow-y-auto"
+            className="w-full max-w-md surface-card p-5 sm:p-6 max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-xl font-bold mb-2">Delete empty group?</h2>
-            <p className="text-gray-300 mb-6">
+            <p className="text-white/70 mb-6">
               The group <span className="font-semibold">{cleanupGroup.name}</span> no longer has any
               quizzes. Would you like to delete this group?
             </p>
             <div className="flex flex-col sm:flex-row justify-end gap-2">
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-gray-700 hover:bg-gray-600"
+                className={`w-full sm:w-auto ${btnBase} ${btnGray}`}
                 onClick={() => setCleanupOpen(false)}
                 disabled={cleaning}
               >
                 Keep group
               </button>
               <button
-                className="w-full sm:w-auto px-3 py-2 rounded bg-red-500 hover:bg-red-600 disabled:opacity-60"
+                className={`w-full sm:w-auto ${btnBase} ${btnRed}`}
                 onClick={deleteEmptyGroupNow}
                 disabled={cleaning}
               >
@@ -954,19 +938,19 @@ export default function Editor() {
           onClick={() => !generating && setGenOpen(false)}
         >
           <div
-            className="w-full max-w-xl bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
+            className="w-full max-w-xl surface-card p-6 max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-xl font-bold mb-4">Generate with AI</h2>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
-                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-title">
+                <label className="block text-sm text-white/70 mb-1" htmlFor="gen-title">
                   Name
                 </label>
                 <input
                   id="gen-title"
-                  className="w-full p-3 rounded bg-white text-gray-900 border border-gray-300 placeholder:text-gray-500"
+                  className="field w-full"
                   placeholder="Quiz name"
                   value={gTitle}
                   onChange={(e) => setGTitle(e.target.value)}
@@ -974,12 +958,12 @@ export default function Editor() {
               </div>
 
               <div className="sm:col-span-2">
-                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-topic">
+                <label className="block text-sm text-white/70 mb-1" htmlFor="gen-topic">
                   Prompt
                 </label>
                 <textarea
                   id="gen-topic"
-                  className="w-full min-h-[8rem] p-3 rounded bg-white text-gray-900 border border-gray-300 placeholder:text-gray-500 resize-y"
+                  className="field-textarea w-full min-h-[8rem] resize-y"
                   placeholder="Describe what to generate…"
                   value={gTopic}
                   onChange={(e) => setGTopic(e.target.value)}
@@ -987,7 +971,7 @@ export default function Editor() {
               </div>
 
               <div className="sm:col-span-2">
-                <label className="inline-flex items-center gap-2 text-sm text-gray-200">
+                <label className="inline-flex items-center gap-2 text-sm text-white/80">
                   <input
                     type="checkbox"
                     className="h-4 w-4"
@@ -1000,12 +984,12 @@ export default function Editor() {
 
               {/* Optional source file */}
               <div className="sm:col-span-2">
-                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-file">
+                <label className="block text-sm text-white/70 mb-1" htmlFor="gen-file">
                   Optional document to use as source (PDF / TXT / MD)
                 </label>
 
                 {savedFileId && (
-                  <div className="mb-2 text-sm text-gray-300">
+                  <div className="mb-2 text-sm text-white/70">
                     <label className="inline-flex items-center gap-2">
                       <input
                         type="checkbox"
@@ -1021,7 +1005,7 @@ export default function Editor() {
                       </span>
                     </label>
                     {!savedFileName && (
-                      <div className="mt-1 text-xs text-gray-400">
+                      <div className="mt-1 text-xs text-white/60">
                         (previous file id: {String(savedFileId).slice(0, 8)}…)
                       </div>
                     )}
@@ -1033,12 +1017,12 @@ export default function Editor() {
                   ref={fileInputRef}
                   type="file"
                   accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
-                  className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700"
+                  className="w-full"
                   onChange={handleChooseFileChange}
                 />
 
                 {gFile && (
-                  <div className="mt-1 text-xs text-gray-300">
+                  <div className="mt-1 text-xs text-white/70">
                     Selected: {gFile.name}{" "}
                     <button
                       type="button"
@@ -1058,12 +1042,12 @@ export default function Editor() {
               </div>
 
               <div>
-                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-group">
+                <label className="block text-sm text-white/70 mb-1" htmlFor="gen-group">
                   Add to Group
                 </label>
                 <select
                   id="gen-group"
-                  className="w-full p-3 rounded bg-gray-900 text-white border border-gray-700"
+                  className="w-full"
                   value={gGroupId}
                   onChange={(e) => setGGroupId(e.target.value)}
                 >
@@ -1077,7 +1061,7 @@ export default function Editor() {
               </div>
 
               <div>
-                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-count">
+                <label className="block text-sm text-white/70 mb-1" htmlFor="gen-count">
                   {isAdd ? "# of questions to add" : "# of questions"}
                 </label>
                 <input
@@ -1086,21 +1070,21 @@ export default function Editor() {
                   inputMode="numeric"
                   min={1}
                   max={999}
-                  className="w-full p-3 rounded bg-gray-900 text-white border border-gray-700"
+                  className="field w-full"
                   value={gCountStr}
                   onChange={handleCountChange}
                   onBlur={handleCountBlur}
                 />
                 {isAdd && (
-                  <div className="mt-1 text-xs text-gray-400">
+                  <div className="mt-1 text-xs text-white/60">
                     Current questions: {currentCount} • Max total: {MAX_TOTAL} • You can add up to {maxAdd}.
                   </div>
                 )}
               </div>
 
-              <div className="sm:col-span-2 mt-2 border-t border-gray-700 pt-3">
+              <div className="sm:col-span-2 mt-2 border-t border-white/10 pt-3">
                 <div className="flex flex-col gap-2">
-                  <label className="inline-flex items-center gap-2 text-sm text-gray-200">
+                  <label className="inline-flex items-center gap-2 text-sm text-white/80">
                     <input
                       type="checkbox"
                       className="h-4 w-4"
@@ -1109,7 +1093,7 @@ export default function Editor() {
                     />
                     <span>Add to existing questions</span>
                   </label>
-                  <label className="inline-flex items-center gap-2 text-sm text-gray-200">
+                  <label className="inline-flex items-center gap-2 text-sm text-white/80">
                     <input
                       type="checkbox"
                       className="h-4 w-4"

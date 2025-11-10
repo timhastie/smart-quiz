@@ -18,17 +18,51 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
-      <form onSubmit={handle} className="w-full max-w-sm space-y-4 bg-gray-800 p-6 rounded-2xl shadow">
-        <h1 className="text-2xl font-bold">Log in</h1>
-        {err && <p className="text-red-400 text-sm">{err}</p>}
-        <input className="w-full p-3 rounded text-black" placeholder="Email"
-               value={email} onChange={e=>setEmail(e.target.value)} />
-        <input className="w-full p-3 rounded text-black" placeholder="Password" type="password"
-               value={pass} onChange={e=>setPass(e.target.value)} />
-        <button className="w-full p-3 rounded bg-emerald-500 font-semibold hover:bg-emerald-600">Sign in</button>
-        <p className="text-sm text-gray-300">No account? <Link to="/signup" className="text-emerald-400">Sign up</Link></p>
-      </form>
+    <div className="min-h-screen flex items-center justify-center px-4 py-10 text-slate-100">
+      <div className="w-full max-w-md">
+        <div className="surface-card p-6 sm:p-8 space-y-6">
+          <div className="space-y-2">
+            <img
+              src="/smartquizlogo.png"
+              alt="Smart-Quiz logo"
+              className="h-9 w-auto object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,0.35)] -ml-1"
+              draggable="false"
+            />
+            <h1 className="text-2xl font-semibold">Welcome back</h1>
+            <p className="text-white/70 text-sm">
+              Sign in to keep your quizzes in sync across devices.
+            </p>
+          </div>
+
+          <form onSubmit={handle} className="space-y-4">
+            {err && <p className="text-sm text-red-400">{err}</p>}
+            <input
+              className="field w-full"
+              placeholder="Email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            <input
+              className="field w-full"
+              placeholder="Password"
+              type="password"
+              value={pass}
+              onChange={(e) => setPass(e.target.value)}
+            />
+            <button className="w-full px-4 py-3 rounded-2xl bg-emerald-500/90 hover:bg-emerald-400 text-slate-950 font-semibold transition">
+              Sign in
+            </button>
+          </form>
+
+          <p className="text-sm text-white/70 text-center">
+            No account?{" "}
+            <Link to="/signup" className="text-emerald-300 hover:text-emerald-200 font-semibold">
+              Sign up
+            </Link>
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

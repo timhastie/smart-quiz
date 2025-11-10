@@ -36,6 +36,12 @@ export default function PlayAllRevisit() {
 
   const current = items[idx] || null;
 
+  const pressAnim = "transition-all duration-150 active:scale-[0.97]";
+  const btnBase =
+    "px-4 py-2 rounded-2xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed";
+  const btnGray = `bg-white/10 hover:bg-white/20 text-white ${pressAnim}`;
+  const btnGreen = `bg-emerald-500/90 hover:bg-emerald-400 text-slate-950 ${pressAnim}`;
+
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -110,63 +116,75 @@ export default function PlayAllRevisit() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white grid place-items-center">
-        <div className="text-gray-300">Loading all Revisit questions…</div>
+      <div className="min-h-screen flex items-center justify-center px-4 py-10 text-slate-100">
+        <div className="surface-card p-6 sm:p-7 text-white/80">
+          Loading all Revisit questions…
+        </div>
       </div>
     );
   }
 
   if (!items.length) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-6">
-        <div className="text-xl font-semibold mb-2">No Revisit questions yet</div>
-        <p className="text-gray-300 mb-6 text-center max-w-md">
-          Mark questions to “Revisit” while playing quizzes. They’ll appear here across all groups.
-        </p>
-        <Link
-          to="/"
-          className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 transition"
-        >
-          Back to Dashboard
-        </Link>
+      <div className="min-h-screen flex items-center justify-center px-4 py-10 text-slate-100">
+        <div className="surface-card p-6 sm:p-8 text-center space-y-4 max-w-md">
+          <div className="text-xl font-semibold">No Revisit questions yet</div>
+          <p className="text-white/70">
+            Mark questions to “Revisit” while playing quizzes. They’ll appear here across all groups.
+          </p>
+          <Link to="/" className={`${btnBase} ${btnGreen}`}>
+            Back to Dashboard
+          </Link>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
-      <header className="border-b border-gray-800 px-6 sm:px-8 lg:px-12 py-4">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold">Revisit (All Groups)</h1>
+    <div className="min-h-screen text-slate-100 pb-16">
+      <header className="sticky top-0 z-30 border-b border-white/5 bg-slate-950/80 backdrop-blur-md">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-white/60">
+              Revisit
+            </p>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Revisit (All Groups)
+            </h1>
+          </div>
           <button
             onClick={() => nav(-1)}
-            className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 transition"
+            className={`${btnBase} ${btnGray}`}
           >
             Back
           </button>
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto p-6">
+      <main className="max-w-4xl mx-auto px-4 sm:px-6 py-8 space-y-5">
         {/* Progress */}
-        <div className="text-sm text-gray-300 mb-3">
-          Question {idx + 1} of {items.length}
+        <div className="text-sm text-white/70 flex flex-wrap items-center gap-2">
+          <span>
+            Question {idx + 1} of {items.length}
+          </span>
           {current?.sourceTitle ? (
-            <span className="ml-2 text-gray-400">
-              (from: <span className="italic">{current.sourceTitle}</span>)
+            <span className="text-white/60">
+              (from <span className="italic">{current.sourceTitle}</span>)
             </span>
           ) : null}
         </div>
 
         {/* Prompt */}
-        <div className="bg-gray-800 rounded-2xl p-5 border border-gray-800 shadow">
-          <div className="text-lg leading-7">{current.prompt}</div>
+        <div className="surface-card p-5">
+          <div className="text-lg sm:text-2xl font-semibold leading-7 text-white">
+            {current.prompt}
+          </div>
         </div>
 
         {/* Input + actions */}
-        <div className="mt-4 flex flex-col sm:flex-row gap-3 items-stretch">
+        <div className="flex flex-col sm:flex-row gap-3 items-stretch">
           <textarea
-            className="flex-1 min-h-[120px] p-3 rounded bg-gray-800 text-white border border-gray-700"
+            className="flex-1 min-h-[140px] field-textarea"
             placeholder="Type your answer… (Press Enter to submit)"
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -180,14 +198,14 @@ export default function PlayAllRevisit() {
                 setResult(ok ? "correct" : "incorrect");
                 setRevealed(true);
               }}
-              className="px-3 py-2 rounded bg-emerald-500 hover:bg-emerald-600 font-semibold transition"
+              className={`${btnBase} ${btnGreen}`}
               disabled={revealed}
             >
               Submit
             </button>
             <button
               onClick={() => setRevealed(true)}
-              className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 transition"
+              className={`${btnBase} ${btnGray}`}
               disabled={revealed}
               title="Show the model answer"
             >
@@ -208,8 +226,8 @@ export default function PlayAllRevisit() {
                 Incorrect ❌ Press <span className="font-semibold">C</span> to continue.
               </div>
             )}
-            <div className="mt-2 rounded-lg bg-gray-800 border border-gray-700 px-3 py-2">
-              <div className="text-sm text-gray-300">Accepted answer(s):</div>
+            <div className="mt-2 surface-panel px-3 py-2">
+              <div className="text-sm text-white/70">Accepted answer(s):</div>
               <div className="mt-1 text-white">
                 {(current.answers || []).length
                   ? current.answers.join(" • ")
@@ -219,14 +237,14 @@ export default function PlayAllRevisit() {
             <div className="mt-3 flex gap-2">
               <button
                 onClick={prev}
-                className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 transition disabled:opacity-60"
+                className={`${btnBase} ${btnGray}`}
                 disabled={idx === 0}
               >
                 Previous
               </button>
               <button
                 onClick={next}
-                className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 transition disabled:opacity-60"
+                className={`${btnBase} ${btnGray}`}
                 disabled={idx >= items.length - 1}
               >
                 Next

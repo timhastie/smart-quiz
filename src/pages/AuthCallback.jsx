@@ -84,8 +84,8 @@ export default function AuthCallback() {
   }, [nav]);
 
   return (
-    <div className="min-h-screen grid place-items-center bg-gray-900 text-white">
-      <div className="p-6 rounded-2xl bg-gray-800 border border-gray-700">{msg}</div>
+    <div className="min-h-screen grid place-items-center px-4 py-10 text-slate-100">
+      <div className="surface-card p-6 sm:p-7 text-center text-white/80 max-w-md">{msg}</div>
     </div>
   );
 }

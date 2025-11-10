@@ -2,33 +2,72 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Global form field look */
 @layer base {
-  /* Keep inputs/selects globally styled if you want */
+  :root {
+    font-family: "Inter", "SF Pro Display", "Segoe UI", system-ui, -apple-system,
+      BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+    background-color: #07131a;
+    color: #f8fafc;
+    font-feature-settings: "cv02" 1, "cv03" 1, "cv04" 1, "liga" 1;
+  }
+
+  html,
+  body {
+    @apply min-h-full bg-[#041c21] text-slate-50 antialiased;
+    margin: 0;
+  }
+
+  body {
+    background-image: radial-gradient(circle at 12% 18%, rgba(45, 212, 191, 0.35) 0, transparent 30%),
+      radial-gradient(circle at 78% 4%, rgba(20, 184, 166, 0.32) 0, transparent 40%),
+      linear-gradient(180deg, #0b2c32 0%, #082229 45%, #03141a 100%);
+    background-attachment: fixed;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  a,
+  button {
+    font-family: inherit;
+  }
+
   input,
-  select {
-    @apply bg-gray-300 text-gray-900 placeholder-gray-500
-           rounded-xl p-4
-           focus:outline-none focus:ring-2 focus:ring-emerald-500;
-  }
-
-  /* Do NOT color all textareas globally anymore. Just size/line-height. */
+  select,
   textarea {
-    @apply min-h-[120px] leading-relaxed;
+    @apply bg-white/85 text-slate-900 placeholder-slate-500
+      rounded-2xl border border-teal-100/70 px-4 py-3
+      focus:outline-none focus:ring-2 focus:ring-teal-300/80 focus:border-teal-300/80
+      transition shadow;
+  }
+
+  textarea {
+    @apply min-h-[140px] leading-relaxed;
   }
 }
 
-/* Utility classes you can opt into elsewhere (Dashboard, modals, etc.) */
-.field {
-  @apply bg-gray-300 text-gray-900 placeholder-gray-500
-         rounded-xl p-4
-         focus:outline-none focus:ring-2 focus:ring-emerald-500;
+/* Utility classes for consistent surfaces */
+.surface-card {
+  @apply bg-teal-300/10 border border-teal-200/40 rounded-3xl shadow-2xl shadow-teal-900/25 backdrop-blur-xl;
 }
+
+.surface-panel {
+  @apply bg-teal-200/10 border border-teal-100/30 rounded-2xl shadow-xl shadow-teal-900/20 backdrop-blur;
+}
+
+.field {
+  @apply bg-white/85 text-slate-900 placeholder-slate-500
+    rounded-2xl border border-teal-100/70 px-4 py-3
+    focus:outline-none focus:ring-2 focus:ring-teal-300/80 focus:border-teal-300/80;
+}
+
 .field-textarea {
-  @apply bg-gray-300 text-gray-900 placeholder-gray-500
-         rounded-xl p-4
-         min-h-[120px] leading-relaxed
-         focus:outline-none focus:ring-2 focus:ring-emerald-500;
+  @apply bg-white/85 text-slate-900 placeholder-slate-500
+    rounded-2xl border border-teal-100/70 px-4 py-3 min-h-[140px] leading-relaxed
+    focus:outline-none focus:ring-2 focus:ring-teal-300/80 focus:border-teal-300/80;
 }
 
 /* Play page: force dark textarea and neutralize UA dark theming */

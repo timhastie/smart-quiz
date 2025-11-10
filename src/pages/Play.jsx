@@ -157,6 +157,61 @@ function tokenJaccard(a, b) {
   for (const t of A) if (B.has(t)) inter++;
   return inter / (A.size + B.size - inter || 1);
 }
+
+const CONCEPT_GROUPS = [
+  {
+    id: "protect",
+    keywords: [
+      "protect",
+      "protection",
+      "guard",
+      "guardian",
+      "defend",
+      "defense",
+      "safeguard",
+      "security",
+    ],
+  },
+  {
+    id: "meat-diet",
+    keywords: [
+      "meat",
+      "prey",
+      "preys",
+      "flesh",
+      "carnivore",
+      "carnivores",
+      "carnivorous",
+      "meat eater",
+      "meat-eating",
+      "other animals",
+    ],
+  },
+];
+
+function conceptTags(str) {
+  const tags = new Set();
+  const tokens = new Set(str.split(" ").filter(Boolean));
+  const haystack = ` ${str} `;
+
+  for (const concept of CONCEPT_GROUPS) {
+    for (const raw of concept.keywords) {
+      const keyword = raw.trim();
+      if (!keyword) continue;
+      if (keyword.includes(" ")) {
+        if (haystack.includes(` ${keyword} `)) {
+          tags.add(concept.id);
+          break;
+        }
+      } else if (tokens.has(keyword)) {
+        tags.add(concept.id);
+        break;
+      }
+    }
+  }
+  return tags;
+}
+
 function localGrade(userRaw, expectedRaw) {
   const u = normalize(userRaw);
   const e = normalize(expectedRaw);
@@ -167,6 +222,13 @@ function localGrade(userRaw, expectedRaw) {
   if (d <= maxEdits) return { pass: true, why: `lev<=${maxEdits}` };
   const j = tokenJaccard(u, e);
   if (j >= 0.66) return { pass: true, why: `jaccard-${j.toFixed(2)}` };
+  const userConcepts = conceptTags(u);
+  const expectedConcepts = conceptTags(e);
+  for (const tag of userConcepts) {
+    if (expectedConcepts.has(tag)) {
+      return { pass: true, why: `concept-${tag}` };
+    }
+  }
   return { pass: false, why: "local-failed" };
 }
 
@@ -1153,11 +1215,11 @@ export default function Play() {
 
   // --- UI helpers / styles ---
   const pressAnim =
-    "transition-transform duration-100 active:scale-95";
+    "transition-all duration-150 active:scale-[0.97]";
   const btnBase =
-    "px-4 py-2 rounded text-sm sm:text-base disabled:opacity-50 disabled:cursor-not-allowed";
-  const btnGray = `bg-gray-700 hover:bg-gray-600 ${pressAnim}`;
-  const btnIndigo = `bg-indigo-600 hover:bg-indigo-500 ${pressAnim}`;
+    "px-4 py-2 rounded-2xl font-semibold text-sm sm:text-base disabled:opacity-50 disabled:cursor-not-allowed";
+  const btnGray = `bg-white/10 hover:bg-white/20 text-white ${pressAnim}`;
+  const btnIndigo = `bg-sky-500/90 hover:bg-sky-400 text-slate-950 ${pressAnim}`;
 
   if (!quiz) return null;
 
@@ -1171,84 +1233,58 @@ export default function Play() {
     ? !current?.__srcQuizId
     : false;
 
+  const experienceLabel = isReviewMode ? "Revisit" : "Play";
+
   return (
     <div
-      className="quiz-play min-h-screen bg-gray-900 text-white"
+      className="quiz-play min-h-screen text-slate-100 pb-16"
       onKeyDown={onKey}
       tabIndex={0}
     >
-      <header className="border-b border-gray-800 px-6 sm:px-8 lg:px-12 py-3 sm:py-4">
-        {/* --- Desktop / tablet --- */}
-        <div className="hidden sm:grid sm:grid-cols-3 sm:items-center">
-          <h1 className="text-lg sm:text-xl font-bold truncate pr-3">
-            {quiz.title || "Quiz"}
-            {isSyntheticMode
-              ? isReviewMode
-                ? " — Review"
-                : " — All Questions"
-              : isReviewMode
-              ? " — Review"
-              : ""}
-          </h1>
-          <div className="flex items-center justify-center">
+      <header className="sticky top-0 z-30 border-b border-white/5 bg-slate-950/80 backdrop-blur-md">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
             <img
               src="/smartquizlogo.png"
               alt="Smart-Quiz logo"
-              className="h-12 sm:h-10 md:h-16 w-auto my-2 sm:my-3 object-contain select-none pointer-events-none"
+              className="h-9 sm:h-10 w-auto -ml-2 object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,0.35)]"
               draggable="false"
             />
-          </div>
-          <div className="justify-self-end">
-            <Link
-              to={backPath}
-              className={`${btnBase} ${btnGray}`}
-              title="Go back to dashboard"
-            >
-              Back
-            </Link>
-          </div>
-        </div>
-
-        {/* --- Mobile only --- */}
-        <div className="sm:hidden">
-          <div className="flex items-center justify-center mb-3">
-            <img
-              src="/smartquizlogo.png"
-              alt="Smart-Quiz logo"
-              className="h-12 w-auto my-1 object-contain select-none pointer-events-none"
-              draggable="false"
-            />
-          </div>
-          <div className="flex items-center justify-between">
-            <h1 className="text-lg font-bold truncate pr-3">
-              {quiz.title || "Quiz"}
-              {isSyntheticMode
-                ? isReviewMode
+            <div className="min-w-0">
+              <p className="text-xs uppercase tracking-[0.2em] text-white/60">
+                {experienceLabel}
+              </p>
+              <h1 className="text-xl sm:text-2xl font-semibold tracking-tight truncate">
+                {quiz.title || "Quiz"}
+                {isSyntheticMode
+                  ? isReviewMode
+                    ? " — Review"
+                    : " — All Questions"
+                  : isReviewMode
                   ? " — Review"
-                  : " — All Questions"
-                : isReviewMode
-                ? " — Review"
-                : ""}
-            </h1>
-            <Link
-              to={backPath}
-              className={`${btnBase} ${btnGray}`}
-            >
-              Back
-            </Link>
+                  : ""}
+              </h1>
+            </div>
           </div>
+          <Link
+            to={backPath}
+            className={`${btnBase} ${btnGray} self-start sm:self-auto`}
+            title="Go back to dashboard"
+          >
+            Back
+          </Link>
         </div>
       </header>
 
-      <main className="px-4 sm:px-6 py-6 text-base sm:text-2xl">
-        <div className="mx-auto w-full max-w-[900px]">
+      <main className="px-4 sm:px-6 py-8 flex justify-center">
+        <div className="w-full max-w-[900px]">
           {current ? (
             <>
-              <div className="mx-auto w-full max-w-[740px]">
-                <p className="mb-3 sm:mb-4 leading-snug">
-                  <span className="mr-2">
-                    {index + 1}/{questionsArr.length}
-                  </span>
+              <div className="surface-card p-5 sm:p-8 space-y-6">
+                  <p className="text-xs uppercase tracking-wide text-white/60">
+                    Question {index + 1} / {questionsArr.length}
+                  </p>
+                <p className="text-lg sm:text-2xl font-semibold leading-snug">
                   {current.prompt}
                 </p>
 
@@ -1266,7 +1302,7 @@ export default function Play() {
                           setStrict(e.target.checked)
                         }
                       />
-                      <span className="text-gray-300">
+                      <span className="text-white/70">
                         Strict mode
                       </span>
                     </label>
@@ -1473,8 +1509,8 @@ export default function Play() {
                 </div>
 
                 {/* TEXTAREA FRAME */}
-                <div className="relative mb-3">
-                  <form onSubmit={submit}>
+                <div className="mb-3 lg:flex lg:items-center lg:gap-6">
+                  <form onSubmit={submit} className="lg:flex-1">
                     <textarea
                       ref={areaRef}
                       className="w-full h-56 p-4 rounded-lg bg-white text-gray-900 border border-gray-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-base sm:text-xl placeholder:text-gray-500"
@@ -1517,17 +1553,17 @@ export default function Play() {
                       </button>
                     </div>
                   </form>
-
-                  {/* Desktop side Enter */}
-                  <button
-                    type="button"
-                    onClick={submit}
-                    className={`hidden lg:flex ${btnBase} ${btnGray} h-12 items-center justify-center absolute top-1/2 -translate-y-1/2 left-full ml-3`}
-                    aria-label="Submit answer"
-                    title="Submit (same as pressing Enter)"
-                  >
-                    Enter
-                  </button>
+                  <div className="hidden lg:flex justify-center">
+                    <button
+                      type="button"
+                      onClick={submit}
+                      className={`${btnBase} ${btnGray} h-12 items-center justify-center w-[150px]`}
+                      aria-label="Submit answer"
+                      title="Submit (same as pressing Enter)"
+                    >
+                      Enter
+                    </button>
+                  </div>
                 </div>
 
                 {/* NAV BUTTONS */}
@@ -1625,12 +1661,12 @@ export default function Play() {
               </div>
             </>
           ) : (
-            <>
-              <p className="text-gray-300 text-center">
+            <div className="surface-card p-5 sm:p-8 text-center space-y-4">
+              <p className="text-white/70">
                 No questions yet. Add some in the editor.
               </p>
               {(isReviewMode || isSyntheticMode) && (
-                <div className="mt-4 flex justify-center">
+                <div className="flex justify-center">
                   {isSyntheticMode ? (
                     <Link
                       to="/"
@@ -1650,7 +1686,7 @@ export default function Play() {
                   )}
                 </div>
               )}
-            </>
+            </div>
           )}
         </div>
       </main>
@@ -1658,7 +1694,7 @@ export default function Play() {
       {/* Results Modal */}
       {showResult && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-3 sm:p-4 z-50">
-          <div className="bg-gray-800 text-white rounded-2xl p-5 sm:p-6 max-w-md w-full max-h-[85vh] overflow-y-auto">
+          <div className="surface-card p-5 sm:p-6 max-w-md w-full max-h-[85vh] overflow-y-auto">
             <h2 className="text-xl sm:text-2xl font-bold mb-2">
               {isSyntheticMode
                 ? isReviewMode

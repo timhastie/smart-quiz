@@ -143,13 +143,13 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
     };
   }, [user?.id]);
 
-  const pressAnim = "transition-transform duration-100 active:scale-95";
+  const pressAnim = "transition-all duration-150 active:scale-[0.97]";
   const btnBase =
-    "px-3 py-2 rounded disabled:opacity-60 disabled:cursor-not-allowed";
-  const btnGray = `bg-gray-700 hover:bg-gray-600 ${pressAnim}`;
-  const btnGreen = `bg-emerald-500 hover:bg-emerald-600 font-semibold ${pressAnim}`;
-  const btnRed = `bg-red-600 hover:bg-red-700 ${pressAnim}`;
-  const btnRedSoft = `bg-red-500 hover:bg-red-600 ${pressAnim}`;
+    "px-4 py-2 rounded-2xl font-semibold tracking-tight disabled:opacity-50 disabled:cursor-not-allowed";
+  const btnGray = `bg-white/10 hover:bg-white/20 text-white ${pressAnim}`;
+  const btnGreen = `bg-emerald-500/90 hover:bg-emerald-400 text-slate-950 ${pressAnim}`;
+  const btnRed = `bg-rose-600/80 hover:bg-rose-500 text-white ${pressAnim}`;
+  const btnRedSoft = `bg-rose-500/70 hover:bg-rose-500 text-white ${pressAnim}`;
   const actionH = "min-h-[3rem] h-auto sm:h-12";
 
   function computeIsAnon(u) {
@@ -1265,27 +1265,28 @@ useEffect(() => {
 
   /* ---------------------------------- UI ---------------------------------- */
   return (
-    <div className="min-h-screen bg-gray-900 text-white overflow-x-hidden">
-      <header className="border-b border-gray-800 px-6 sm:px-8 lg:px-12 py-3 sm:py-4">
-        <div className="grid grid-cols-2 sm:grid-cols-3 items-center">
-          <h1 className="text-xl font-bold justify-self-start self-center order-2 sm:order-none mt-2 sm:mt-0">
-            Your Quizzes
-          </h1>
-          <div className="flex items-center justify-center col-span-2 sm:col-span-1 order-1 sm:order-none">
+    <div className="min-h-screen text-slate-100 overflow-x-hidden pb-16">
+      <header className="sticky top-0 z-40 border-b border-white/5 bg-slate-950/80 backdrop-blur-md">
+        <div className="max-w-6xl mx-auto flex flex-col gap-4 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
             <img
               src="/smartquizlogo.png"
               alt="Smart-Quiz logo"
-              className="h-12 sm:h-10 md:h-16 w-auto my-2 sm:my-3 object-contain select-none pointer-events-none"
+              className="h-9 sm:h-10 w-auto my-1 -ml-2 object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,0.35)]"
               draggable="false"
             />
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-white/60">Dashboard</p>
+              <h1 className="text-2xl font-semibold tracking-tight">Your Quizzes</h1>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3 text-sm justify-self-end self-center min-w-0 col-span-1 sm:col-span-1 order-2 sm:order-none mt-2 sm:mt-0">
+          <div className="flex flex-wrap items-center justify-end gap-2 text-sm">
             {!ready ? (
-              <span className="text-gray-400">Loading…</span>
+              <span className="text-white/70">Loading…</span>
             ) : isAnon ? (
               <>
-                <span className="text-gray-300 hidden sm:inline">Guest</span>
+                <span className="text-white/60 hidden sm:inline">Guest</span>
                 <button
                   onClick={() => {
                     setAuthMessage("");
@@ -1298,7 +1299,7 @@ useEffect(() => {
               </>
             ) : user ? (
               <>
-                <span className="text-gray-300 hidden md:inline max-w-[28ch] truncate">
+                <span className="text-white/70 hidden md:inline max-w-[28ch] truncate">
                   {user.email}
                 </span>
                 <button
@@ -1329,14 +1330,14 @@ useEffect(() => {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto p-6">
-       {/* ---- MOBILE actions ---- */}
-<div className="mb-6 sm:hidden">
-  {/* Top buttons (unchanged positions) */}
-  <div className="flex items-stretch gap-2">
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-0 py-8 space-y-6">
+        {/* ---- MOBILE actions ---- */}
+{hasAnyQuizzes && (
+<div className="sm:hidden surface-card p-4 space-y-4">
+  <div className="flex flex-col gap-2">
     <button
       onClick={async () => {
-        if (isFirstQuizState) return; // inline form already visible
+        if (isFirstQuizState) return;
         if (filterGroupId && filterGroupId !== NO_GROUP) setGGroupId(filterGroupId);
         else setGGroupId("");
         const allowed = await ensureCanCreate();
@@ -1344,8 +1345,8 @@ useEffect(() => {
         setGenOpen(true);
       }}
       disabled={isFirstQuizState}
-      className={`flex-none whitespace-nowrap ${btnBase} ${btnGreen} h-11 px-3 py-2 text-[13px] ${
-        isFirstQuizState ? "opacity-60 cursor-not-allowed" : ""
+      className={`${btnBase} ${btnGreen} justify-center text-sm ${
+        isFirstQuizState ? "opacity-50 cursor-not-allowed" : ""
       }`}
     >
       + Generate Quiz with AI
@@ -1353,20 +1354,20 @@ useEffect(() => {
 
     <button
       onClick={createQuiz}
-      className={`flex-1 whitespace-nowrap ${btnBase} ${btnGray} h-11 px-3 py-2 text-[13px]`}
+      className={`${btnBase} ${btnGray} justify-center text-sm`}
       disabled={creating}
     >
       {creating ? "Creating…" : "New empty quiz"}
     </button>
   </div>
 
-  {/* Filters/search underneath */}
-  <div className="mt-3 flex flex-wrap items-stretch gap-3">
-    {/* Filter by group (moved above search) */}
-    <div className="flex items-center gap-2 w-full">
-      <label className="text-sm text-gray-300 shrink-0">Filter by group:</label>
+  <div className="space-y-3">
+    <div className="space-y-1">
+      <label className="text-xs uppercase tracking-wide text-white/60">
+        Filter by group
+      </label>
       <select
-        className="w-full rounded bg-gray-800 text-white border border-gray-700 px-3 py-2 h-11 text-[13px]"
+        className="w-full"
         value={filterGroupId}
         onChange={(e) => setFilterGroupId(e.target.value)}
       >
@@ -1380,18 +1381,20 @@ useEffect(() => {
       </select>
     </div>
 
-   {/* Search — full-width on mobile */}
-<div className="w-full">
-  <input
-    className="block w-full rounded bg-gray-800 text-white border border-gray-700 px-3 py-2 h-11 text-[13px] placeholder:text-gray-400"
-    placeholder="Search quizzes…"
-    value={query}
-    onChange={(e) => setQuery(e.target.value)}
-  />
-</div>
+    <div className="space-y-1">
+      <label className="text-xs uppercase tracking-wide text-white/60">
+        Search
+      </label>
+      <input
+        className="w-full"
+        placeholder="Search quizzes…"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+    </div>
 
     {hasSelected && (
-      <div className="ml-auto flex items-center gap-2">
+      <div className="flex flex-col gap-2 pt-2">
         <button onClick={() => setMoveOpen(true)} className={`${btnBase} ${btnGray}`}>
           Move to group
         </button>
@@ -1402,50 +1405,65 @@ useEffect(() => {
     )}
   </div>
 </div>
+)}
 
         {/* ---- DESKTOP/TABLET actions ---- */}
-        <div className="mb-6 hidden sm:flex flex-wrap items-stretch gap-3 w-full">
-          <button
-            onClick={async () => {
-              if (isFirstQuizState) return; // inline form already visible
-              if (filterGroupId && filterGroupId !== NO_GROUP)
-                setGGroupId(filterGroupId);
-              else setGGroupId("");
-              const allowed = await ensureCanCreate();
-              if (!allowed) return;
-              setGenOpen(true);
-            }}
-            disabled={isFirstQuizState}
-            className={`whitespace-normal text-left leading-tight ${btnBase} ${btnGreen} ${actionH} ${
-              isFirstQuizState ? "opacity-60 cursor-not-allowed" : ""
-            }`}
-          >
-            + Generate Quiz with AI
-          </button>
-          <button
-            onClick={createQuiz}
-            className={`whitespace-normal text-left leading-tight ${btnBase} ${btnGray} ${actionH}`}
-            disabled={creating}
-          >
-            {creating ? "Creating…" : "New empty quiz"}
-          </button>
+        {hasAnyQuizzes && (
+        <div className="hidden sm:flex items-center gap-4 surface-card px-5 py-7">
+          <div className="flex gap-3 flex-none items-center">
+            <button
+              onClick={async () => {
+                if (isFirstQuizState) return;
+                if (filterGroupId && filterGroupId !== NO_GROUP)
+                  setGGroupId(filterGroupId);
+                else setGGroupId("");
+                const allowed = await ensureCanCreate();
+                if (!allowed) return;
+                setGenOpen(true);
+              }}
+              disabled={isFirstQuizState}
+              className={`${btnBase} ${btnGreen} ${actionH} ${
+                isFirstQuizState ? "opacity-50 cursor-not-allowed" : ""
+              }`}
+            >
+              + Generate Quiz with AI
+            </button>
+            <button
+              onClick={createQuiz}
+              className={`${btnBase} ${btnGray} ${actionH}`}
+              disabled={creating}
+            >
+              {creating ? "Creating…" : "New empty quiz"}
+            </button>
+          </div>
 
-          <div className="flex-1 flex justify-end gap-3 w-full">
-            <div className="flex-none w-64 md:w-80">
+          <div className="flex flex-1 flex-wrap items-center justify-end gap-4">
+            <div className="flex-1 min-w-[220px] max-w-sm relative">
+              <label
+                htmlFor="desktop-search"
+                className="absolute left-0 -top-6 text-xs uppercase tracking-wide text-white/60"
+              >
+                Search
+              </label>
               <input
-                className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 placeholder:text-gray-400"
+                id="desktop-search"
+                className="w-full"
                 placeholder="Search quizzes…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
             </div>
 
-            <div className="relative z-50 flex-none w-56 md:w-64 flex items-center">
-              <label className="text-sm text-gray-300 mr-2 whitespace-nowrap">
-                Filter by group:
+            <div className="w-56 flex-none relative">
+              <label
+                htmlFor="desktop-filter"
+                className="absolute left-0 -top-6 text-xs uppercase tracking-wide text-white/60"
+              >
+                Filter by group
               </label>
               <select
-                className="relative z-50 w-full p-3 rounded bg-gray-800 text-white border border-gray-700"
+                id="desktop-filter"
+                className="w-full"
                 value={filterGroupId}
                 onChange={(e) => setFilterGroupId(e.target.value)}
               >
@@ -1461,7 +1479,7 @@ useEffect(() => {
           </div>
 
           {hasSelected && (
-            <div className="ml-auto flex items-center gap-2">
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => setMoveOpen(true)}
                 className={`${btnBase} ${btnGray}`}
@@ -1477,29 +1495,31 @@ useEffect(() => {
             </div>
           )}
         </div>
+        )}
 
                 {/* ----------------------- QUIZ LIST / CAROUSEL ---------------------- */}
         {!hasAnyQuizzes ? (
-          /* Inline “Generate with AI” panel for brand-new users */
-          <section className="mt-4 max-w-3xl mx-auto bg-gray-800/70 border border-gray-700 rounded-2xl p-5 sm:p-6 shadow-sm">
+          <>
+          {/* Inline “Generate with AI” panel for brand-new users */}
+          <section className="mt-4 max-w-3xl mx-auto surface-card p-5 sm:p-6 space-y-4">
             <h2 className="text-xl sm:text-2xl font-semibold mb-2">
               Generate a quiz with AI
             </h2>
-            <p className="text-sm text-gray-300 mb-4">
+            <p className="text-sm text-white/70 mb-4">
               Use this form to instantly create your first AI quiz.
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
                 <label
-                  className="block text-sm text-gray-300 mb-1"
+                  className="block text-sm text-white/70 mb-1"
                   htmlFor="inline-gen-title"
                 >
                   Name
                 </label>
                 <input
                   id="inline-gen-title"
-                  className="field w-full placeholder:text-gray-400"
+                  className="field w-full placeholder:text-slate-500"
                   placeholder="Bash Top 10"
                   value={gTitle}
                   onChange={(e) => setGTitle(e.target.value)}
@@ -1509,14 +1529,14 @@ useEffect(() => {
 
               <div className="sm:col-span-2">
                 <label
-                  className="block text-sm text-gray-300 mb-1"
+                  className="block text-sm text-white/70 mb-1"
                   htmlFor="inline-gen-topic"
                 >
                   Prompt
                 </label>
                 <textarea
                   id="inline-gen-topic"
-                  className="field-textarea w-full min-h-[8rem] resize-y placeholder:text-gray-400"
+                  className="field-textarea w-full min-h-[8rem] resize-y placeholder:text-slate-500"
                   placeholder="Create 10 questions that test the 10 most-used Bash commands."
                   value={gTopic}
                   onChange={(e) => setGTopic(e.target.value)}
@@ -1525,7 +1545,7 @@ useEffect(() => {
               </div>
 
               <div className="sm:col-span-2">
-                <label className="inline-flex items-center gap-2 text-sm text-gray-200">
+                <label className="inline-flex items-center gap-2 text-sm text-white/80">
                   <input
                     type="checkbox"
                     className="h-4 w-4"
@@ -1539,21 +1559,23 @@ useEffect(() => {
 
               <div className="sm:col-span-2">
                 <label
-                  className="block text-sm text-gray-300 mb-1"
+                  className="block text-sm text-white/70 mb-1"
                   htmlFor="inline-gen-file"
                 >
                   Optional document to use as source (PDF / TXT / MD)
                 </label>
-                <input
-                  id="inline-gen-file"
-                  type="file"
-                  accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
-                  className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700"
-                  onChange={(e) => setGFile(e.target.files?.[0] ?? null)}
-                  disabled={generating}
-                />
+                <div className="w-full sm:w-1/2">
+                  <input
+                    id="inline-gen-file"
+                    type="file"
+                    accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+                    className="w-full"
+                    onChange={(e) => setGFile(e.target.files?.[0] ?? null)}
+                    disabled={generating}
+                  />
+                </div>
                 {gFile && (
-                  <div className="mt-1 text-xs text-gray-300">
+                  <div className="mt-1 text-xs text-white/60">
                     Selected: {gFile.name}{" "}
                     <button
                       type="button"
@@ -1567,17 +1589,17 @@ useEffect(() => {
                 )}
               </div>
 
-              <div className="sm:col-span-1">
+              <div className="sm:col-span-2">
                 <label
-                  className="block text-sm text-gray-300 mb-1"
+                  className="block text-sm text-white/70 mb-1"
                   htmlFor="inline-gen-group"
                 >
                   Add to Group
                 </label>
-                <div className="flex flex-col sm:flex-row gap-2">
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
                   <select
                     id="inline-gen-group"
-                    className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700"
+                    className="field w-full sm:flex-1 h-12"
                     value={gGroupId}
                     onChange={(e) => setGGroupId(e.target.value)}
                     disabled={generating}
@@ -1591,7 +1613,7 @@ useEffect(() => {
                   </select>
                   <button
                     type="button"
-                    className={`${btnBase} ${btnGray}`}
+                    className={`${btnBase} ${btnGray} h-12 px-6`}
                     onClick={() => {
                       setGNewName("");
                       setGNewOpen(true);
@@ -1600,41 +1622,50 @@ useEffect(() => {
                   >
                     New group +
                   </button>
+                  <div className="w-full sm:w-28">
+                    <label
+                      className="block text-sm text-white/70 mb-1"
+                      htmlFor="inline-gen-count"
+                    >
+                      # of questions
+                    </label>
+                    <input
+                      id="inline-gen-count"
+                      className="field w-full h-12 text-center"
+                      type="number"
+                      min={1}
+                      max={30}
+                      value={gCount}
+                      onChange={(e) =>
+                        setGCount(Number(e.target.value) || 10)
+                      }
+                      disabled={generating}
+                    />
+                  </div>
+                  <button
+                    className={`${btnBase} ${btnGreen} h-12 px-6 sm:ml-auto`}
+                    onClick={generateQuiz}
+                    disabled={generating}
+                  >
+                    {generating ? "Generating…" : "Generate"}
+                  </button>
                 </div>
               </div>
-
-              <div className="sm:col-span-1">
-                <label
-                  className="block text-sm text-gray-300 mb-1"
-                  htmlFor="inline-gen-count"
-                >
-                  # of questions
-                </label>
-                <input
-                  id="inline-gen-count"
-                  className="field w-full sm:w-20 text-left pl-4"
-                  type="number"
-                  min={1}
-                  max={30}
-                  value={gCount}
-                  onChange={(e) =>
-                    setGCount(Number(e.target.value) || 10)
-                  }
-                  disabled={generating}
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 mt-6">
-              <button
-                className={`${btnBase} ${btnGreen}`}
-                onClick={generateQuiz}
-                disabled={generating}
-              >
-                {generating ? "Generating…" : "Generate"}
-              </button>
             </div>
           </section>
+          <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3 max-w-3xl mx-auto px-5 sm:px-0">
+            <p className="text-white/70 text-sm">
+              Want to create a quiz from scratch without AI?
+            </p>
+            <button
+              className={`${btnBase} ${btnGray} w-full sm:w-auto`}
+              onClick={createQuiz}
+              disabled={creating}
+            >
+              {creating ? "Creating…" : "New Blank Quiz"}
+            </button>
+          </div>
+          </>
         ) : (
           <>
             {/* --- MOBILE vertical list --- */}
@@ -1653,7 +1684,7 @@ useEffect(() => {
                       return (
                         <li
                           key={q.id}
-                          className="w-full max-w-[580px] bg-gray-800 rounded-2xl p-4 shadow-sm border border-gray-800 flex flex-col overflow-hidden h-[360px]"
+                          className="w-full max-w-[580px] surface-panel p-4 flex flex-col overflow-hidden h-[360px]"
                         >
                           {/* Top: meta + preview */}
                           <div className="flex-1 grid grid-cols-1 gap-3 min-h-0 overflow-hidden">
@@ -1675,7 +1706,7 @@ useEffect(() => {
                                     {q.title || "Untitled Quiz"}
                                   </div>
 
-                                  <div className="mt-2 text-xs text-gray-300 space-y-0.5">
+                                  <div className="mt-2 text-xs text-white/70 space-y-0.5">
                                     <div>{q.questions?.length ?? 0} questions</div>
                                     <div>
                                       Last score:{" "}
@@ -1715,7 +1746,7 @@ useEffect(() => {
                             </div>
 
                             {/* RIGHT: Questions preview */}
-                            <div className="relative bg-gray-900/30 border border-gray-700 rounded-xl p-3 overflow-hidden">
+                            <div className="relative bg-white/5 border border-white/5 rounded-2xl p-3 overflow-hidden">
                               <ol className="text-[13px] leading-5 list-decimal pl-5 pr-3 pb-7 space-y-1.5 max-h-[160px] overflow-hidden">
                                 {(Array.isArray(q.questions) ? q.questions : []).map(
                                   (it, idx) => {
@@ -1729,7 +1760,7 @@ useEffect(() => {
                                   }
                                 )}
                               </ol>
-                              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-gray-900/95 to-transparent" />
+                              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-slate-950/70 via-slate-950/25 to-transparent" />
                               <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end pr-3 pb-1.5 select-none">
                                 <span>…</span>
                               </div>
@@ -1807,12 +1838,12 @@ useEffect(() => {
             </div>
 
             {/* --- DESKTOP/TABLET horizontal carousel --- */}
-            <div className="relative hidden sm:block overflow-x-clip">
+            <div className="relative hidden sm:block overflow-visible">
               {canLeft && (
                 <button
                   type="button"
                   onClick={scrollLeft}
-                  className="absolute -left-4 top-1/2 -translate-y-1/2 z-10 bg-gray-800 hover:bg-gray-700 rounded-full p-3 shadow"
+                  className="absolute -left-4 top-1/2 -translate-y-1/2 z-10 bg-white/10 hover:bg-white/20 rounded-full p-3 shadow-lg shadow-black/40"
                   aria-label="Scroll left"
                   title="Scroll left"
                 >
@@ -1823,7 +1854,7 @@ useEffect(() => {
                 <button
                   type="button"
                   onClick={scrollRight}
-                  className="absolute -right-4 top-1/2 -translate-y-1/2 z-10 bg-gray-800 hover:bg-gray-700 rounded-full p-3 shadow"
+                  className="absolute -right-4 top-1/2 -translate-y-1/2 z-10 bg-white/10 hover:bg-white/20 rounded-full p-3 shadow-lg shadow-black/40"
                   aria-label="Scroll right"
                   title="Scroll right"
                 >
@@ -1846,7 +1877,7 @@ useEffect(() => {
                       <li
                         key={q.id}
                         className="sm:snap-start shrink-0 w-[540px] max-w-[580px]
-                                   bg-gray-800 rounded-3xl p-5 shadow-sm border border-gray-800
+                                   surface-card p-5
                                    h-[460px] flex flex-col overflow-hidden"
                       >
                         {/* Top content */}
@@ -1869,7 +1900,7 @@ useEffect(() => {
                                   {q.title || "Untitled Quiz"}
                                 </div>
 
-                                <div className="mt-3 text-sm text-gray-300 space-y-1">
+                                <div className="mt-3 text-sm text-white/70 space-y-1">
                                   <div>{q.questions?.length ?? 0} questions</div>
                                   <div>
                                     Last score:{" "}
@@ -1909,7 +1940,7 @@ useEffect(() => {
                           </div>
 
                           {/* RIGHT: Questions preview */}
-                          <div className="relative bg-gray-900/30 border border-gray-700 rounded-2xl p-3 overflow-hidden">
+                          <div className="relative bg-white/5 border border-white/5 rounded-2xl p-3 overflow-hidden">
                             <ol className="text-sm leading-6 list-decimal pl-5 pr-3 pb-8 space-y-2 max-h-[320px] overflow-hidden">
                               {(Array.isArray(q.questions) ? q.questions : []).map(
                                 (it, idx) => {
@@ -1925,7 +1956,7 @@ useEffect(() => {
                                 }
                               )}
                             </ol>
-                            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-gray-900/95 to-transparent" />
+                            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-slate-950/70 via-slate-950/25 to-transparent" />
                             <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end pr-3 pb-2 select-none">
                               <span>…</span>
                             </div>
@@ -2018,12 +2049,11 @@ useEffect(() => {
 
   return (isAll || isNoGroup || isConcreteGroup) ? (
     <div className="mt-8 flex justify-center">
-      {/* Mobile: full width; ≥sm: shrink to content */}
       <div className="w-full sm:w-auto">
-        <div className="w-full sm:w-auto bg-gray-800/60 border border-gray-700 rounded-2xl p-5 sm:p-6 shadow-sm">
+        <div className="w-full sm:w-auto surface-card p-5 sm:p-6">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between md:flex-nowrap gap-4">
             {/* LEFT: context + last scores */}
-            <div className="text-base text-gray-300 space-y-2">
+            <div className="text-base text-white/70 space-y-2">
               <div>
                 <span className="font-semibold text-white text-xl sm:text-2xl tracking-tight">
                   {isConcreteGroup
@@ -2036,7 +2066,7 @@ useEffect(() => {
 
               {/* Revisit last score */}
               <div className="text-sm sm:text-base">
-                <span className="text-gray-400">Revisit last score:</span>{" "}
+                <span className="text-white/60">Revisit last score:</span>{" "}
                 {isAll ? (
                   typeof allRevisitScore === "number" ? (
                     <span className={allRevisitScore >= 90 ? "text-green-400 font-semibold" : "text-white"}>
@@ -2060,7 +2090,7 @@ useEffect(() => {
 
               {/* All-Questions last score */}
               <div className="text-sm sm:text-base">
-                <span className="text-gray-400">All-questions last score:</span>{" "}
+                <span className="text-white/60">All-questions last score:</span>{" "}
                 {isAll ? (
                   typeof allAllScore === "number" ? (
                     <span className={allAllScore >= 90 ? "text-green-400 font-semibold" : "text-white"}>
@@ -2283,11 +2313,11 @@ useEffect(() => {
           onClick={() => !deleting && setConfirmOpen(false)}
         >
           <div
-            className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
+            className="w-full max-w-md surface-card p-6 max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-xl font-bold mb-2">Delete quiz?</h2>
-            <p className="text-gray-300 mb-6">
+            <p className="text-white/70 mb-6">
               Are you sure you want to delete{" "}
               <span className="font-semibold">{target?.title}</span>?
             </p>
@@ -2324,7 +2354,7 @@ useEffect(() => {
           }}
         >
           <div
-            className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
+            className="w-full max-w-md surface-card p-6 max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-xl font-bold mb-4">Account</h2>
@@ -2340,9 +2370,9 @@ useEffect(() => {
 >
   Delete Account
 </button>
-            <p className="text-gray-300 text-sm">
+            <p className="text-white/70 text-sm">
               Feedback? -{" "}
-              <span className="text-gray-300 text-sm">support@smart-quiz.app</span>
+              <span className="text-white/70 text-sm">support@smart-quiz.app</span>
             </p>
 
             {accountError && (
@@ -2380,11 +2410,11 @@ useEffect(() => {
           }}
         >
           <div
-            className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl"
+            className="w-full max-w-md surface-card p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-xl font-bold mb-3">Delete account?</h2>
-            <p className="text-gray-300 mb-6 text-sm">
+            <p className="text-white/70 mb-6 text-sm">
               Are you sure you want to delete your account? This action will
               delete all your quizzes.
             </p>
@@ -2420,7 +2450,7 @@ useEffect(() => {
           role="dialog"
         >
           <div
-            className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
+            className="w-full max-w-md surface-card p-6 max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-xl font-bold mb-2">
@@ -2433,20 +2463,20 @@ useEffect(() => {
               </div>
             )}
 
-            <p className="text-gray-300 mb-4 text-sm">
+            <p className="text-white/70 mb-4 text-sm">
               Creating an account upgrades your current guest session so your
               quizzes stay with you.
             </p>
 
             <label
-              className="block text-sm text-gray-300 mb-1"
+              className="block text-sm text-white/70 mb-1"
               htmlFor="auth-email"
             >
               Email
             </label>
             <input
               id="auth-email"
-              className="w-full p-3 rounded bg-gray-900 text-white border border-gray-700 mb-3"
+              className="field w-full mb-3"
               type="email"
               placeholder="you@example.com"
               value={authEmail}
@@ -2455,14 +2485,14 @@ useEffect(() => {
             />
 
             <label
-              className="block text-sm text-gray-300 mb-1"
+              className="block text-sm text-white/70 mb-1"
               htmlFor="auth-pass"
             >
               Password
             </label>
             <input
               id="auth-pass"
-              className="w-full p-3 rounded bg-gray-900 text-white border border-gray-700 mb-4"
+              className="field w-full mb-4"
               type="password"
               placeholder="••••••••"
               value={authPass}
@@ -2548,19 +2578,19 @@ useEffect(() => {
           onClick={() => !generating && setGenOpen(false)}
         >
           <div
-            className="w-full max-w-xl bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
+            className="w-full max-w-xl surface-card p-6 max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-xl font-bold mb-4">Generate a quiz</h2>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
-                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-title">
+                <label className="block text-sm text-white/70 mb-1" htmlFor="gen-title">
                   Name
                 </label>
                 <input
                   id="gen-title"
-                  className="field w-full placeholder:text-gray-400"
+                  className="field w-full placeholder:text-white/60"
                   placeholder="Bash Top 10"
                   value={gTitle}
                   onChange={(e) => setGTitle(e.target.value)}
@@ -2568,12 +2598,12 @@ useEffect(() => {
               </div>
 
               <div className="sm:col-span-2">
-                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-topic">
+                <label className="block text-sm text-white/70 mb-1" htmlFor="gen-topic">
                   Prompt
                 </label>
                 <textarea
                   id="gen-topic"
-                  className="field-textarea w-full min-h-[8rem] resize-y placeholder:text-gray-400"
+                  className="field-textarea w-full min-h-[8rem] resize-y placeholder:text-white/60"
                   placeholder="Create 10 questions that test the 10 most-used Bash commands."
                   value={gTopic}
                   onChange={(e) => setGTopic(e.target.value)}
@@ -2581,7 +2611,7 @@ useEffect(() => {
               </div>
 
               <div className="sm:col-span-2">
-                <label className="inline-flex items-center gap-2 text-sm text-gray-200">
+                <label className="inline-flex items-center gap-2 text-sm text-white/80">
                   <input
                     type="checkbox"
                     className="h-4 w-4"
@@ -2593,18 +2623,18 @@ useEffect(() => {
               </div>
 
               <div className="sm:col-span-2">
-                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-file">
+                <label className="block text-sm text-white/70 mb-1" htmlFor="gen-file">
                   Optional document to use as source (PDF / TXT / MD)
                 </label>
                 <input
                   id="gen-file"
                   type="file"
                   accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
-                  className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700"
+                  className="w-full"
                   onChange={(e) => setGFile(e.target.files?.[0] ?? null)}
                 />
                 {gFile && (
-                  <div className="mt-1 text-xs text-gray-300">
+                  <div className="mt-1 text-xs text-white/70">
                     Selected: {gFile.name}{" "}
                     <button
                       type="button"
@@ -2618,13 +2648,13 @@ useEffect(() => {
               </div>
 
               <div className="sm:col-span-1">
-                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-group">
+                <label className="block text-sm text-white/70 mb-1" htmlFor="gen-group">
                   Add to Group
                 </label>
                 <div className="flex flex-col sm:flex-row gap-2">
                   <select
                     id="gen-group"
-                    className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700"
+                    className="w-full"
                     value={gGroupId}
                     onChange={(e) => setGGroupId(e.target.value)}
                   >
@@ -2649,7 +2679,7 @@ useEffect(() => {
               </div>
 
               <div className="sm:col-span-1">
-                <label className="block text-sm text-gray-300 mb-1" htmlFor="gen-count">
+                <label className="block text-sm text-white/70 mb-1" htmlFor="gen-count">
                   # of questions
                 </label>
                 <input
@@ -2692,12 +2722,12 @@ useEffect(() => {
           onClick={() => !gCreatingGroup && setGNewOpen(false)}
         >
           <div
-            className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl"
+            className="w-full max-w-md surface-card p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-xl font-bold mb-4">Create new group</h2>
             <input
-              className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700"
+              className="w-full"
               placeholder="Group name"
               value={gNewName}
               onChange={(e) => setGNewName(e.target.value)}
@@ -2730,13 +2760,13 @@ useEffect(() => {
           onClick={() => !bulkDeleting && setBulkConfirmOpen(false)}
         >
           <div
-            className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
+            className="w-full max-w-md surface-card p-6 max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-xl font-bold mb-2">
               Delete selected quizzes?
             </h2>
-            <p className="text-gray-300 mb-4">
+            <p className="text-white/70 mb-4">
               You have selected:
               <span className="block mt-1 font-semibold break-words">
                 {Array.from(selectedIds).length
@@ -2772,22 +2802,22 @@ useEffect(() => {
           onClick={() => !moving && setMoveOpen(false)}
         >
           <div
-            className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
+            className="w-full max-w-md surface-card p-6 max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-xl font-bold mb-4">Move selected to group</h2>
-            <p className="text-gray-300 mb-4">
+            <p className="text-white/70 mb-4">
               Selected: <span className="font-semibold">{selectedIds.size}</span>{" "}
               {selectedIds.size === 1 ? "quiz" : "quizzes"}
             </p>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm text-gray-300 mb-1">
+                <label className="block text-sm text-white/70 mb-1">
                   Choose existing group (or leave blank for “No group”)
                 </label>
                 <select
-                  className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700"
+                  className="w-full"
                   value={moveGroupId}
                   onChange={(e) => setMoveGroupId(e.target.value)}
                 >
@@ -2801,16 +2831,16 @@ useEffect(() => {
               </div>
 
               <div>
-                <label className="block text-sm text-gray-300 mb-1">
+                <label className="block text-sm text-white/70 mb-1">
                   Or create a new group
                 </label>
                 <input
-                  className="w-full p-3 bg-white rounded bg-gray-800 text-white border border-gray-700"
+                  className="w-full"
                   placeholder="New group name (optional)"
                   value={moveNewName}
                   onChange={(e) => setMoveNewName(e.target.value)}
                 />
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-xs text-white/60 mt-1">
                   If you enter a name here, a new group will be created and
                   used.
                 </p>
@@ -2846,11 +2876,11 @@ useEffect(() => {
           onClick={() => !deletingGroup && setDeleteGroupOpen(false)}
         >
           <div
-            className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
+            className="w-full max-w-md surface-card p-6 max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-xl font-bold mb-2">Delete group?</h2>
-            <p className="text-gray-300 mb-6">
+            <p className="text-white/70 mb-6">
               This deletes the group{" "}
               <span className="font-semibold">{currentGroup.name}</span> and all
               quizzes inside it.
@@ -2883,12 +2913,12 @@ useEffect(() => {
           onClick={() => !savingGroupName && setEditGroupOpen(false)}
         >
           <div
-            className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
+            className="w-full max-w-md surface-card p-6 max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-xl font-bold mb-4">Rename group</h2>
             <input
-              className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700"
+              className="w-full"
               value={editGroupName}
               onChange={(e) => setEditGroupName(e.target.value)}
               placeholder="Group name"
@@ -2921,11 +2951,11 @@ useEffect(() => {
           onClick={() => !cleaning && setCleanupOpen(false)}
         >
           <div
-            className="w-full max-w-md bg-gray-800 text-white rounded-2xl p-6 shadow-xl max-h-[85vh] overflow-y-auto"
+            className="w-full max-w-md surface-card p-6 max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-xl font-bold mb-2">Delete empty group?</h2>
-            <p className="text-gray-300 mb-6">
+            <p className="text-white/70 mb-6">
               The group{" "}
               <span className="font-semibold">{cleanupGroup.name}</span> is now
               empty. Would you like to delete it?
