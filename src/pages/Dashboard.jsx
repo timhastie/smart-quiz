@@ -93,7 +93,7 @@ GlobalWorkerOptions.workerSrc = workerSrc;
 /* ========================================================================== */
 export default function Dashboard() {
   const nav = useNavigate();
-  const { user, ready, signout, signupOrLink, signin, oauthOrLink } = useAuth();
+  const { user, ready, signout, signupOrLink, signin } = useAuth();
 
 const [allRevisitScore, setAllRevisitScore] = useState(null);
 const [groupRevisitScores, setGroupRevisitScores] = useState(new Map());
@@ -243,7 +243,11 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
 
   async function continueWithGoogle() {
     try {
-      await oauthOrLink("google");
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: window.location.origin },
+      });
+      if (error) alert(error.message);
     } catch (e) {
       console.error(e);
       alert("Google sign-in failed. Please try again.");
