@@ -4,7 +4,7 @@ import { supabase } from "../lib/supabase";
 
 export default function AuthCallback() {
   const nav = useNavigate();
-  const [msg, setMsg] = useState("Completing sign-in…");
+  const [msg, setMsg] = useState("Finishing sign-in...");
   const ranRef = useRef(false);
 
   useEffect(() => {
@@ -15,94 +15,74 @@ export default function AuthCallback() {
       try {
         const url = new URL(window.location.href);
         const params = url.searchParams;
-        const hash = window.location.hash || "";
-        const hashParams = new URLSearchParams(
-          hash.startsWith("#") ? hash.slice(1) : hash
+        const hash = new URLSearchParams(
+          (window.location.hash || "").replace(/^#/, "")
         );
 
         console.log("[AuthCallback] URL params:", Object.fromEntries(params.entries()));
-        console.log("[AuthCallback] Hash params:", Object.fromEntries(hashParams.entries()));
+        console.log("[AuthCallback] Hash params:", Object.fromEntries(hash.entries()));
 
-        const error = params.get("error") || hashParams.get("error");
-        const errorDesc =
-          params.get("error_description") || hashParams.get("error_description");
+        const error = params.get("error");
+        const errorDesc = params.get("error_description");
 
         if (error) {
           const diagnostic = `Auth error: ${error}${
             errorDesc ? ` — ${errorDesc}` : ""
           }`;
-          console.error("[AuthCallback]", diagnostic);
+          console.error("[AuthCallback] Supabase error:", {
+            error,
+            errorDesc,
+            fullUrl: url.toString(),
+          });
           setMsg(diagnostic);
+          alert(diagnostic);
           return;
         }
 
         const code = params.get("code");
 
         if (code) {
-          // ---------- PKCE FLOW ----------
-          setMsg("Finishing sign-in…");
-          console.log("[AuthCallback] Exchanging PKCE code for session…");
+          console.log(
+            "[AuthCallback] Exchanging PKCE code for session...",
+            code
+          );
 
           const { data, error: exchErr } =
             await supabase.auth.exchangeCodeForSession(code);
 
           if (exchErr) {
-            console.error("[AuthCallback] exchangeCodeForSession error:", exchErr);
-            setMsg(
-              exchErr.message || "Could not finish sign-in. Please try again."
+            console.error(
+              "[AuthCallback] exchangeCodeForSession error:",
+              exchErr
             );
+            setMsg(exchErr.message || "Could not finish sign-in.");
+            alert(exchErr.message || "Could not finish sign-in.");
             return;
           }
 
           console.log(
-            "[AuthCallback] PKCE exchange succeeded for user:",
+            "[AuthCallback] exchangeCodeForSession succeeded",
             data?.session?.user?.id
           );
         } else {
-          // ---------- FALLBACK: IMPLICIT TOKENS (if any) ----------
-          const access_token = hashParams.get("access_token");
-          const refresh_token = hashParams.get("refresh_token");
-
-          if (access_token && refresh_token) {
-            setMsg("Finishing sign-in…");
-            console.log(
-              "[AuthCallback] Using implicit tokens from hash to set session"
-            );
-
-            const { data, error: setErr } = await supabase.auth.setSession({
-              access_token,
-              refresh_token,
-            });
-
-            if (setErr) {
-              console.error("[AuthCallback] setSession error:", setErr);
-              setMsg(
-                setErr.message ||
-                  "Could not finish sign-in. Please try again."
-              );
-              return;
-            }
-
-            console.log(
-              "[AuthCallback] Implicit session stored for user:",
-              data?.session?.user?.id
-            );
-          } else {
-            console.error(
-              "[AuthCallback] Missing auth code and no usable tokens in hash"
-            );
-            setMsg("Missing auth code in callback. Please try again.");
-            return;
-          }
+          // No ?code – nothing we can do here with PKCE config
+          console.error(
+            "[AuthCallback] No auth code found in callback URL"
+          );
+          setMsg("Missing auth code in callback. Please try again.");
+          alert("Missing auth code in callback. Please try again.");
+          return;
         }
 
-        // ---------- SUCCESS: clean URL + go home ----------
+        // Clean URL so refresh doesn't repeat callback
         window.history.replaceState({}, document.title, "/");
+
         setMsg("Signed in. Redirecting…");
         nav("/", { replace: true });
       } catch (e) {
         console.error("[AuthCallback] Unexpected error:", e);
-        setMsg("Unexpected error finishing sign-in. Please try again.");
+        setMsg("Unexpected error finishing sign-in.");
+        alert(e?.message || "Unexpected error finishing sign-in.");
       }
     })();
   }, [nav]);

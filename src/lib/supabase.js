@@ -8,8 +8,8 @@ export const supabase = createClient(url, key, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: false, // we handle it manually
-    flowType: "pkce",          // 🔴 add this line
+    detectSessionInUrl: false, // we're handling the callback manually
+    flowType: "pkce",          // <- IMPORTANT for the ?code=... flow
   },
 });
 
