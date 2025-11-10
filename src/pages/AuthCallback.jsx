@@ -1,6 +1,10 @@
+// src/pages/AuthCallback.jsx
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
+
+// DEBUG: expose client for console tests
+if (typeof window !== "undefined") window.__sb = supabase;
 
 export default function AuthCallback() {
   const nav = useNavigate();
@@ -14,141 +18,107 @@ export default function AuthCallback() {
     (async () => {
       try {
         const url = new URL(window.location.href);
-        const params = url.searchParams;
-        const hashParams = new URLSearchParams(
-          (window.location.hash || "").replace(/^#/, "")
-        );
+        const searchParams = Object.fromEntries(url.searchParams.entries());
+        const hashParams = new URLSearchParams((window.location.hash || "").replace(/^#/, ""));
+        const hashObj = Object.fromEntries(hashParams.entries());
 
-        const code = params.get("code");
-        const error =
-          params.get("error") || hashParams.get("error") || null;
-        const errorDesc =
-          params.get("error_description") ||
+        console.log("[AuthCallback] URL params:", searchParams);
+        console.log("[AuthCallback] Hash params:", hashObj);
+
+        const err =
+          searchParams.error || hashParams.get("error") || null;
+        const errDesc =
+          searchParams.error_description ||
           hashParams.get("error_description") ||
           null;
 
-        const hashSnapshot = Object.fromEntries(hashParams.entries());
-
-        console.log("[AuthCallback] URL params:", Object.fromEntries(params.entries()));
-        console.log("[AuthCallback] Hash params:", hashSnapshot);
-
-        // Persist last callback for debugging
-        try {
-          localStorage.setItem(
-            "last_auth_callback",
-            JSON.stringify({
-              ts: Date.now(),
-              search: Object.fromEntries(params.entries()),
-              hash: hashSnapshot,
-            })
-          );
-        } catch {}
-
-        // 1) Provider returned an error
-        if (error) {
-          const diagnostic = `Auth error: ${error}${
-            errorDesc ? ` — ${errorDesc}` : ""
-          }`;
+        if (err) {
+          const diagnostic = `Auth error: ${err}${errDesc ? ` — ${errDesc}` : ""}`;
           console.error("[AuthCallback]", diagnostic);
           setMsg(diagnostic);
+          alert(diagnostic);
           return;
         }
 
-        // 2) PKCE code path (recommended / what we're using)
+        const code = searchParams.code;
+        const hasImplicitTokens =
+          hashParams.get("access_token") || hashParams.get("refresh_token");
+
         if (code) {
-          console.log("[AuthCallback] Exchanging PKCE code for session...");
+          // ---- PKCE / code flow ----
+          console.log("[AuthCallback] Exchanging PKCE code for session...", code);
+
           const { data, error: exchErr } =
             await supabase.auth.exchangeCodeForSession(code);
 
+          console.log("[AuthCallback] PKCE exchange result:", { data, exchErr });
+
           if (exchErr) {
-            console.error(
-              "[AuthCallback] exchangeCodeForSession error:",
-              exchErr
-            );
-            setMsg(
-              exchErr.message ||
-                "Could not finish sign-in (code exchange failed)."
-            );
+            console.error("[AuthCallback] PKCE exchange error:", exchErr);
+            setMsg(exchErr.message || "Could not finish sign-in.");
+            alert(exchErr.message || "Could not finish sign-in.");
             return;
           }
-
-          console.log(
-            "[AuthCallback] exchangeCodeForSession success for user:",
-            data?.session?.user?.id
-          );
-        }
-        // 3) Legacy implicit fallback (just in case some flow still uses it)
-        else if (hashParams.get("access_token")) {
+        } else if (hasImplicitTokens) {
+          // ---- Fallback: implicit (hash tokens) ----
           console.log("[AuthCallback] Using implicit tokens from hash to set session…");
 
-          const internalGet =
-            typeof supabase.auth._getSessionFromURL === "function"
-              ? supabase.auth._getSessionFromURL.bind(supabase.auth)
-              : null;
-          const internalSave =
-            typeof supabase.auth._saveSession === "function"
-              ? supabase.auth._saveSession.bind(supabase.auth)
-              : null;
-          const internalNotify =
-            typeof supabase.auth._notifyAllSubscribers === "function"
-              ? supabase.auth._notifyAllSubscribers.bind(supabase.auth)
-              : null;
+          const authAny = supabase.auth;
+          const get =
+            authAny._getSessionFromURL?.bind(authAny) || null;
+          const save =
+            authAny._saveSession?.bind(authAny) || null;
+          const notify =
+            authAny._notifyAllSubscribers?.bind(authAny) || null;
 
-          if (!internalGet || !internalSave || !internalNotify) {
-            console.error(
-              "[AuthCallback] Missing Supabase internal helpers for implicit flow"
-            );
-            setMsg(
-              "Could not finish sign-in (client version mismatch for implicit flow)."
-            );
+          if (!get || !save || !notify) {
+            const m = "Supabase client missing helpers for implicit flow.";
+            console.error("[AuthCallback]", m);
+            setMsg(m);
+            alert(m);
             return;
           }
 
-          const implicitParams = Object.fromEntries(hashParams.entries());
-          const { data, error: impErr } = await internalGet(
-            implicitParams,
-            "implicit"
-          );
+          const { data, error: implicitErr } = await get(hashObj, "implicit");
+          console.log("[AuthCallback] implicit result:", { data, implicitErr });
 
-          if (impErr) {
-            console.error("[AuthCallback] implicit flow error:", impErr);
-            setMsg(
-              impErr.message || "Could not finish sign-in (implicit flow)."
-            );
+          if (implicitErr) {
+            console.error("[AuthCallback] implicit error:", implicitErr);
+            setMsg(implicitErr.message || "Could not finish sign-in.");
+            alert(implicitErr.message || "Could not finish sign-in.");
             return;
           }
 
           const session = data?.session;
           if (!session?.user) {
-            console.error(
-              "[AuthCallback] implicit flow returned no user",
-              data
-            );
-            setMsg("No session returned from sign-in.");
+            const m = "No session returned from implicit flow.";
+            console.error("[AuthCallback]", m, data);
+            setMsg(m);
+            alert(m);
             return;
           }
 
-          await internalSave(session);
-          await internalNotify("SIGNED_IN", session);
-          console.log(
-            "[AuthCallback] implicit flow stored session for:",
-            session.user.id
-          );
-        }
-        // 4) Nothing useful in the URL
-        else {
-          console.error("[AuthCallback] No code or tokens in callback URL");
-          setMsg("Missing auth code in callback.");
+          await save(session);
+          await notify("SIGNED_IN", session);
+          console.log("[AuthCallback] implicit flow stored session for user:", session.user.id);
+        } else {
+          // ---- Nothing to work with ----
+          const m = "Missing auth code in callback URL.";
+          console.error("[AuthCallback]", m, { fullUrl: url.toString() });
+          setMsg("Missing auth code in callback. Please try again.");
+          alert("Missing auth code in callback. See console for details.");
           return;
         }
 
-        // ---- Success: clean URL + go home ----
+        // Success: clean URL and go home
         window.history.replaceState({}, document.title, "/");
         setMsg("Signed in. Redirecting…");
+        console.log("[AuthCallback] Success → navigating to /");
         nav("/", { replace: true });
       } catch (e) {
         console.error("[AuthCallback] Unexpected error:", e);
-        setMsg(e?.message || "Unexpected error while finishing sign-in.");
+        setMsg(e?.message || "Unexpected error finishing sign-in.");
+        alert(e?.message || "Unexpected error finishing sign-in.");
       }
     })();
   }, [nav]);
