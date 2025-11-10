@@ -27,9 +27,11 @@ export function AuthProvider({ children }) {
     let mounted = true;
 
     async function ensureSession() {
+      console.log("[AuthProvider] ensureSession start");
       try {
         const { data: sess } = await supabase.auth.getSession();
         if (mounted && sess?.session?.user) {
+          console.log("[AuthProvider] existing session user:", sess.session.user.id);
           setUser(sess.session.user);
           return;
         }
@@ -41,9 +43,11 @@ export function AuthProvider({ children }) {
             if (mounted) setUser(null);
             return;
           }
+          console.log("[AuthProvider] started anonymous session:", anonRes?.user?.id);
           if (mounted) setUser(anonRes?.user ?? null);
         }
       } finally {
+        console.log("[AuthProvider] ensureSession complete");
         if (mounted) setReady(true);
       }
     }
@@ -51,6 +55,7 @@ export function AuthProvider({ children }) {
     ensureSession();
 
     const { data: listener } = supabase.auth.onAuthStateChange((_evt, session) => {
+      console.log("[AuthProvider] auth state change:", _evt, session?.user?.id || null);
       if (mounted) setUser(session?.user ?? null);
     });
 
@@ -81,6 +86,7 @@ export function AuthProvider({ children }) {
   // This covers cases where the callback didn’t include ?guest=...
   useEffect(() => {
     if (!ready || !user) return;
+    console.log("[AuthProvider] ready+user effect", { ready, userId: user.id });
     const oldId = localStorage.getItem("guest_to_adopt");
     if (!oldId) return;
     if (isAnonymous(user)) return; // only adopt after we are a non-anon user
