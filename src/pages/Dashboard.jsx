@@ -243,6 +243,7 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
 
   async function continueWithGoogle() {
     try {
+      console.log("[Dashboard] continueWithGoogle pressed");
       await oauthSignIn("google");
     } catch (e) {
       console.error(e);

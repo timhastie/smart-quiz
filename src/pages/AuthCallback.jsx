@@ -42,7 +42,11 @@ export default function AuthCallback() {
         }
         if (!code) {
           if (hashAccessToken && hashRefreshToken) {
-            console.log("[AuthCallback] Using implicit tokens from hash.");
+            console.log("[AuthCallback] Using implicit tokens from hash.", {
+              hashAccessToken: hashAccessToken.slice(0, 8) + "...",
+              hasRefresh: !!hashRefreshToken,
+            });
+            console.log("[AuthCallback] Calling supabase.auth.setSession...");
             const { data: setData, error: setErr } = await supabase.auth.setSession({
               access_token: hashAccessToken,
               refresh_token: hashRefreshToken,
@@ -56,6 +60,8 @@ export default function AuthCallback() {
               return;
             }
             console.log("[AuthCallback] setSession succeeded:", setData);
+            const { data: sessionCheck } = await supabase.auth.getSession();
+            console.log("[AuthCallback] getSession after setSession:", sessionCheck);
             // clean hash from URL
             window.history.replaceState({}, document.title, window.location.pathname);
           } else {

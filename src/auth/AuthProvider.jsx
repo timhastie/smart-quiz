@@ -30,6 +30,7 @@ export function AuthProvider({ children }) {
       console.log("[AuthProvider] ensureSession start");
       try {
         const { data: sess } = await supabase.auth.getSession();
+        console.log("[AuthProvider] getSession result:", sess);
         if (mounted && sess?.session?.user) {
           console.log("[AuthProvider] existing session user:", sess.session.user.id);
           setUser(sess.session.user);
@@ -92,8 +93,10 @@ export function AuthProvider({ children }) {
     if (isAnonymous(user)) return; // only adopt after we are a non-anon user
 
     (async () => {
+      console.log("[AuthProvider] adopting guest", oldId);
       const { error } = await supabase.rpc("adopt_guest", { p_old_user: oldId });
       if (!error) {
+        console.log("[AuthProvider] adopt_guest success, clearing marker");
         localStorage.removeItem("guest_to_adopt");
       } else {
         console.warn("adopt_guest (post-login) failed:", error);
