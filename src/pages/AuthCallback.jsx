@@ -43,7 +43,7 @@ export default function AuthCallback() {
         if (!code) {
           if (hashAccessToken && hashRefreshToken) {
             console.log("[AuthCallback] Using implicit tokens from hash.");
-            const { error: setErr } = await supabase.auth.setSession({
+            const { data: setData, error: setErr } = await supabase.auth.setSession({
               access_token: hashAccessToken,
               refresh_token: hashRefreshToken,
             });
@@ -55,6 +55,7 @@ export default function AuthCallback() {
               setMsg(setErr.message || "Could not finish sign-in.");
               return;
             }
+            console.log("[AuthCallback] setSession succeeded:", setData);
             // clean hash from URL
             window.history.replaceState({}, document.title, window.location.pathname);
           } else {
@@ -78,7 +79,7 @@ export default function AuthCallback() {
         const guestFromUrl = url.searchParams.get("guest");
         const guestFromLS = localStorage.getItem("guest_to_adopt");
         const oldId = guestFromUrl || guestFromLS;
-        console.log("[callback] guestFromUrl:", guestFromUrl, "guestFromLS:", guestFromLS);
+        console.log("[AuthCallback] guestFromUrl:", guestFromUrl, "guestFromLS:", guestFromLS);
 
         // 2a) Guard: if the id is stale (no quizzes), skip adopting
         let shouldAdopt = !!oldId;
@@ -112,6 +113,7 @@ export default function AuthCallback() {
           setMsg("Signed in. Redirecting…");
         }
 
+        console.log("[AuthCallback] Redirecting home…");
         // 3) Redirect home (or change to your preferred landing page)
         nav("/", { replace: true });
       } catch (e) {
