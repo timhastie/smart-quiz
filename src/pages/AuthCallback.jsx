@@ -22,9 +22,14 @@ export default function AuthCallback() {
           url.searchParams.get("auth_code");
 
         if (error) {
-          setMsg(
-            `Auth error: ${error}${errorDesc ? ` — ${errorDesc}` : ""}`
-          );
+          const diagnostic = `Auth error: ${error}${errorDesc ? ` — ${errorDesc}` : ""}`;
+          setMsg(diagnostic);
+          console.error("[AuthCallback] Supabase error:", {
+            error,
+            errorDesc,
+            fullUrl: url.toString(),
+          });
+          alert(diagnostic);
           return;
         }
         if (!code) {
@@ -35,6 +40,7 @@ export default function AuthCallback() {
         // 1) Finish the Supabase auth exchange (PKCE)
         const { error: exchErr } = await supabase.auth.exchangeCodeForSession(code);
         if (exchErr) {
+          console.error("[AuthCallback] exchangeCodeForSession error:", exchErr);
           setMsg(exchErr.message || "Could not finish sign-in.");
           return;
         }
@@ -54,8 +60,8 @@ export default function AuthCallback() {
             .eq("user_id", oldId);
 
           if (cntErr) {
-            console.warn("Could not check old guest quizzes:", cntErr);
-          } else if ((oldQuizCount ?? 0) === 0) {
+          console.warn("Could not check old guest quizzes:", cntErr);
+        } else if ((oldQuizCount ?? 0) === 0) {
             console.log("No quizzes found for old guest id -> skipping adopt");
             shouldAdopt = false;
           }
