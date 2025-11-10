@@ -5,6 +5,8 @@ import { supabase } from "../lib/supabase";
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
 
+const GUEST_STORAGE_KEY = "guest_to_merge";
+
 // Build the callback URL; include the guest id when we have one.
 function buildRedirectURL(guestId) {
   if (typeof window === "undefined") return "/auth/callback";
@@ -104,7 +106,7 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     if (!ready || !user) return;
     if (typeof window === "undefined") return;
-    const oldId = window.localStorage.getItem("guest_to_adopt");
+    const oldId = window.localStorage.getItem(GUEST_STORAGE_KEY);
     if (!oldId) return;
     if (isAnonymous(user)) return; // only adopt once we are non-anon
 
@@ -117,7 +119,7 @@ export function AuthProvider({ children }) {
           console.warn("adopt_guest (post-login) failed:", error);
           return;
         }
-        window.localStorage.removeItem("guest_to_adopt");
+        window.localStorage.removeItem(GUEST_STORAGE_KEY);
       } catch (e) {
         console.warn("adopt_guest (post-login) threw:", e);
       }
@@ -135,7 +137,9 @@ export function AuthProvider({ children }) {
 
     if (current?.is_anonymous) {
       const oldGuestId = current.id;
-      localStorage.setItem("guest_to_adopt", oldGuestId);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(GUEST_STORAGE_KEY, oldGuestId);
+      }
       const emailRedirectTo = buildRedirectURL(oldGuestId);
 
       const { error } = await supabase.auth.signUp({
@@ -161,95 +165,39 @@ export function AuthProvider({ children }) {
   }
 
   // ---------------------------------------------------------------------------
-  // 4) OAuth: link OR sign-in with adopt fallback
-  //
-  //    - If current user is anonymous:
-  //        1) Remember guest id.
-  //        2) Try linkIdentity(provider).
-  //        3) If link succeeds -> done (guest upgraded in-place).
-  //        4) If error "Identity is already linked to another user":
-  //             fall back to signInWithOAuth, still passing guest id
-  //             so AuthCallback/adopt_guest can migrate quizzes.
-  //
-  //    - If not anonymous (or no current user):
-  //        just signInWithOAuth (standard).
+  // 4) Google sign-in (guest → real upgrade with quiz adoption)
   // ---------------------------------------------------------------------------
-  async function oauthOrLink(provider) {
-  console.log("[Auth] oauthOrLink start:", provider);
+  async function googleSignIn() {
+    const {
+      data: { user: current } = {},
+    } = await supabase.auth.getUser();
 
-  const { data: { user: current } = {}, error: getUserErr } =
-    await supabase.auth.getUser();
+    const isGuest = isAnonymous(current);
+    const guestId = isGuest ? current?.id ?? null : null;
 
-  if (getUserErr) {
-    console.error("[Auth] getUser failed before oauthOrLink:", getUserErr);
-  }
+    if (isGuest && guestId && typeof window !== "undefined") {
+      window.localStorage.setItem(GUEST_STORAGE_KEY, guestId);
+    }
 
-  // Helper: where should we send them back?
-  // If we're a guest, include our id so callback can adopt.
-  const guestId = current?.is_anonymous ? current.id : null;
-  const redirectTo = buildRedirectURL(guestId);
+    const redirectTo = buildRedirectURL(guestId);
 
-  // CASE A: current user is anonymous -> try to link
-  if (current?.is_anonymous) {
-    console.log("[Auth] Anonymous user, trying linkIdentity with redirectTo:", redirectTo);
-
-    const { error } = await supabase.auth.linkIdentity({
-      provider,
-      options: { redirectTo },
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo,
+        queryParams: {
+          prompt: "select_account",
+        },
+      },
     });
 
-    if (!error) {
-      console.log("[Auth] linkIdentity started OK (will redirect)");
-      return { mode: "link", ok: true };
+    if (error) {
+      console.error("[Auth] googleSignIn error:", error);
+      throw error;
     }
 
-    console.warn("[Auth] linkIdentity error:", error);
-
-    // If this Google account is already linked to some other user,
-    // Supabase may send identity_already_exists / identity_already_linked.
-    const msg =
-      error?.code || error?.message || error?.error_description || "";
-
-    const alreadyLinked =
-      msg.includes("identity_already_exists") ||
-      msg.includes("identity already exists") ||
-      msg.includes("identity is already linked");
-
-    if (alreadyLinked) {
-      console.log(
-        "[Auth] Identity already linked; falling back to signInWithOAuth into existing account."
-      );
-      // Important: STILL use redirectTo with our guest id so callback can adopt.
-      const { error: signErr } = await supabase.auth.signInWithOAuth({
-        provider,
-        options: { redirectTo },
-      });
-      if (signErr) {
-        console.error(
-          "[Auth] signInWithOAuth after identity_already_exists failed:",
-          signErr
-        );
-        throw signErr;
-      }
-      return { mode: "existing", ok: true };
-    }
-
-    // Some other failure
-    throw error;
+    return { started: true };
   }
-
-  // CASE B: already a real user -> normal OAuth sign-in (or re-auth)
-  console.log("[Auth] Non-anon user; starting plain signInWithOAuth");
-  const { error } = await supabase.auth.signInWithOAuth({
-    provider,
-    options: { redirectTo: buildRedirectURL(null) },
-  });
-  if (error) {
-    console.error("[Auth] signInWithOAuth error:", error);
-    throw error;
-  }
-  return { mode: "signin", ok: true };
-}
 
   // ---------------------------------------------------------------------------
   // 5) Sign out -> start fresh anonymous session again
@@ -285,7 +233,7 @@ export function AuthProvider({ children }) {
         ready,
         signupOrLink,
         signin,
-        oauthOrLink, // <-- export this (name must match what Dashboard uses)
+        googleSignIn,
         signout,
       }}
     >

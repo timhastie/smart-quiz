@@ -8,7 +8,9 @@ export const supabase = createClient(url, key, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: false, // we handle /auth/callback manually
+    detectSessionInUrl: true, // let Supabase process OAuth callbacks natively
+    multiTab: false,
+    storage: typeof window !== "undefined" ? window.localStorage : undefined,
   },
 });
 

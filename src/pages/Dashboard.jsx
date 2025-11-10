@@ -93,7 +93,7 @@ GlobalWorkerOptions.workerSrc = workerSrc;
 /* ========================================================================== */
 export default function Dashboard() {
   const nav = useNavigate();
-  const { user, ready, signout, signupOrLink, signin, oauthOrLink } = useAuth();
+  const { user, ready, signout, signupOrLink, signin, googleSignIn } = useAuth();
   
 
 const [allRevisitScore, setAllRevisitScore] = useState(null);
@@ -245,7 +245,7 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
   async function continueWithGoogle() {
   try {
     console.log("[Dashboard] continueWithGoogle pressed");
-    await oauthOrLink("google");
+    await googleSignIn();
   } catch (e) {
     console.error(e);
     alert("Google sign-in failed. Please try again.");
