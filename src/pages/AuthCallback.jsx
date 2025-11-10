@@ -1,113 +1,144 @@
+// src/pages/AuthCallback.jsx
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
+if (typeof window !== "undefined") {
+  window.__sb = supabase; // debug helper
+}
+
 export default function AuthCallback() {
-  const [msg, setMsg] = useState("Completing sign-in…");
+  const nav = useNavigate();
+  const [msg, setMsg] = useState("Finishing sign-in…");
 
   useEffect(() => {
-    let canceled = false;
+    let cancelled = false;
 
-    async function finishSignIn() {
+    (async () => {
       try {
-        if (typeof window === "undefined") return;
-
         const url = new URL(window.location.href);
-        const params = Object.fromEntries(url.searchParams.entries());
-        const hashParams = new URLSearchParams(
-          (window.location.hash || "").replace(/^#/, "")
-        );
-        const hashObj = Object.fromEntries(hashParams.entries());
+        console.log("[AuthCallback] URL params:", Object.fromEntries(url.searchParams.entries()));
 
-        console.log("[AuthCallback] URL params:", params);
-        console.log("[AuthCallback] Hash params:", hashObj);
+        const error = url.searchParams.get("error");
+        const errorDesc = url.searchParams.get("error_description");
 
-        const error =
-          params.error || hashParams.get("error") || null;
-        const errorDesc =
-          params.error_description || hashParams.get("error_description") || null;
+        // Supabase PKCE param
+        const code =
+          url.searchParams.get("code") ||
+          url.searchParams.get("token") ||
+          url.searchParams.get("auth_code");
 
         if (error) {
           const diagnostic = `Auth error: ${error}${
             errorDesc ? ` — ${errorDesc}` : ""
           }`;
           console.error("[AuthCallback]", diagnostic);
-          if (!canceled) setMsg(diagnostic);
+          if (!cancelled) setMsg(diagnostic);
           return;
         }
 
-        const code = params.code || null;
-        const accessToken = hashParams.get("access_token");
-        const refreshToken = hashParams.get("refresh_token");
-
-        if (!code && !(accessToken && refreshToken)) {
-          console.error("[AuthCallback] Missing code/tokens in callback URL.");
-          if (!canceled)
-            setMsg("Missing auth code in callback. Please try again.");
+        if (!code) {
+          console.error("[AuthCallback] Missing code in callback URL");
+          if (!cancelled) setMsg("Missing auth code in callback. Please try again.");
           return;
         }
 
-        if (code) {
-          console.log("[AuthCallback] Exchanging PKCE code for session…");
-          const timeout = setTimeout(() => {
-            if (!canceled)
-              console.warn("[AuthCallback] exchangeCodeForSession taking >8s");
-          }, 8000);
-          const { error: exchErr } = await supabase.auth.exchangeCodeForSession(
-            code
-          );
-          clearTimeout(timeout);
-          if (exchErr) {
-            console.error(
-              "[AuthCallback] exchangeCodeForSession error:",
-              exchErr
+        console.log("[AuthCallback] Exchanging PKCE code for session…");
+        const { data, error: exchErr } = await supabase.auth.exchangeCodeForSession(code);
+        if (exchErr) {
+          console.error("[AuthCallback] exchangeCodeForSession error:", exchErr);
+          if (!cancelled)
+            setMsg(exchErr.message || "Could not finish sign-in.");
+          return;
+        }
+
+        console.log("[AuthCallback] exchangeCodeForSession OK:", {
+          hasSession: !!data?.session,
+          userId: data?.session?.user?.id,
+        });
+
+        const {
+          data: { user: current },
+        } = await supabase.auth.getUser();
+
+        if (!current) {
+          console.error("[AuthCallback] No user after exchange");
+          if (!cancelled)
+            setMsg("Signed in, but no session was found. Please try again.");
+          return;
+        }
+
+        // -------- guest adoption logic --------
+        const guestFromUrl = url.searchParams.get("guest");
+        const guestFromLS = localStorage.getItem("guest_to_adopt");
+        const oldId = guestFromUrl || guestFromLS || null;
+
+        console.log("[AuthCallback] potential old guest:", {
+          guestFromUrl,
+          guestFromLS,
+          using: oldId,
+          currentUser: current.id,
+        });
+
+        if (oldId && oldId !== current.id) {
+          // Optional: only adopt if that guest actually has quizzes
+          const { count, error: cntErr } = await supabase
+            .from("quizzes")
+            .select("id", { count: "exact", head: true })
+            .eq("user_id", oldId);
+
+          if (cntErr) {
+            console.warn("[AuthCallback] could not count old quizzes:", cntErr);
+          }
+
+          if (!cntErr && (count ?? 0) > 0) {
+            console.log("[AuthCallback] adopting guest", oldId, "->", current.id);
+            const { error: adoptErr } = await supabase.rpc("adopt_guest", {
+              p_old_user: oldId,
+            });
+            if (adoptErr) {
+              console.error("[AuthCallback] adopt_guest failed:", adoptErr);
+              if (!cancelled) {
+                setMsg(
+                  "Signed in, but we couldn't automatically move your guest data. You can keep using the app."
+                );
+              }
+            } else {
+              if (!cancelled) {
+                setMsg(
+                  "Signed in! Your guest quizzes were moved to this account. Redirecting…"
+                );
+              }
+            }
+          } else {
+            console.log(
+              "[AuthCallback] no quizzes for old guest or count failed; skipping adopt."
             );
-            if (!canceled)
-              setMsg(exchErr.message || "Could not finish sign-in.");
-            return;
+            if (!cancelled) setMsg("Signed in. Redirecting…");
           }
-        } else if (accessToken && refreshToken) {
-          console.log("[AuthCallback] Using implicit tokens from URL hash");
-          const timeout = setTimeout(() => {
-            if (!canceled)
-              console.warn("[AuthCallback] setSession taking >8s (implicit)");
-          }, 8000);
-          const { error: sessionErr } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          });
-          clearTimeout(timeout);
-          if (sessionErr) {
-            console.error("[AuthCallback] setSession error:", sessionErr);
-            if (!canceled)
-              setMsg(sessionErr.message || "Could not finish sign-in.");
-            return;
-          }
+        } else {
+          // No old guest or already same id (linkIdentity case)
+          localStorage.removeItem("guest_to_adopt");
+          if (!cancelled) setMsg("Signed in. Redirecting…");
         }
 
-        const { data } = await supabase.auth.getSession();
-        console.log(
-          "[AuthCallback] Session after processing:",
-          data?.session?.user?.id || null
-        );
+        // Clean URL so refresh won't redo callback.
+        window.history.replaceState({}, document.title, "/");
 
-        if (!canceled) {
-          setMsg("Signed in. Redirecting…");
-          window.history.replaceState({}, document.title, "/");
-          window.location.replace("/");
+        if (!cancelled) {
+          nav("/", { replace: true });
         }
       } catch (e) {
         console.error("[AuthCallback] Unexpected error:", e);
-        if (!canceled)
-          setMsg(e?.message || "Unexpected error finishing sign-in.");
+        if (!cancelled)
+          setMsg("Unexpected error finishing sign-in. Please try again.");
       }
-    }
-
-    finishSignIn();
+    })();
 
     return () => {
-      canceled = true;
+      cancelled = true;
     };
-  }, []);
+  }, [nav]);
 
   return (
     <div className="min-h-screen grid place-items-center px-4 py-10 text-slate-100">
