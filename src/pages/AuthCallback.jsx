@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
-// DEBUG: expose client for console tests (safe in dev)
 if (typeof window !== "undefined") window.__sb = supabase;
 
 function buildRedirectURL(guestId) {
@@ -20,18 +19,19 @@ export default function AuthCallback() {
     (async () => {
       try {
         const url = new URL(window.location.href);
+
         const error = url.searchParams.get("error");
         const errorDesc =
           url.searchParams.get("error_description") ||
           url.searchParams.get("error_description_message") ||
           "";
+
         const rawCode =
           url.searchParams.get("code") ||
           url.searchParams.get("token") ||
           url.searchParams.get("auth_code") ||
           "";
 
-        // Prefer guest from URL, else from localStorage (used in guest→account flow)
         const guestFromUrl = url.searchParams.get("guest");
         let guestFromLS = null;
         try {
@@ -42,6 +42,8 @@ export default function AuthCallback() {
         const oldGuestId = guestFromUrl || guestFromLS || null;
 
         console.log("[AuthCallback] URL params:", {
+          search: url.search,
+          hash: url.hash,
           error,
           errorDesc,
           rawCode,
@@ -49,17 +51,9 @@ export default function AuthCallback() {
           guestFromLS,
         });
 
-        // -------------------------------------------------------------------
-        // SPECIAL CASE: "Identity is already linked to another user"
-        //
-        // This happens when:
-        // - We tried linkIdentity() for a guest, but that Google account
-        //   already belongs to another Supabase user.
-        //
-        // Fix:
-        // - Re-run OAuth as a normal sign-in so we land in the existing
-        //   account, still passing the guest id so adopt_guest can migrate.
-        // -------------------------------------------------------------------
+        /* ---------------------------------------------------------- *
+         * 1. Special-case: "Identity is already linked to another user"
+         * ---------------------------------------------------------- */
         if (
           error &&
           /identity is already linked to another user/i.test(
@@ -67,12 +61,12 @@ export default function AuthCallback() {
           )
         ) {
           console.log(
-            "[AuthCallback] Detected 'identity already linked' error."
+            "[AuthCallback] 'identity already linked' error detected."
           );
 
           if (!oldGuestId) {
             console.warn(
-              "[AuthCallback] No guest id available; cannot adopt. Showing error."
+              "[AuthCallback] No guest id available; cannot adopt."
             );
             setMsg(
               "Auth error: that Google account is already linked to another user."
@@ -80,12 +74,10 @@ export default function AuthCallback() {
             return;
           }
 
-          // Make sure the marker persists for the next callback.
+          // Persist marker for the *next* callback
           try {
             localStorage.setItem("guest_to_adopt", oldGuestId);
-          } catch {
-            // ignore
-          }
+          } catch {}
 
           setMsg(
             "That Google account is already linked. Signing you into it and moving your quizzes…"
@@ -93,8 +85,7 @@ export default function AuthCallback() {
 
           const redirectTo = buildRedirectURL(oldGuestId);
 
-          // IMPORTANT: this will redirect the browser again.
-          // We hard-code "google" because that's your only OAuth provider here.
+          // This triggers a new full OAuth sign-in to the existing account.
           const { error: retryErr } = await supabase.auth.signInWithOAuth({
             provider: "google",
             options: { redirectTo },
@@ -113,12 +104,12 @@ export default function AuthCallback() {
               "[AuthCallback] Launched second OAuth flow to existing Google user."
             );
           }
-          return; // stop; browser is navigating
+          return; // browser is navigating away
         }
 
-        // -------------------------------------------------------------------
-        // Generic error (not our special case)
-        // -------------------------------------------------------------------
+        /* ----------------------------- *
+         * 2. Any other explicit error
+         * ----------------------------- */
         if (error) {
           console.error("[AuthCallback] Auth error:", { error, errorDesc });
           setMsg(
@@ -129,47 +120,85 @@ export default function AuthCallback() {
           return;
         }
 
-        if (!rawCode) {
-          console.error("[AuthCallback] Missing auth code in callback URL.");
-          setMsg("Missing auth code.");
-          return;
+        /* ------------------------------------------------
+         * 3. Finish login: either via code OR existing
+         *    session (Safari implicit/hash flow case)
+         * ------------------------------------------------ */
+
+        let authedUser = null;
+
+        if (rawCode) {
+          console.log(
+            "[AuthCallback] Found auth code; exchanging for session…"
+          );
+          const { data: exchData, error: exchErr } =
+            await supabase.auth.exchangeCodeForSession(rawCode);
+
+          if (exchErr) {
+            console.error(
+              "[AuthCallback] exchangeCodeForSession error:",
+              exchErr
+            );
+            setMsg(
+              exchErr.message ||
+                "Could not finish sign-in. Please try again."
+            );
+            return;
+          }
+
+          authedUser = exchData?.session?.user || exchData?.user || null;
+          console.log("[AuthCallback] Session via code:", {
+            id: authedUser?.id,
+            email: authedUser?.email,
+            providers: authedUser?.app_metadata?.providers,
+          });
+        } else {
+          // No code in URL. This is where Safari / implicit flow lands.
+          console.log(
+            "[AuthCallback] No auth code in URL; checking existing session…"
+          );
+          const { data: sessData, error: sessErr } =
+            await supabase.auth.getSession();
+
+          if (sessErr) {
+            console.error(
+              "[AuthCallback] getSession error (no code path):",
+              sessErr
+            );
+          }
+
+          const sessUser = sessData?.session?.user || null;
+          if (sessUser) {
+            authedUser = sessUser;
+            console.log(
+              "[AuthCallback] Using existing session from hash/implicit:",
+              {
+                id: authedUser.id,
+                email: authedUser.email,
+                providers: authedUser?.app_metadata?.providers,
+              }
+            );
+          } else {
+            console.error(
+              "[AuthCallback] No code and no active session -> real failure."
+            );
+            setMsg("Missing auth code.");
+            return;
+          }
         }
 
-        // -------------------------------------------------------------------
-        // 1) Finish Supabase PKCE flow
-        // -------------------------------------------------------------------
-        console.log("[AuthCallback] Exchanging code for session…");
-        const { data: exchData, error: exchErr } =
-          await supabase.auth.exchangeCodeForSession(rawCode);
-
-        if (exchErr) {
-          console.error(
-            "[AuthCallback] exchangeCodeForSession error:",
-            exchErr
-          );
-          setMsg(
-            exchErr.message || "Could not finish sign-in. Please try again."
-          );
-          return;
-        }
-
-        const authedUser = exchData?.session?.user || exchData?.user || null;
-        console.log("[AuthCallback] Session established for:", {
-          id: authedUser?.id,
-          email: authedUser?.email,
-          providers: authedUser?.app_metadata?.providers,
-        });
-
-        // -------------------------------------------------------------------
-        // 2) Guest adoption: move quizzes from oldGuestId -> new user
-        // -------------------------------------------------------------------
+        /* ----------------------------------------- *
+         * 4. Guest adoption (move quizzes)
+         * ----------------------------------------- */
         if (oldGuestId && authedUser?.id && oldGuestId !== authedUser.id) {
           console.log(
-            "[AuthCallback] Considering adopt_guest for old id:",
-            oldGuestId
+            "[AuthCallback] Considering adopt_guest from",
+            oldGuestId,
+            "to",
+            authedUser.id
           );
 
-          // Optional guard: only bother if that guest actually has quizzes
+          // Optional: only run if guest actually has quizzes
           const { count: oldQuizCount, error: cntErr } = await supabase
             .from("quizzes")
             .select("id", { count: "exact", head: true })
@@ -188,12 +217,7 @@ export default function AuthCallback() {
           }
 
           if (!cntErr && (oldQuizCount ?? 0) > 0) {
-            console.log(
-              "[AuthCallback] Running adopt_guest from",
-              oldGuestId,
-              "to",
-              authedUser.id
-            );
+            console.log("[AuthCallback] Running adopt_guest…");
             const { error: adoptErr } = await supabase.rpc("adopt_guest", {
               p_old_user: oldGuestId,
             });
@@ -207,7 +231,7 @@ export default function AuthCallback() {
               );
             } else {
               console.log(
-                "[AuthCallback] adopt_guest succeeded. Cleaning local marker."
+                "[AuthCallback] adopt_guest succeeded; clearing marker."
               );
               setMsg(
                 "Account ready! Your guest quizzes were moved to this account. Redirecting…"
@@ -222,16 +246,14 @@ export default function AuthCallback() {
 
           try {
             localStorage.removeItem("guest_to_adopt");
-          } catch {
-            // ignore
-          }
+          } catch {}
         } else {
           setMsg("Signed in. Redirecting…");
         }
 
-        // -------------------------------------------------------------------
-        // 3) Go home
-        // -------------------------------------------------------------------
+        /* ----------------------------------------- *
+         * 5. Redirect home
+         * ----------------------------------------- */
         console.log("[AuthCallback] Navigation -> /");
         nav("/", { replace: true });
       } catch (e) {
