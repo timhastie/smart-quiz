@@ -1,11 +1,10 @@
 // src/auth/AuthProvider.jsx
 import { createContext, useContext, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { clearGuestId, readGuestId, storeGuestId } from "./guestStorage";
 
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
-
-const GUEST_STORAGE_KEY = "guest_to_merge";
 
 // Build the callback URL; include the guest id when we have one.
 function buildRedirectURL(guestId) {
@@ -106,7 +105,7 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     if (!ready || !user) return;
     if (typeof window === "undefined") return;
-    const oldId = window.localStorage.getItem(GUEST_STORAGE_KEY);
+    const oldId = readGuestId();
     if (!oldId) return;
     if (isAnonymous(user)) return; // only adopt once we are non-anon
 
@@ -119,7 +118,7 @@ export function AuthProvider({ children }) {
           console.warn("adopt_guest (post-login) failed:", error);
           return;
         }
-        window.localStorage.removeItem(GUEST_STORAGE_KEY);
+        clearGuestId();
       } catch (e) {
         console.warn("adopt_guest (post-login) threw:", e);
       }
@@ -137,9 +136,7 @@ export function AuthProvider({ children }) {
 
     if (current?.is_anonymous) {
       const oldGuestId = current.id;
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(GUEST_STORAGE_KEY, oldGuestId);
-      }
+      storeGuestId(oldGuestId);
       const emailRedirectTo = buildRedirectURL(oldGuestId);
 
       const { error } = await supabase.auth.signUp({
@@ -175,9 +172,7 @@ export function AuthProvider({ children }) {
     const isGuest = isAnonymous(current);
     const guestId = isGuest ? current?.id ?? null : null;
 
-    if (isGuest && guestId && typeof window !== "undefined") {
-      window.localStorage.setItem(GUEST_STORAGE_KEY, guestId);
-    }
+    if (isGuest && guestId) storeGuestId(guestId);
 
     const redirectTo = buildRedirectURL(guestId);
 
