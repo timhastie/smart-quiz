@@ -1520,7 +1520,7 @@ useEffect(() => {
                 <input
                   id="inline-gen-title"
                   className="field w-full placeholder:text-slate-500"
-                  placeholder="Bash Top 10"
+                  placeholder="Bash Top 10!!!!!!"
                   value={gTitle}
                   onChange={(e) => setGTitle(e.target.value)}
                   disabled={generating}
