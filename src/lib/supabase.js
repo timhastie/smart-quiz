@@ -8,10 +8,10 @@ export const supabase = createClient(url, key, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: false, // we're handling the callback manually
-    flowType: "pkce",          // <- IMPORTANT for the ?code=... flow
+    detectSessionInUrl: false, // we handle the URL manually in AuthCallback
+    flowType: "pkce",          // safe + correct for modern supabase-js
   },
 });
 
-// Optional dev helper:
+// Optional: for debugging in browser console
 if (typeof window !== "undefined") window.sb = supabase;

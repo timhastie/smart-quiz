@@ -15,38 +15,48 @@ export default function AuthCallback() {
       try {
         const url = new URL(window.location.href);
         const params = url.searchParams;
-        const hash = new URLSearchParams(
+        const hashParams = new URLSearchParams(
           (window.location.hash || "").replace(/^#/, "")
         );
 
+        const code = params.get("code");
+        const error =
+          params.get("error") || hashParams.get("error") || null;
+        const errorDesc =
+          params.get("error_description") ||
+          hashParams.get("error_description") ||
+          null;
+
+        const hashSnapshot = Object.fromEntries(hashParams.entries());
+
         console.log("[AuthCallback] URL params:", Object.fromEntries(params.entries()));
-        console.log("[AuthCallback] Hash params:", Object.fromEntries(hash.entries()));
+        console.log("[AuthCallback] Hash params:", hashSnapshot);
 
-        const error = params.get("error");
-        const errorDesc = params.get("error_description");
+        // Persist last callback for debugging
+        try {
+          localStorage.setItem(
+            "last_auth_callback",
+            JSON.stringify({
+              ts: Date.now(),
+              search: Object.fromEntries(params.entries()),
+              hash: hashSnapshot,
+            })
+          );
+        } catch {}
 
+        // 1) Provider returned an error
         if (error) {
           const diagnostic = `Auth error: ${error}${
             errorDesc ? ` — ${errorDesc}` : ""
           }`;
-          console.error("[AuthCallback] Supabase error:", {
-            error,
-            errorDesc,
-            fullUrl: url.toString(),
-          });
+          console.error("[AuthCallback]", diagnostic);
           setMsg(diagnostic);
-          alert(diagnostic);
           return;
         }
 
-        const code = params.get("code");
-
+        // 2) PKCE code path (recommended / what we're using)
         if (code) {
-          console.log(
-            "[AuthCallback] Exchanging PKCE code for session...",
-            code
-          );
-
+          console.log("[AuthCallback] Exchanging PKCE code for session...");
           const { data, error: exchErr } =
             await supabase.auth.exchangeCodeForSession(code);
 
@@ -55,34 +65,90 @@ export default function AuthCallback() {
               "[AuthCallback] exchangeCodeForSession error:",
               exchErr
             );
-            setMsg(exchErr.message || "Could not finish sign-in.");
-            alert(exchErr.message || "Could not finish sign-in.");
+            setMsg(
+              exchErr.message ||
+                "Could not finish sign-in (code exchange failed)."
+            );
             return;
           }
 
           console.log(
-            "[AuthCallback] exchangeCodeForSession succeeded",
+            "[AuthCallback] exchangeCodeForSession success for user:",
             data?.session?.user?.id
           );
-        } else {
-          // No ?code – nothing we can do here with PKCE config
-          console.error(
-            "[AuthCallback] No auth code found in callback URL"
+        }
+        // 3) Legacy implicit fallback (just in case some flow still uses it)
+        else if (hashParams.get("access_token")) {
+          console.log("[AuthCallback] Using implicit tokens from hash to set session…");
+
+          const internalGet =
+            typeof supabase.auth._getSessionFromURL === "function"
+              ? supabase.auth._getSessionFromURL.bind(supabase.auth)
+              : null;
+          const internalSave =
+            typeof supabase.auth._saveSession === "function"
+              ? supabase.auth._saveSession.bind(supabase.auth)
+              : null;
+          const internalNotify =
+            typeof supabase.auth._notifyAllSubscribers === "function"
+              ? supabase.auth._notifyAllSubscribers.bind(supabase.auth)
+              : null;
+
+          if (!internalGet || !internalSave || !internalNotify) {
+            console.error(
+              "[AuthCallback] Missing Supabase internal helpers for implicit flow"
+            );
+            setMsg(
+              "Could not finish sign-in (client version mismatch for implicit flow)."
+            );
+            return;
+          }
+
+          const implicitParams = Object.fromEntries(hashParams.entries());
+          const { data, error: impErr } = await internalGet(
+            implicitParams,
+            "implicit"
           );
-          setMsg("Missing auth code in callback. Please try again.");
-          alert("Missing auth code in callback. Please try again.");
+
+          if (impErr) {
+            console.error("[AuthCallback] implicit flow error:", impErr);
+            setMsg(
+              impErr.message || "Could not finish sign-in (implicit flow)."
+            );
+            return;
+          }
+
+          const session = data?.session;
+          if (!session?.user) {
+            console.error(
+              "[AuthCallback] implicit flow returned no user",
+              data
+            );
+            setMsg("No session returned from sign-in.");
+            return;
+          }
+
+          await internalSave(session);
+          await internalNotify("SIGNED_IN", session);
+          console.log(
+            "[AuthCallback] implicit flow stored session for:",
+            session.user.id
+          );
+        }
+        // 4) Nothing useful in the URL
+        else {
+          console.error("[AuthCallback] No code or tokens in callback URL");
+          setMsg("Missing auth code in callback.");
           return;
         }
 
-        // Clean URL so refresh doesn't repeat callback
+        // ---- Success: clean URL + go home ----
         window.history.replaceState({}, document.title, "/");
-
         setMsg("Signed in. Redirecting…");
         nav("/", { replace: true });
       } catch (e) {
         console.error("[AuthCallback] Unexpected error:", e);
-        setMsg("Unexpected error finishing sign-in.");
-        alert(e?.message || "Unexpected error finishing sign-in.");
+        setMsg(e?.message || "Unexpected error while finishing sign-in.");
       }
     })();
   }, [nav]);
