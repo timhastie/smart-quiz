@@ -4,7 +4,19 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>quiz-app</title>
+    <title>Smart-Quiz</title>
+
+    <!-- Force all traffic to the www origin so OAuth PKCE works consistently -->
+    <script>
+      if (location.hostname === "smart-quiz.app") {
+        location.replace(
+          "https://www.smart-quiz.app" +
+            location.pathname +
+            location.search +
+            location.hash
+        );
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
