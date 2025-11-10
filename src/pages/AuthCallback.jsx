@@ -15,11 +15,14 @@ export default function AuthCallback() {
         const url = new URL(window.location.href);
         const error = url.searchParams.get("error");
         const errorDesc = url.searchParams.get("error_description");
-        // Supabase v2 sends ?code=... (fallback keys just in case)
+        // Supabase v2 sends ?code=... but on implicit flow we get hash tokens
         const code =
           url.searchParams.get("code") ||
           url.searchParams.get("token") ||
           url.searchParams.get("auth_code");
+        const hashParams = new URLSearchParams((window.location.hash || "").replace(/^#/, ""));
+        const hashAccessToken = hashParams.get("access_token");
+        const hashRefreshToken = hashParams.get("refresh_token");
 
         console.log("[AuthCallback] URL params:", Object.fromEntries(url.searchParams.entries()));
 
@@ -34,7 +37,7 @@ export default function AuthCallback() {
           alert(diagnostic);
           return;
         }
-        if (!code) {
+        if (!code && !(hashAccessToken && hashRefreshToken)) {
           const dbg = `[AuthCallback] Missing auth code in ${url.toString()}`;
           console.error(dbg);
           setMsg("Missing auth code.");
@@ -42,12 +45,28 @@ export default function AuthCallback() {
           return;
         }
 
-        // 1) Finish the Supabase auth exchange (PKCE)
-        const { error: exchErr } = await supabase.auth.exchangeCodeForSession(code);
-        if (exchErr) {
-          console.error("[AuthCallback] exchangeCodeForSession error:", exchErr);
-          setMsg(exchErr.message || "Could not finish sign-in.");
-          return;
+        if (code) {
+          const { error: exchErr } = await supabase.auth.exchangeCodeForSession(code);
+          if (exchErr) {
+            console.error("[AuthCallback] exchangeCodeForSession error:", exchErr);
+            setMsg(exchErr.message || "Could not finish sign-in.");
+            return;
+          }
+        } else {
+          console.log("[AuthCallback] Using implicit tokens from hash.");
+          const { data: setData, error: setErr } = await supabase.auth.setSession({
+            access_token: hashAccessToken,
+            refresh_token: hashRefreshToken,
+          });
+          if (setErr) {
+            console.error("[AuthCallback] setSession error:", setErr);
+            setMsg(setErr.message || "Could not finish sign-in.");
+            return;
+          }
+          console.log("[AuthCallback] setSession succeeded:", setData);
+          const { data: sessionCheck } = await supabase.auth.getSession();
+          console.log("[AuthCallback] getSession after setSession:", sessionCheck);
+          window.history.replaceState({}, document.title, window.location.pathname);
         }
 
         setMsg("Signed in. Redirecting…");

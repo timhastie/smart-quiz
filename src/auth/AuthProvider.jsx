@@ -151,7 +151,6 @@ export function AuthProvider({ children }) {
       provider,
       options: {
         redirectTo,
-        flowType: "pkce",
       },
     });
     if (error) throw error;
