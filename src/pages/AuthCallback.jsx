@@ -14,6 +14,7 @@ export default function AuthCallback() {
       try {
         const url = new URL(window.location.href);
         const error = url.searchParams.get("error");
+        const errorDesc = url.searchParams.get("error_description");
         // Supabase v2 sends ?code=... (fallback keys just in case)
         const code =
           url.searchParams.get("code") ||
@@ -21,7 +22,9 @@ export default function AuthCallback() {
           url.searchParams.get("auth_code");
 
         if (error) {
-          setMsg(`Auth error: ${error}`);
+          setMsg(
+            `Auth error: ${error}${errorDesc ? ` — ${errorDesc}` : ""}`
+          );
           return;
         }
         if (!code) {
