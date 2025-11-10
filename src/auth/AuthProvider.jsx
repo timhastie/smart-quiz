@@ -145,18 +145,12 @@ export function AuthProvider({ children }) {
     const redirectTo =
       typeof window !== "undefined" ? buildRedirectURL() : undefined;
 
-    console.log("[AuthProvider] Starting OAuth", {
-      provider,
-      redirectTo,
-      guestId,
-      flowType: "pkce",
-    });
+    console.log("[AuthProvider] Starting OAuth", { provider, redirectTo, guestId });
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
         redirectTo,
-        flowType: "pkce",
       },
     });
     if (error) throw error;

@@ -74,40 +74,63 @@ export default function AuthCallback() {
           console.log("[AuthCallback] exchangeCodeForSession succeeded");
         } else {
           console.log(
-            "[AuthCallback] Using refreshSession for hash tokens",
+            "[AuthCallback] Using implicit flow helper",
             JSON.stringify({
               hasAccess: Boolean(hashAccessToken),
               hasRefresh: Boolean(hashRefreshToken),
             })
           );
-          const refreshTimeout = setTimeout(() => {
-            console.warn("[AuthCallback] refreshSession still pending after 8s");
-            setMsg("Still finishing sign-in…");
-          }, 8000);
 
-          const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession({
-            refresh_token: hashRefreshToken,
-          });
-          clearTimeout(refreshTimeout);
+          const privateGet =
+            typeof supabase.auth._getSessionFromURL === "function"
+              ? supabase.auth._getSessionFromURL.bind(supabase.auth)
+              : null;
+          const privateSave =
+            typeof supabase.auth._saveSession === "function"
+              ? supabase.auth._saveSession.bind(supabase.auth)
+              : null;
+          const privateNotify =
+            typeof supabase.auth._notifyAllSubscribers === "function"
+              ? supabase.auth._notifyAllSubscribers.bind(supabase.auth)
+              : null;
 
-          if (refreshErr) {
-            console.error("[AuthCallback] refreshSession error:", refreshErr);
-            setMsg(refreshErr.message || "Could not finish sign-in.");
-            alert(refreshErr.message || "Could not finish sign-in.");
+          if (!privateGet || !privateSave || !privateNotify) {
+            console.error("[AuthCallback] Supabase client missing internal helpers");
+            setMsg("Could not finish sign-in (client mismatch).");
+            alert("Could not finish sign-in. Please refresh and try again.");
             return;
           }
 
-          if (!refreshData?.session?.user) {
-            console.error("[AuthCallback] refreshSession returned no user", refreshData);
+          const implicitParams = Object.fromEntries(hashParams.entries());
+          const implicitTimeout = setTimeout(() => {
+            console.warn("[AuthCallback] implicit helper still pending after 8s");
+            setMsg("Still finishing sign-in…");
+          }, 8000);
+
+          const { data: implicitData, error: implicitErr } = await privateGet(
+            implicitParams,
+            "implicit"
+          );
+          clearTimeout(implicitTimeout);
+
+          if (implicitErr) {
+            console.error("[AuthCallback] implicit helper error:", implicitErr);
+            setMsg(implicitErr.message || "Could not finish sign-in.");
+            alert(implicitErr.message || "Could not finish sign-in.");
+            return;
+          }
+
+          const session = implicitData?.session;
+          if (!session?.user) {
+            console.error("[AuthCallback] implicit helper returned no user", implicitData);
             setMsg("No session returned. Please try again.");
             alert("Finished sign-in but no session was returned. Please try again.");
             return;
           }
 
-          console.log(
-            "[AuthCallback] refreshSession succeeded for user:",
-            refreshData.session.user.id
-          );
+          await privateSave(session);
+          await privateNotify("SIGNED_IN", session);
+          console.log("[AuthCallback] implicit helper stored session for user:", session.user.id);
         }
 
         // Clean up the URL so refreshes don’t retry the callback flow.
