@@ -98,6 +98,7 @@ function storePendingTokens(session) {
 async function runSafariAutoHandler() {
   if (!isSafariBrowser()) return false;
   try {
+    console.log("[AuthCallback] Safari auto handler starting");
     const flag = window.sessionStorage.getItem(SAFARI_HELPER_FLAG);
     if (flag === "done") return false;
     const url = import.meta.env.VITE_SUPABASE_URL;
@@ -125,6 +126,7 @@ async function runSafariAutoHandler() {
   } catch (err) {
     console.warn("[AuthCallback] Safari auto handler failed", err);
   }
+  console.warn("[AuthCallback] Safari auto handler found no session");
   return false;
 }
 

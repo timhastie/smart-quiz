@@ -220,6 +220,7 @@ export function AuthProvider({ children }) {
         const pendingTokens = readPendingTokens();
         if (pendingTokens?.access_token && pendingTokens?.refresh_token) {
           try {
+            console.log("[AuthProvider] applying pending tokens");
             await supabase.auth.setSession(pendingTokens);
             clearPendingTokens();
             const { data: refreshed } = await supabase.auth.getSession();
@@ -233,6 +234,8 @@ export function AuthProvider({ children }) {
           } catch (tokenErr) {
             console.warn("[AuthProvider] pending token setSession failed", tokenErr);
           }
+        } else {
+          console.log("[AuthProvider] no pending tokens available");
         }
         const awaited = await waitForSupabaseSession();
         if (awaited?.user) {
