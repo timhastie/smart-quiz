@@ -173,7 +173,7 @@ export default function AuthCallback() {
 
         setMsg("Signed in. Redirecting…");
         window.history.replaceState({}, document.title, "/");
-        nav("/", { replace: true });
+        window.location.replace("/");
       } catch (err) {
         console.error("[AuthCallback] Unexpected error:", err);
         setMsg(err?.message || "Unexpected error finishing sign-in.");
