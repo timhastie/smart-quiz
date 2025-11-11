@@ -73,6 +73,8 @@ export default function AuthCallback() {
           (window.location.hash || "").replace(/^#/, "")
         );
 
+        console.log("[AuthCallback] location", url.toString());
+
         const error =
           params.get("error") || hashParams.get("error") || null;
         const errorDesc =
@@ -104,15 +106,14 @@ export default function AuthCallback() {
         const accessToken = hashParams.get("access_token");
         const refreshToken = hashParams.get("refresh_token");
         const hasImplicitTokens = accessToken && refreshToken;
-
-        const { data: existingSession } = await supabase.auth.getSession();
-        if (existingSession?.session?.user && !code && !hasImplicitTokens) {
-          setMsg("Signed in. Redirecting…");
-          window.history.replaceState({}, document.title, "/");
-          return nav("/", { replace: true });
-        }
+        console.log("[AuthCallback] parsed params", {
+          codePresent: Boolean(code),
+          hasImplicitTokens,
+          guest: guestParam || null,
+        });
 
         if (code) {
+          console.log("[AuthCallback] exchanging code for session");
           setMsg("Finishing sign-in…");
           const timeout = setTimeout(() => {
             console.warn("[AuthCallback] exchangeCodeForSession taking >8s");
@@ -127,9 +128,11 @@ export default function AuthCallback() {
             return;
           }
         } else if (hasImplicitTokens) {
+          console.log("[AuthCallback] implicit tokens detected");
           setMsg("Finishing sign-in…");
           try {
             if (isSafariBrowser()) {
+              console.log("[AuthCallback] using manual exchange (Safari)");
               const manualSession = await exchangeImplicitTokensManually(
                 refreshToken
               );
@@ -139,11 +142,13 @@ export default function AuthCallback() {
               });
               if (setErr) throw setErr;
             } else {
+              console.log("[AuthCallback] using direct setSession");
               const { error: directErr } = await supabase.auth.setSession({
                 access_token: accessToken,
                 refresh_token: refreshToken,
               });
               if (directErr) {
+                console.warn("[AuthCallback] direct setSession failed; retrying manual", directErr);
                 const manualSession = await exchangeImplicitTokensManually(
                   refreshToken
                 );
