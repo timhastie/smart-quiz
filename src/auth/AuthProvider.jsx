@@ -164,8 +164,8 @@ export function AuthProvider({ children }) {
         return;
       }
 
-      if (pendingOAuth && !onAuthCallbackPath()) {
-        console.log("[AuthProvider] awaiting Supabase session after OAuth...");
+      if (pendingOAuth) {
+        console.log("[AuthProvider] awaiting Supabase session after OAuth…");
         const awaited = await waitForSupabaseSession();
         if (awaited?.user) {
           clearPendingOAuthArtifacts(url);
