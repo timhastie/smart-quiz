@@ -136,26 +136,37 @@ export default function AuthCallback() {
               const manualSession = await exchangeImplicitTokensManually(
                 refreshToken
               );
-              const { error: setErr } = await supabase.auth.setSession({
+              console.log("[AuthCallback] manual exchange response", {
+                hasAccess: Boolean(manualSession.access_token),
+                hasRefresh: Boolean(manualSession.refresh_token),
+              });
+              const { data: setData, error: setErr } = await supabase.auth.setSession({
                 access_token: manualSession.access_token,
                 refresh_token: manualSession.refresh_token,
               });
+              console.log("[AuthCallback] setSession result (Safari)", { setData, setErr });
               if (setErr) throw setErr;
             } else {
               console.log("[AuthCallback] using direct setSession");
-              const { error: directErr } = await supabase.auth.setSession({
+              const { data: directData, error: directErr } = await supabase.auth.setSession({
                 access_token: accessToken,
                 refresh_token: refreshToken,
               });
+              console.log("[AuthCallback] direct setSession result", { directData, directErr });
               if (directErr) {
                 console.warn("[AuthCallback] direct setSession failed; retrying manual", directErr);
                 const manualSession = await exchangeImplicitTokensManually(
                   refreshToken
                 );
-                const { error: setErr } = await supabase.auth.setSession({
+                console.log("[AuthCallback] manual exchange response (fallback)", {
+                  hasAccess: Boolean(manualSession.access_token),
+                  hasRefresh: Boolean(manualSession.refresh_token),
+                });
+                const { data: fallbackData, error: setErr } = await supabase.auth.setSession({
                   access_token: manualSession.access_token,
                   refresh_token: manualSession.refresh_token,
                 });
+                console.log("[AuthCallback] fallback setSession result", { fallbackData, setErr });
                 if (setErr) throw setErr;
               }
             }
