@@ -290,18 +290,27 @@ export function AuthProvider({ children }) {
       // Only auto-create an anonymous user if we are NOT on /auth/callback
       if (!onAuthCallbackPath()) {
         console.log("[AuthProvider] no session, creating anonymous user");
-        const { data: anonRes, error: anonErr } =
-          await supabase.auth.signInAnonymously();
-        if (anonErr) {
-          console.error("[Auth] Anonymous sign-in failed:", anonErr);
-          if (mounted) setUser(null);
-          return;
-        }
-        if (mounted) {
-          setPendingOAuthState(null);
-          clearPendingTokens();
-          console.log("[AuthProvider] anonymous user ready", anonRes?.user?.id);
-          setUser(anonRes?.user ?? null);
+        // Wait a bit more for Safari before falling back to anonymous session
+        await new Promise((res) => setTimeout(res, 1200));
+        const { data: lateSession } = await supabase.auth.getSession();
+        if (lateSession?.session?.user && !isAnonymous(lateSession.session.user)) {
+          console.log("[AuthProvider] session appeared before anonymous fallback", lateSession.session.user.id);
+          clearPendingOAuthArtifacts(url);
+          if (mounted) setUser(lateSession.session.user);
+        } else {
+          const { data: anonRes, error: anonErr } =
+            await supabase.auth.signInAnonymously();
+          if (anonErr) {
+            console.error("[Auth] Anonymous sign-in failed:", anonErr);
+            if (mounted) setUser(null);
+            return;
+          }
+          if (mounted) {
+            setPendingOAuthState(null);
+            clearPendingTokens();
+            console.log("[AuthProvider] anonymous user ready", anonRes?.user?.id);
+            setUser(anonRes?.user ?? null);
+          }
         }
       }
     } finally {
