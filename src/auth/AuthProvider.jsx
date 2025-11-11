@@ -207,12 +207,26 @@ export function AuthProvider({ children }) {
         console.error("[Auth] getSession error:", error);
       }
 
-      // If we already have a user session, use it
-      if (mounted && sess?.session?.user) {
-        console.log("[AuthProvider] existing session user", sess.session.user.id);
+      const sessionUser = sess?.session?.user ?? null;
+      const guestId = readGuestId();
+      const shouldIgnoreExisting = Boolean(
+        pendingOAuth &&
+          sessionUser &&
+          (isAnonymous(sessionUser) || (guestId && guestId === sessionUser.id))
+      );
+
+      if (mounted && sessionUser && !shouldIgnoreExisting) {
+        console.log("[AuthProvider] existing session user", sessionUser.id);
         clearPendingOAuthArtifacts(url);
-        setUser(sess.session.user);
+        setUser(sessionUser);
         return;
+      }
+
+      if (sessionUser && shouldIgnoreExisting) {
+        console.log(
+          "[AuthProvider] ignoring anonymous session during OAuth",
+          sessionUser.id
+        );
       }
 
       if (pendingOAuth) {
