@@ -3,6 +3,47 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { clearGuestId, readGuestId, storeGuestId } from "./guestStorage";
 
+const OAUTH_PENDING_KEY = "smartquiz_pending_oauth";
+
+function getPendingOAuthState() {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage.getItem(OAUTH_PENDING_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setPendingOAuthState(value) {
+  if (typeof window === "undefined") return;
+  try {
+    if (value) {
+      window.sessionStorage.setItem(OAUTH_PENDING_KEY, value);
+    } else {
+      window.sessionStorage.removeItem(OAUTH_PENDING_KEY);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+async function waitForSupabaseSession(timeoutMs = 8000, intervalMs = 500) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) {
+      console.warn("[AuthProvider] waitForSupabaseSession error:", error);
+      break;
+    }
+    if (data?.session?.user) {
+      console.log("[AuthProvider] delayed session became available", data.session.user.id);
+      return data.session;
+    }
+    await new Promise((res) => setTimeout(res, intervalMs));
+  }
+  return null;
+}
+
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
 
@@ -55,6 +96,7 @@ export function AuthProvider({ children }) {
   async function ensureSession() {
     try {
       console.log("[AuthProvider] bootstrap start, path:", window.location.pathname);
+      const pendingOAuth = getPendingOAuthState();
       const { data: sess, error } = await supabase.auth.getSession();
       if (error) {
         console.error("[Auth] getSession error:", error);
@@ -63,8 +105,23 @@ export function AuthProvider({ children }) {
       // If we already have a user session, use it
       if (mounted && sess?.session?.user) {
         console.log("[AuthProvider] existing session user", sess.session.user.id);
+        setPendingOAuthState(null);
         setUser(sess.session.user);
         return;
+      }
+
+      if (pendingOAuth && !onAuthCallbackPath()) {
+        console.log("[AuthProvider] awaiting Supabase session after OAuth...");
+        const awaited = await waitForSupabaseSession();
+        if (awaited?.user) {
+          setPendingOAuthState(null);
+          if (mounted) {
+            setUser(awaited.user);
+          }
+          return;
+        }
+        console.warn("[AuthProvider] session still missing after OAuth wait, continuing.");
+        setPendingOAuthState(null);
       }
 
       // ❗ IMPORTANT:
@@ -79,6 +136,7 @@ export function AuthProvider({ children }) {
           return;
         }
         if (mounted) {
+          setPendingOAuthState(null);
           console.log("[AuthProvider] anonymous user ready", anonRes?.user?.id);
           setUser(anonRes?.user ?? null);
         }
@@ -186,6 +244,10 @@ export function AuthProvider({ children }) {
 
     const redirectTo = buildRedirectURL(guestId);
 
+    if (typeof window !== "undefined") {
+      setPendingOAuthState("starting");
+    }
+
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
@@ -197,6 +259,7 @@ export function AuthProvider({ children }) {
     });
 
     if (error) {
+      setPendingOAuthState(null);
       console.error("[Auth] googleSignIn error:", error);
       throw error;
     }

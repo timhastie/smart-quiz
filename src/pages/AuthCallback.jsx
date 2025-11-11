@@ -64,6 +64,20 @@ function isIgnorableIdentityError(error, desc) {
   );
 }
 
+const OAUTH_PENDING_KEY = "smartquiz_pending_oauth";
+function setPendingOAuthState(value) {
+  if (typeof window === "undefined") return;
+  try {
+    if (value) {
+      window.sessionStorage.setItem(OAUTH_PENDING_KEY, value);
+    } else {
+      window.sessionStorage.removeItem(OAUTH_PENDING_KEY);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 export default function AuthCallback() {
   const nav = useNavigate();
   const [msg, setMsg] = useState("Completing sign-in…");
@@ -135,6 +149,7 @@ export default function AuthCallback() {
           if (!user) return false;
           console.log("[AuthCallback] session user available:", user.id, "via", sourceLabel);
           setMsg("Signed in. Redirecting…");
+          setPendingOAuthState("returning");
           const safari = isSafariBrowser();
           if (safari) {
             console.log("[AuthCallback] redirecting via hard reload for Safari");
