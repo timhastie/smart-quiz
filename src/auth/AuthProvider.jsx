@@ -266,6 +266,22 @@ export function AuthProvider({ children }) {
           }
           return;
         }
+        // Safari sometimes needs a little extra time to surface the new session.
+        // Wait briefly before falling back to anonymous creation.
+        console.log("[AuthProvider] extra delay before fallback after OAuth wait");
+        await new Promise((res) => setTimeout(res, 1500));
+        try {
+          const { data: delayedCheck } = await supabase.auth.getSession();
+          const delayedUser = delayedCheck?.session?.user || null;
+          if (delayedUser && !isAnonymous(delayedUser)) {
+            console.log("[AuthProvider] session became available after delay", delayedUser.id);
+            clearPendingOAuthArtifacts(url);
+            if (mounted) setUser(delayedUser);
+            return;
+          }
+        } catch (delayErr) {
+          console.warn("[AuthProvider] delayed session check failed", delayErr);
+        }
         console.warn("[AuthProvider] session still missing after OAuth wait, continuing.");
         clearPendingOAuthArtifacts(url);
       }
