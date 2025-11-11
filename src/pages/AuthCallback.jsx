@@ -134,42 +134,6 @@ export default function AuthCallback() {
         const finishWithUser = async (user, sourceLabel = "unknown") => {
           if (!user) return false;
           console.log("[AuthCallback] session user available:", user.id, "via", sourceLabel);
-          const guestId = readGuestId();
-          if (
-            guestId &&
-            guestId !== user.id &&
-            !isAnonymousUser(user)
-          ) {
-            console.log("[AuthCallback] adopt_guest start", {
-              guestId,
-              newUser: user.id,
-            });
-            setMsg("Moving your quizzes to this account…");
-            try {
-              const adoptTimeoutMs = 7000;
-              let timerId;
-              const timeoutPromise = new Promise((_, reject) => {
-                timerId = setTimeout(
-                  () => reject(new Error("adopt_guest timeout")),
-                  adoptTimeoutMs
-                );
-              });
-              const { error: adoptErr } = await Promise.race([
-                supabase.rpc("adopt_guest", { p_old_user: guestId }),
-                timeoutPromise,
-              ]);
-              clearTimeout(timerId);
-              if (adoptErr) {
-                console.warn("[AuthCallback] adopt_guest error:", adoptErr);
-              } else {
-                console.log("[AuthCallback] adopt_guest success");
-                clearGuestId();
-              }
-            } catch (adoptError) {
-              console.warn("[AuthCallback] adopt_guest threw:", adoptError);
-            }
-          }
-          console.log("[AuthCallback] redirecting home");
           setMsg("Signed in. Redirecting…");
           window.history.replaceState({}, document.title, "/");
           nav("/", { replace: true });
@@ -206,34 +170,21 @@ export default function AuthCallback() {
           const { data: userAfterCode } = await supabase.auth.getUser();
           if (await finishWithUser(userAfterCode?.user ?? null)) return;
         } else if (hasImplicitTokens) {
-          console.log("[AuthCallback] implicit tokens detected", {
-            isSafari: isSafariBrowser(),
-          });
+          console.log("[AuthCallback] implicit tokens detected");
           setMsg("Finishing sign-in…");
           try {
             let helperUser = null;
-            if (isSafariBrowser()) {
-              console.log("[AuthCallback] Safari branch → helper first");
+            try {
+              console.log("[AuthCallback] using helper for implicit tokens");
               helperUser = await applyHelperFromHash(hashParams);
               helperUsed = true;
-              if (await finishWithUser(helperUser, "safari-helper")) return;
-            } else {
-              try {
-                await attemptSetSession({
-                  access_token: accessToken,
-                  refresh_token: refreshToken,
-                });
-              } catch (setErr) {
-                console.warn(
-                  "[AuthCallback] setSession timeout/failure, falling back to helper"
-                );
-                helperUser = await applyHelperFromHash(hashParams);
-                helperUsed = true;
-                if (
-                  await finishWithUser(helperUser, "helper-after-setSession-error")
-                )
-                  return;
-              }
+              if (await finishWithUser(helperUser, "implicit-helper")) return;
+            } catch (helperErr) {
+              console.warn("[AuthCallback] helper failed, trying setSession", helperErr);
+              await attemptSetSession({
+                access_token: accessToken,
+                refresh_token: refreshToken,
+              });
             }
             const { data: userAfterImplicit } = await supabase.auth.getUser();
             if (
