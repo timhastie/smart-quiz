@@ -68,7 +68,6 @@ export function AuthProvider({ children }) {
       // ❗ IMPORTANT:
       // Only auto-create an anonymous user if we are NOT on /auth/callback
       if (!onAuthCallbackPath()) {
-        console.log("[Auth] No session → creating anonymous user");
         const { data: anonRes, error: anonErr } =
           await supabase.auth.signInAnonymously();
         if (anonErr) {
@@ -77,10 +76,6 @@ export function AuthProvider({ children }) {
           return;
         }
         if (mounted) setUser(anonRes?.user ?? null);
-      } else {
-        console.log(
-          "[Auth] On /auth/callback with no session yet → let AuthCallback handle it"
-        );
       }
     } finally {
       if (mounted) setReady(true);

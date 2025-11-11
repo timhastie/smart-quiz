@@ -65,6 +65,12 @@ export default function AuthCallback() {
           );
         }
 
+        console.log("[AuthCallback] raw params", {
+          codePresent: Boolean(params.get("code")),
+          hasHashTokens: hasImplicitTokens,
+          guest: params.get("guest") || null,
+        });
+
         const guestParam = params.get("guest");
         if (guestParam) storeGuestId(guestParam);
 
@@ -78,6 +84,7 @@ export default function AuthCallback() {
         const hasImplicitTokens = accessToken && refreshToken;
 
         if (code) {
+          console.log("[AuthCallback] exchanging code via Supabase");
           setMsg("Finishing sign-in…");
           const timeout = setTimeout(() => {
             console.warn("[AuthCallback] exchangeCodeForSession taking >8s");
@@ -92,6 +99,7 @@ export default function AuthCallback() {
             return;
           }
         } else if (hasImplicitTokens) {
+          console.log("[AuthCallback] using implicit flow helpers");
           setMsg("Finishing sign-in…");
           const privGet =
             typeof supabase.auth._getSessionFromURL === "function"
@@ -130,7 +138,7 @@ export default function AuthCallback() {
           await privSave(session);
           await privNotify("SIGNED_IN", session);
         } else {
-          // No code/hash tokens → check if Supabase already populated session.
+          console.log("[AuthCallback] no code/hash tokens, checking existing session");
           const { data } = await supabase.auth.getSession();
           if (!data?.session?.user) {
             console.error("[AuthCallback] Missing auth code/tokens.");
@@ -163,6 +171,7 @@ export default function AuthCallback() {
           );
           return;
         }
+        console.log("[AuthCallback] session user available:", authedUser.id);
 
         const guestId = readGuestId();
         if (guestId && guestId !== authedUser.id && !isAnonymousUser(authedUser)) {
@@ -182,8 +191,11 @@ export default function AuthCallback() {
         }
 
         setMsg("Signed in. Redirecting…");
+        console.log("[AuthCallback] redirecting to /");
         window.history.replaceState({}, document.title, "/");
-        window.location.replace("/");
+        setTimeout(() => {
+          window.location.href = "/";
+        }, 100);
       } catch (err) {
         console.error("[AuthCallback] Unexpected error:", err);
         setMsg(err?.message || "Unexpected error finishing sign-in.");

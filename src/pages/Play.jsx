@@ -39,7 +39,6 @@ async function saveGroupRevisitScore(userId, { scope, groupId, percentExact }) {
       updated_at: new Date().toISOString(),
     };
 
-    console.log("[group_scores][REVIEW] upsert payload =>", payload);
 
     const { error: upErr } = await supabase
       .from("group_scores")
@@ -59,7 +58,6 @@ async function saveGroupRevisitScore(userId, { scope, groupId, percentExact }) {
       .single();
 
     if (readErr) console.error("[group_scores][REVIEW] verify read error:", readErr);
-    else console.log("[group_scores][REVIEW] verify row =>", row);
   } catch (e) {
     console.error("[group_scores][REVIEW] thrown:", e);
   }
@@ -87,7 +85,6 @@ async function saveGroupAllScore(userId, { scope, groupId, percentExact }) {
       updated_at: new Date().toISOString(),
     };
 
-    console.log("[group_scores][ALL-Q] upsert payload =>", payload);
 
     const { error: upErr } = await supabase
       .from("group_scores")
@@ -107,7 +104,6 @@ async function saveGroupAllScore(userId, { scope, groupId, percentExact }) {
       .single();
 
     if (readErr) console.error("[group_scores][ALL-Q] verify read error:", readErr);
-    else console.log("[group_scores][ALL-Q] verify row =>", row);
   } catch (e) {
     console.error("[group_scores][ALL-Q] thrown:", e);
   }

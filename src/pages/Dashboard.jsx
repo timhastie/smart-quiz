@@ -20,10 +20,7 @@ const NO_GROUP_ID = "00000000-0000-0000-0000-000000000001"; // sentinel for “N
 if (typeof window !== "undefined") {
   window.__SQ_SENTINELS__ = { ALL_GROUP_ID, NO_GROUP, NO_GROUP_ID };
 }
-function dbg(...args) {
-  // comment this out later
-  console.log("[DashDBG]", ...args);
-}
+function dbg() {}
 
 /* ------------------------------- HELPERS (DB) ------------------------------ */
 async function fetchAllRevisitScore(sb) {
@@ -185,7 +182,7 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
       is_anonymous_top: user?.is_anonymous ?? null,
       is_anonymous_meta: user?.user_metadata?.is_anonymous ?? null,
     };
-    console.log("auth snapshot", snapshot);
+    // snapshot available in devtools if needed
   }, [ready, user, isAnon]);
 
   const [quizzes, setQuizzes] = useState([]);
@@ -243,14 +240,13 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
   }
 
   async function continueWithGoogle() {
-  try {
-    console.log("[Dashboard] continueWithGoogle pressed");
-    await googleSignIn();
-  } catch (e) {
-    console.error(e);
-    alert("Google sign-in failed. Please try again.");
+    try {
+      await googleSignIn();
+    } catch (e) {
+      console.error(e);
+      alert("Google sign-in failed. Please try again.");
+    }
   }
-}
 
   async function handleSignOut() {
     await signout();
@@ -518,10 +514,9 @@ useEffect(() => {
 }, [ready, user?.id, filterGroupId]);
 
 // Persist the current group filter so Play → Dashboard restores it
-useEffect(() => {
-  persistLastGroup(filterGroupId || "");
-  console.log("[Dash] persistLastGroup ->", filterGroupId || "");
-}, [filterGroupId]);
+  useEffect(() => {
+    persistLastGroup(filterGroupId || "");
+  }, [filterGroupId]);
 
 // Normalize ALL_GROUP_ID to "" so "All" footer/actions always render
 useEffect(() => {
@@ -561,15 +556,10 @@ useEffect(() => {
 }, [user?.id]);
 
 // 🔎 FETCH QUIZZES (diagnostic: ensure 'All' selection doesn't filter; log state)
-useEffect(() => {
+  useEffect(() => {
   if (!user?.id) return;
 
-  // safe logger (uses dbg() if you added it; otherwise falls back to console.log)
-  const _dbg = (...a) => {
-    try {
-      (typeof dbg === "function" ? dbg : console.log)("[DashDBG]", ...a);
-    } catch {}
-  };
+  const _dbg = () => {};
 
   // Normalize the selection
   const sel = (filterGroupId ?? "").trim();
