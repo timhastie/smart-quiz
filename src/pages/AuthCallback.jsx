@@ -154,9 +154,16 @@ async function runSafariAutoHandler(hashParams) {
         refresh_token: helperSession.refresh_token,
       });
       storePendingTokens(helperSession);
+      const { data: postUser } = await supabase.auth.getUser();
       window.sessionStorage.setItem(SAFARI_HELPER_FLAG, "done");
       console.log("[AuthCallback] Safari auto handler populated session");
-      return true;
+      return {
+        user: postUser?.user || helperSession.user || null,
+        tokens: {
+          access_token: helperSession.access_token,
+          refresh_token: helperSession.refresh_token,
+        },
+      };
     }
   } catch (err) {
     console.warn("[AuthCallback] Safari auto handler failed", err);
@@ -207,8 +214,9 @@ export default function AuthCallback() {
         const hashParams = new URLSearchParams(
           (window.location.hash || "").replace(/^#/, "")
         );
+        let safariResult = null;
         if (isSafariBrowser()) {
-          await runSafariAutoHandler(hashParams);
+          safariResult = await runSafariAutoHandler(hashParams);
         }
 
         console.log("[AuthCallback] location", url.toString());
@@ -258,6 +266,17 @@ export default function AuthCallback() {
           }
           return true;
         };
+
+        if (safariResult?.user) {
+          if (
+            await finishWithUser(
+              safariResult.user,
+              "safari-auto-handler",
+              safariResult.tokens
+            )
+          )
+            return;
+        }
 
         const code =
           params.get("code") ||
