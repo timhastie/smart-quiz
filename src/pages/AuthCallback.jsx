@@ -68,6 +68,34 @@ export default function AuthCallback() {
   const nav = useNavigate();
   const [msg, setMsg] = useState("Completing sign-in…");
 
+  const attemptSetSession = async (tokens) => {
+    if (!tokens?.access_token || !tokens?.refresh_token) {
+      throw new Error("attemptSetSession called without tokens");
+    }
+    console.log("[AuthCallback] attempting supabase.auth.setSession");
+    const timeoutMs = 5000;
+    let timeoutId;
+    try {
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error("setSession timeout"));
+        }, timeoutMs);
+      });
+      const result = await Promise.race([
+        supabase.auth.setSession(tokens),
+        timeoutPromise,
+      ]);
+      clearTimeout(timeoutId);
+      console.log("[AuthCallback] setSession resolved", result?.error || "ok");
+      if (result?.error) throw result.error;
+      return true;
+    } catch (err) {
+      clearTimeout(timeoutId);
+      console.warn("[AuthCallback] setSession did not succeed:", err);
+      throw err;
+    }
+  };
+
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -180,21 +208,21 @@ export default function AuthCallback() {
               helperUsed = true;
               if (await finishWithUser(helperUser, "safari-helper")) return;
             } else {
-              console.log("[AuthCallback] attempting supabase.auth.setSession");
-              const { error: setErr } = await supabase.auth.setSession({
-                access_token: accessToken,
-                refresh_token: refreshToken,
-              });
-              if (setErr) {
-                console.warn("[AuthCallback] setSession failed, falling back to helper", setErr);
+              try {
+                await attemptSetSession({
+                  access_token: accessToken,
+                  refresh_token: refreshToken,
+                });
+              } catch (setErr) {
+                console.warn(
+                  "[AuthCallback] setSession timeout/failure, falling back to helper"
+                );
                 helperUser = await applyHelperFromHash(hashParams);
                 helperUsed = true;
                 if (
                   await finishWithUser(helperUser, "helper-after-setSession-error")
                 )
                   return;
-              } else {
-                console.log("[AuthCallback] setSession succeeded");
               }
             }
             const { data: userAfterImplicit } = await supabase.auth.getUser();
