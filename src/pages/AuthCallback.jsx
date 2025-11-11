@@ -106,7 +106,6 @@ export default function AuthCallback() {
         const hasImplicitTokens = accessToken && refreshToken;
 
         if (code) {
-          console.log("[AuthCallback] exchanging code via Supabase");
           setMsg("Finishing sign-in…");
           const timeout = setTimeout(() => {
             console.warn("[AuthCallback] exchangeCodeForSession taking >8s");
@@ -121,18 +120,23 @@ export default function AuthCallback() {
             return;
           }
         } else if (hasImplicitTokens) {
-          console.log("[AuthCallback] implicit tokens detected");
           setMsg("Finishing sign-in…");
           try {
-            const manualSession = await exchangeImplicitTokensManually(
-              refreshToken
-            );
-            const { error: setErr } = await supabase.auth.setSession({
-              access_token: manualSession.access_token,
-              refresh_token: manualSession.refresh_token,
-            });
-            if (setErr) {
-              throw setErr;
+            if (isSafariBrowser()) {
+              const manualSession = await exchangeImplicitTokensManually(
+                refreshToken
+              );
+              const { error: setErr } = await supabase.auth.setSession({
+                access_token: manualSession.access_token,
+                refresh_token: manualSession.refresh_token,
+              });
+              if (setErr) throw setErr;
+            } else {
+              const { error: directErr } = await supabase.auth.setSession({
+                access_token: accessToken,
+                refresh_token: refreshToken,
+              });
+              if (directErr) throw directErr;
             }
           } catch (implicitErr) {
             console.error("[AuthCallback] implicit exchange failed:", implicitErr);
