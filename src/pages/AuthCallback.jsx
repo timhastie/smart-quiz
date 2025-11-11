@@ -65,12 +65,6 @@ export default function AuthCallback() {
           );
         }
 
-        console.log("[AuthCallback] raw params", {
-          codePresent: Boolean(params.get("code")),
-          hasHashTokens: hasImplicitTokens,
-          guest: params.get("guest") || null,
-        });
-
         const guestParam = params.get("guest");
         if (guestParam) storeGuestId(guestParam);
 
@@ -82,6 +76,12 @@ export default function AuthCallback() {
         const accessToken = hashParams.get("access_token");
         const refreshToken = hashParams.get("refresh_token");
         const hasImplicitTokens = accessToken && refreshToken;
+
+        console.log("[AuthCallback] raw params", {
+          codePresent: Boolean(code),
+          hasHashTokens: hasImplicitTokens,
+          guest: guestParam || null,
+        });
 
         if (code) {
           console.log("[AuthCallback] exchanging code via Supabase");
