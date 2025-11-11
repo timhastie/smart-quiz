@@ -136,7 +136,16 @@ export default function AuthCallback() {
                 access_token: accessToken,
                 refresh_token: refreshToken,
               });
-              if (directErr) throw directErr;
+              if (directErr) {
+                const manualSession = await exchangeImplicitTokensManually(
+                  refreshToken
+                );
+                const { error: setErr } = await supabase.auth.setSession({
+                  access_token: manualSession.access_token,
+                  refresh_token: manualSession.refresh_token,
+                });
+                if (setErr) throw setErr;
+              }
             }
           } catch (implicitErr) {
             console.error("[AuthCallback] implicit exchange failed:", implicitErr);
