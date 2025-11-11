@@ -135,8 +135,14 @@ export default function AuthCallback() {
           if (!user) return false;
           console.log("[AuthCallback] session user available:", user.id, "via", sourceLabel);
           setMsg("Signed in. Redirecting…");
-          window.history.replaceState({}, document.title, "/");
-          nav("/", { replace: true });
+          const safari = isSafariBrowser();
+          if (safari) {
+            console.log("[AuthCallback] redirecting via hard reload for Safari");
+            window.location.replace("/");
+          } else {
+            window.history.replaceState({}, document.title, "/");
+            nav("/", { replace: true });
+          }
           return true;
         };
 
