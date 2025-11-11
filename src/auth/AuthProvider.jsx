@@ -286,9 +286,11 @@ export function AuthProvider({ children }) {
         clearPendingOAuthArtifacts(url);
       }
 
+      const onCallback = onAuthCallbackPath();
+
       // ❗ IMPORTANT:
       // Only auto-create an anonymous user if we are NOT on /auth/callback
-      if (!onAuthCallbackPath()) {
+      if (!onCallback) {
         console.log("[AuthProvider] no session, creating anonymous user");
         // Wait a bit more for Safari before falling back to anonymous session
         await new Promise((res) => setTimeout(res, 1200));
@@ -312,6 +314,8 @@ export function AuthProvider({ children }) {
             setUser(anonRes?.user ?? null);
           }
         }
+      } else {
+        console.log("[AuthProvider] on /auth/callback with no real session; waiting for redirect");
       }
     } finally {
       if (mounted) {
