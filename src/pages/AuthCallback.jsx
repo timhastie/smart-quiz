@@ -4,35 +4,6 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { clearGuestId, readGuestId, storeGuestId } from "../auth/guestStorage";
 
-async function exchangeImplicitTokensManually(refreshToken) {
-  const url = `${import.meta.env.VITE_SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`;
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-    },
-    body: JSON.stringify({
-      refresh_token: refreshToken,
-    }),
-  });
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(text || `Failed to refresh session (${resp.status})`);
-  }
-  const data = await resp.json();
-  if (!data?.access_token || !data?.refresh_token) {
-    throw new Error("Supabase returned no session tokens.");
-  }
-  return data;
-}
-
-function isSafariBrowser() {
-  if (typeof navigator === "undefined") return false;
-  const ua = navigator.userAgent.toLowerCase();
-  return ua.includes("safari") && !ua.includes("chrome") && !ua.includes("android");
-}
-
 function isAnonymousUser(user) {
   if (!user) return false;
   const providers = Array.isArray(user.app_metadata?.providers)
@@ -127,20 +98,37 @@ export default function AuthCallback() {
           console.log("[AuthCallback] implicit tokens detected");
           setMsg("Finishing sign-in…");
           try {
-            const manualSession = await exchangeImplicitTokensManually(
-              refreshToken
+            const privGet =
+              typeof supabase.auth._getSessionFromURL === "function"
+                ? supabase.auth._getSessionFromURL.bind(supabase.auth)
+                : null;
+            const privSave =
+              typeof supabase.auth._saveSession === "function"
+                ? supabase.auth._saveSession.bind(supabase.auth)
+                : null;
+            const privNotify =
+              typeof supabase.auth._notifyAllSubscribers === "function"
+                ? supabase.auth._notifyAllSubscribers.bind(supabase.auth)
+                : null;
+            if (!privGet || !privSave || !privNotify) {
+              throw new Error("Supabase client missing internal helpers.");
+            }
+            const implicitEntries = Object.fromEntries(hashParams.entries());
+            const { data, error: implicitErr } = await privGet(
+              implicitEntries,
+              "implicit"
             );
-            console.log("[AuthCallback] manual exchange response", {
-              hasAccess: Boolean(manualSession.access_token),
-              hasRefresh: Boolean(manualSession.refresh_token),
-            });
-            const { error: setErr } = await supabase.auth.setSession({
-              access_token: manualSession.access_token,
-              refresh_token: manualSession.refresh_token,
-            });
-            if (setErr) throw setErr;
+            if (implicitErr) {
+              throw implicitErr;
+            }
+            const session = data?.session;
+            if (!session?.user) {
+              throw new Error("Supabase returned no session user.");
+            }
+            await privSave(session);
+            await privNotify("SIGNED_IN", session);
           } catch (implicitErr) {
-            console.error("[AuthCallback] implicit exchange failed:", implicitErr);
+            console.error("[AuthCallback] implicit helper flow failed:", implicitErr);
             setMsg(implicitErr.message || "Could not finish sign-in.");
             return;
           }
