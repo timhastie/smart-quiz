@@ -4,6 +4,12 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { clearGuestId, readGuestId, storeGuestId } from "../auth/guestStorage";
 
+function isSafariBrowser() {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent.toLowerCase();
+  return ua.includes("safari") && !ua.includes("chrome") && !ua.includes("android");
+}
+
 async function applyHelperFromHash(hashParams) {
   const privGet =
     typeof supabase.auth._getSessionFromURL === "function"
@@ -152,15 +158,10 @@ export default function AuthCallback() {
           setPendingOAuthState("returning");
           const safari = isSafariBrowser();
           if (safari) {
-            console.log("[AuthCallback] redirecting via forced reload for Safari");
-            const target = `${window.location.origin}/?from=auth#${Date.now()}`;
-            setTimeout(() => {
-              window.location.href = target;
-            }, 50);
-          } else {
-            window.history.replaceState({}, document.title, "/");
-            nav("/", { replace: true });
+            console.log("[AuthCallback] Safari session captured; returning via SPA nav");
           }
+          window.history.replaceState({}, document.title, "/");
+          nav("/", { replace: true });
           return true;
         };
 
