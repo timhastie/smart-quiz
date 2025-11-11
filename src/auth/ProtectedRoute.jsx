@@ -7,12 +7,15 @@ export default function ProtectedRoute({ children }) {
   const location = useLocation();
 
   if (!ready) {
+    console.log("[ProtectedRoute] waiting for auth", location.pathname);
     return null; // or a spinner
   }
 
   if (!user) {
+    console.warn("[ProtectedRoute] no user, redirecting to /login from", location.pathname);
     return <Navigate to="/login" replace />;
   }
 
+  console.log("[ProtectedRoute] access granted for", location.pathname, "user", user.id);
   return children;
 }

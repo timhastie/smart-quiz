@@ -54,6 +54,7 @@ export function AuthProvider({ children }) {
 
   async function ensureSession() {
     try {
+      console.log("[AuthProvider] bootstrap start, path:", window.location.pathname);
       const { data: sess, error } = await supabase.auth.getSession();
       if (error) {
         console.error("[Auth] getSession error:", error);
@@ -61,6 +62,7 @@ export function AuthProvider({ children }) {
 
       // If we already have a user session, use it
       if (mounted && sess?.session?.user) {
+        console.log("[AuthProvider] existing session user", sess.session.user.id);
         setUser(sess.session.user);
         return;
       }
@@ -68,6 +70,7 @@ export function AuthProvider({ children }) {
       // ❗ IMPORTANT:
       // Only auto-create an anonymous user if we are NOT on /auth/callback
       if (!onAuthCallbackPath()) {
+        console.log("[AuthProvider] no session, creating anonymous user");
         const { data: anonRes, error: anonErr } =
           await supabase.auth.signInAnonymously();
         if (anonErr) {
@@ -75,16 +78,23 @@ export function AuthProvider({ children }) {
           if (mounted) setUser(null);
           return;
         }
-        if (mounted) setUser(anonRes?.user ?? null);
+        if (mounted) {
+          console.log("[AuthProvider] anonymous user ready", anonRes?.user?.id);
+          setUser(anonRes?.user ?? null);
+        }
       }
     } finally {
-      if (mounted) setReady(true);
+      if (mounted) {
+        setReady(true);
+        console.log("[AuthProvider] bootstrap complete");
+      }
     }
   }
 
   ensureSession();
 
-  const { data: listener } = supabase.auth.onAuthStateChange((_evt, session) => {
+  const { data: listener } = supabase.auth.onAuthStateChange((evt, session) => {
+    console.log("[AuthProvider] onAuthStateChange", evt, session?.user?.id);
     if (mounted) setUser(session?.user ?? null);
   });
 
@@ -106,6 +116,10 @@ export function AuthProvider({ children }) {
 
     (async () => {
       try {
+        console.log("[AuthProvider] post-login adopt_guest start", {
+          oldId,
+          newUser: user.id,
+        });
         const { error } = await supabase.rpc("adopt_guest", {
           p_old_user: oldId,
         });
@@ -113,6 +127,7 @@ export function AuthProvider({ children }) {
           console.warn("adopt_guest (post-login) failed:", error);
           return;
         }
+        console.log("[AuthProvider] post-login adopt_guest success");
         clearGuestId();
       } catch (e) {
         console.warn("adopt_guest (post-login) threw:", e);
