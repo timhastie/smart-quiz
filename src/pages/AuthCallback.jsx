@@ -231,6 +231,7 @@ export default function AuthCallback() {
           const { data: currentSession } = await supabase.auth.getSession();
           if (currentSession?.session) {
             storePendingTokens(currentSession.session);
+            console.log("[AuthCallback] stored pending tokens for", user.id);
           }
           setPendingOAuthState("returning");
           const safari = isSafariBrowser();

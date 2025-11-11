@@ -222,6 +222,7 @@ export function AuthProvider({ children }) {
           try {
             console.log("[AuthProvider] applying pending tokens");
             await supabase.auth.setSession(pendingTokens);
+            console.log("[AuthProvider] pending tokens applied, fetching session");
             clearPendingTokens();
             const { data: refreshed } = await supabase.auth.getSession();
             if (refreshed?.session?.user) {
