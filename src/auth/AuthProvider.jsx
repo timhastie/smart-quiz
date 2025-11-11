@@ -5,27 +5,42 @@ import { clearGuestId, readGuestId, storeGuestId } from "./guestStorage";
 
 const OAUTH_PENDING_KEY = "smartquiz_pending_oauth";
 
-function getPendingOAuthState() {
-  if (typeof window === "undefined") return null;
+function readStorage(key, storageGetter) {
   try {
-    return window.sessionStorage.getItem(OAUTH_PENDING_KEY);
+    const store = storageGetter();
+    return store ? store.getItem(key) : null;
   } catch {
     return null;
   }
 }
 
-function setPendingOAuthState(value) {
-  if (typeof window === "undefined") return;
+function writeStorage(key, value, storageGetter) {
   try {
-    if (value) {
-      window.sessionStorage.setItem(OAUTH_PENDING_KEY, value);
+    const store = storageGetter();
+    if (!store) return;
+    if (value === null) {
+      store.removeItem(key);
     } else {
-      window.sessionStorage.removeItem(OAUTH_PENDING_KEY);
+      store.setItem(key, value);
     }
   } catch {
     /* ignore */
   }
 }
+
+const getPendingOAuthState = () => {
+  if (typeof window === "undefined") return null;
+  return (
+    readStorage(OAUTH_PENDING_KEY, () => window.sessionStorage) ||
+    readStorage(OAUTH_PENDING_KEY, () => window.localStorage)
+  );
+};
+
+const setPendingOAuthState = (value) => {
+  if (typeof window === "undefined") return;
+  writeStorage(OAUTH_PENDING_KEY, value, () => window.sessionStorage);
+  writeStorage(OAUTH_PENDING_KEY, value, () => window.localStorage);
+};
 
 async function waitForSupabaseSession(timeoutMs = 8000, intervalMs = 500) {
   const deadline = Date.now() + timeoutMs;
@@ -95,8 +110,14 @@ export function AuthProvider({ children }) {
 
   async function ensureSession() {
     try {
+      const url = new URL(window.location.href);
       console.log("[AuthProvider] bootstrap start, path:", window.location.pathname);
-      const pendingOAuth = getPendingOAuthState();
+      let pendingOAuth = getPendingOAuthState();
+      const fromAuthParam = url.searchParams.get("from") === "auth";
+      if (!pendingOAuth && fromAuthParam) {
+        console.log("[AuthProvider] pending OAuth inferred from URL");
+        pendingOAuth = "from-url";
+      }
       const { data: sess, error } = await supabase.auth.getSession();
       if (error) {
         console.error("[Auth] getSession error:", error);
@@ -106,6 +127,10 @@ export function AuthProvider({ children }) {
       if (mounted && sess?.session?.user) {
         console.log("[AuthProvider] existing session user", sess.session.user.id);
         setPendingOAuthState(null);
+        if (fromAuthParam) {
+          url.searchParams.delete("from");
+          window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+        }
         setUser(sess.session.user);
         return;
       }
@@ -115,6 +140,10 @@ export function AuthProvider({ children }) {
         const awaited = await waitForSupabaseSession();
         if (awaited?.user) {
           setPendingOAuthState(null);
+          if (fromAuthParam) {
+            url.searchParams.delete("from");
+            window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+          }
           if (mounted) {
             setUser(awaited.user);
           }
@@ -122,6 +151,10 @@ export function AuthProvider({ children }) {
         }
         console.warn("[AuthProvider] session still missing after OAuth wait, continuing.");
         setPendingOAuthState(null);
+        if (fromAuthParam) {
+          url.searchParams.delete("from");
+          window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+        }
       }
 
       // ❗ IMPORTANT:
