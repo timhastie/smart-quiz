@@ -105,6 +105,13 @@ export default function AuthCallback() {
         const refreshToken = hashParams.get("refresh_token");
         const hasImplicitTokens = accessToken && refreshToken;
 
+        const { data: existingSession } = await supabase.auth.getSession();
+        if (existingSession?.session?.user && !code && !hasImplicitTokens) {
+          setMsg("Signed in. Redirecting…");
+          window.history.replaceState({}, document.title, "/");
+          return nav("/", { replace: true });
+        }
+
         if (code) {
           setMsg("Finishing sign-in…");
           const timeout = setTimeout(() => {
