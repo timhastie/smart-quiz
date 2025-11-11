@@ -105,12 +105,6 @@ export default function AuthCallback() {
         const refreshToken = hashParams.get("refresh_token");
         const hasImplicitTokens = accessToken && refreshToken;
 
-        console.log("[AuthCallback] raw params", {
-          codePresent: Boolean(code),
-          hasHashTokens: hasImplicitTokens,
-          guest: guestParam || null,
-        });
-
         if (code) {
           console.log("[AuthCallback] exchanging code via Supabase");
           setMsg("Finishing sign-in…");
@@ -130,27 +124,15 @@ export default function AuthCallback() {
           console.log("[AuthCallback] implicit tokens detected");
           setMsg("Finishing sign-in…");
           try {
-            if (isSafariBrowser()) {
-              console.log("[AuthCallback] manual implicit token exchange (Safari)");
-              const manualSession = await exchangeImplicitTokensManually(
-                refreshToken
-              );
-              const { error: setErr } = await supabase.auth.setSession({
-                access_token: manualSession.access_token,
-                refresh_token: manualSession.refresh_token,
-              });
-              if (setErr) {
-                throw setErr;
-              }
-            } else {
-              console.log("[AuthCallback] using supabase.auth.setSession directly");
-              const { error: sessionErr } = await supabase.auth.setSession({
-                access_token: accessToken,
-                refresh_token: refreshToken,
-              });
-              if (sessionErr) {
-                throw sessionErr;
-              }
+            const manualSession = await exchangeImplicitTokensManually(
+              refreshToken
+            );
+            const { error: setErr } = await supabase.auth.setSession({
+              access_token: manualSession.access_token,
+              refresh_token: manualSession.refresh_token,
+            });
+            if (setErr) {
+              throw setErr;
             }
           } catch (implicitErr) {
             console.error("[AuthCallback] implicit exchange failed:", implicitErr);
