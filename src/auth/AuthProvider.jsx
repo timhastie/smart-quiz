@@ -202,18 +202,23 @@ export function AuthProvider({ children }) {
       if (pendingOAuth) {
         console.log("[AuthProvider] pending OAuth detected via", pendingOAuth);
       }
-      const { data: sess, error } = await supabase.auth.getSession();
-      if (error) {
-        console.error("[Auth] getSession error:", error);
-      }
-
-      const sessionUser = sess?.session?.user ?? null;
+      let sessionUser = null;
+      let shouldIgnoreExisting = false;
       const guestId = readGuestId();
-      const shouldIgnoreExisting = Boolean(
-        pendingOAuth &&
-          sessionUser &&
-          (isAnonymous(sessionUser) || (guestId && guestId === sessionUser.id))
-      );
+      try {
+        const { data: sess, error } = await supabase.auth.getSession();
+        if (error) {
+          console.error("[Auth] getSession error:", error);
+        }
+        sessionUser = sess?.session?.user ?? null;
+        shouldIgnoreExisting = Boolean(
+          pendingOAuth &&
+            sessionUser &&
+            (isAnonymous(sessionUser) || (guestId && guestId === sessionUser.id))
+        );
+      } catch (err) {
+        console.error("[Auth] getSession threw:", err);
+      }
 
       if (mounted && sessionUser && !shouldIgnoreExisting) {
         console.log("[AuthProvider] existing session user", sessionUser.id);

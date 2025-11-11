@@ -235,14 +235,17 @@ export default function AuthCallback() {
 
         const guestParam = params.get("guest");
         if (guestParam) storeGuestId(guestParam);
-        const finishWithUser = async (user, sourceLabel = "unknown") => {
+        const finishWithUser = async (user, sourceLabel = "unknown", fallbackTokens = null) => {
           if (!user) return false;
           console.log("[AuthCallback] session user available:", user.id, "via", sourceLabel);
           setMsg("Signed in. Redirecting…");
           const { data: currentSession } = await supabase.auth.getSession();
-          if (currentSession?.session) {
+          if (currentSession?.session?.access_token && currentSession?.session?.refresh_token) {
             storePendingTokens(currentSession.session);
-            console.log("[AuthCallback] stored pending tokens for", user.id);
+            console.log("[AuthCallback] stored pending tokens for", user.id, "from Supabase session");
+          } else if (fallbackTokens?.access_token && fallbackTokens?.refresh_token) {
+            storePendingTokens(fallbackTokens);
+            console.log("[AuthCallback] stored fallback tokens for", user.id);
           }
           setPendingOAuthState("returning");
           const safari = isSafariBrowser();
@@ -292,7 +295,13 @@ export default function AuthCallback() {
               console.log("[AuthCallback] using helper for implicit tokens");
               helperUser = await applyHelperFromHash(hashParams);
               helperUsed = true;
-              if (await finishWithUser(helperUser, "implicit-helper")) return;
+              if (
+                await finishWithUser(helperUser, "implicit-helper", {
+                  access_token: accessToken,
+                  refresh_token: refreshToken,
+                })
+              )
+                return;
             } catch (helperErr) {
               console.warn("[AuthCallback] helper failed, trying setSession", helperErr);
               await attemptSetSession({
@@ -304,7 +313,11 @@ export default function AuthCallback() {
             if (
               await finishWithUser(
                 userAfterImplicit?.user ?? null,
-                "getUser-after-implicit"
+                "getUser-after-implicit",
+                {
+                  access_token: accessToken,
+                  refresh_token: refreshToken,
+                }
               )
             )
               return;
@@ -343,7 +356,13 @@ export default function AuthCallback() {
             if (!helperUsed && !isSafariBrowser()) {
               console.warn("[AuthCallback] still no user; applying helper fallback");
               const helperUser = await applyHelperFromHash(hashParams);
-              if (await finishWithUser(helperUser, "helper-from-retry-loop")) return;
+              if (
+                await finishWithUser(helperUser, "helper-from-retry-loop", {
+                  access_token: hashParams.get("access_token"),
+                  refresh_token: hashParams.get("refresh_token"),
+                })
+              )
+                return;
               helperUsed = true;
             }
             await new Promise((res) => setTimeout(res, waitMs));
