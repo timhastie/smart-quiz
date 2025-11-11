@@ -108,7 +108,7 @@ function createMemoryStorage() {
   };
 }
 
-async function runSafariAutoHandler() {
+async function runSafariAutoHandler(hashParams) {
   if (!isSafariBrowser()) return false;
   try {
     console.log("[AuthCallback] Safari auto handler starting");
@@ -125,18 +125,29 @@ async function runSafariAutoHandler() {
         storage: createMemoryStorage(),
       },
     });
-    if (typeof helperClient.auth.getSessionFromUrl !== "function") {
-      console.warn("[AuthCallback] helper client missing getSessionFromUrl");
-      return false;
+    let helperSession = null;
+    if (typeof helperClient.auth.getSessionFromUrl === "function") {
+      const { data, error: helperErr } = await helperClient.auth.getSessionFromUrl({
+        storeSession: true,
+      });
+      if (helperErr) {
+        console.warn("[AuthCallback] helper client getSessionFromUrl error", helperErr);
+      } else {
+        helperSession = data?.session || null;
+      }
     }
-    const { data, error: helperErr } = await helperClient.auth.getSessionFromUrl({
-      storeSession: true,
-    });
-    if (helperErr) {
-      console.warn("[AuthCallback] helper client getSessionFromUrl error", helperErr);
-      return false;
+
+    if (!helperSession && hashParams?.toString()) {
+      console.log("[AuthCallback] Safari helper falling back to hash parsing");
+      const helperUser = await applyHelperFromHash(hashParams);
+      const { data: refreshed } = await helperClient.auth.getSession();
+      helperSession = refreshed?.session || {
+        user: helperUser,
+        access_token: hashParams.get("access_token"),
+        refresh_token: hashParams.get("refresh_token"),
+      };
     }
-    const helperSession = data?.session;
+
     if (helperSession?.access_token && helperSession?.refresh_token) {
       await supabase.auth.setSession({
         access_token: helperSession.access_token,
@@ -191,9 +202,9 @@ export default function AuthCallback() {
 
     (async () => {
       try {
-        if (isSafariBrowser()) {
-          await runSafariAutoHandler();
-        }
+      if (isSafariBrowser()) {
+        await runSafariAutoHandler(hashParams);
+      }
         const url = new URL(window.location.href);
         const params = url.searchParams;
         const hashParams = new URLSearchParams(
