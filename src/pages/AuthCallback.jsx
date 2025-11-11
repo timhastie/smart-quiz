@@ -30,6 +30,7 @@ async function applyHelperFromHash(hashParams) {
   await privSave(data.session);
   await privNotify("SIGNED_IN", data.session);
   console.log("[AuthCallback] helper stored session for", data.session.user.id);
+  return data.session.user;
 }
 
 function isSafariBrowser() {
@@ -164,9 +165,11 @@ export default function AuthCallback() {
           console.log("[AuthCallback] implicit tokens detected");
           setMsg("Finishing sign-in…");
           try {
+            let helperUser = null;
             if (isSafariBrowser()) {
-              await applyHelperFromHash(hashParams);
+              helperUser = await applyHelperFromHash(hashParams);
               helperUsed = true;
+              if (await finishWithUser(helperUser)) return;
             } else {
               const { error: setErr } = await supabase.auth.setSession({
                 access_token: accessToken,
@@ -174,8 +177,9 @@ export default function AuthCallback() {
               });
               if (setErr) {
                 console.warn("[AuthCallback] setSession failed, falling back to helper", setErr);
-                await applyHelperFromHash(hashParams);
+                helperUser = await applyHelperFromHash(hashParams);
                 helperUsed = true;
+                if (await finishWithUser(helperUser)) return;
               }
             }
             const { data: userAfterImplicit } = await supabase.auth.getUser();
@@ -211,9 +215,10 @@ export default function AuthCallback() {
           }
           authedUser = finalSession?.session?.user || null;
           if (!authedUser) {
-            if (!helperUsed && !isSafariBrowser()) {
-              console.warn("[AuthCallback] still no user; applying helper fallback");
-              await applyHelperFromHash(hashParams);
+              if (!helperUsed && !isSafariBrowser()) {
+                console.warn("[AuthCallback] still no user; applying helper fallback");
+              const helperUser = await applyHelperFromHash(hashParams);
+              if (await finishWithUser(helperUser)) return;
               helperUsed = true;
             }
             await new Promise((res) => setTimeout(res, waitMs));
