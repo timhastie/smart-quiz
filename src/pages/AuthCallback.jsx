@@ -369,7 +369,12 @@ export default function AuthCallback() {
           }
         }
         if (authedUser) {
-          if (await finishWithUser(authedUser, "retry-loop-final")) {
+          if (
+            await finishWithUser(authedUser, "retry-loop-final", {
+              access_token: hashParams.get("access_token") || null,
+              refresh_token: hashParams.get("refresh_token") || null,
+            })
+          ) {
             return;
           }
         }

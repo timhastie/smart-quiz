@@ -237,6 +237,7 @@ export function AuthProvider({ children }) {
       if (pendingOAuth) {
         console.log("[AuthProvider] awaiting Supabase session after OAuth…");
         const pendingTokens = readPendingTokens();
+        console.log("[AuthProvider] pending tokens read", pendingTokens);
         if (pendingTokens?.access_token && pendingTokens?.refresh_token) {
           try {
             console.log("[AuthProvider] applying pending tokens");
