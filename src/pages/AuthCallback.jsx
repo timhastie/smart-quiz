@@ -113,15 +113,11 @@ export default function AuthCallback() {
         });
 
         if (code) {
-          console.log("[AuthCallback] exchanging code for session");
+          console.log("[AuthCallback] exchanging code via Supabase");
           setMsg("Finishing sign-in…");
-          const timeout = setTimeout(() => {
-            console.warn("[AuthCallback] exchangeCodeForSession taking >8s");
-          }, 8000);
           const { error: exchErr } = await supabase.auth.exchangeCodeForSession(
             code
           );
-          clearTimeout(timeout);
           if (exchErr) {
             console.error("[AuthCallback] exchangeCodeForSession error:", exchErr);
             setMsg(exchErr.message || "Could not finish sign-in.");
@@ -138,15 +134,10 @@ export default function AuthCallback() {
               hasAccess: Boolean(manualSession.access_token),
               hasRefresh: Boolean(manualSession.refresh_token),
             });
-            const timeout = setTimeout(() => {
-              console.warn("[AuthCallback] setSession taking >8s");
-            }, 8000);
-            const { data: setData, error: setErr } = await supabase.auth.setSession({
+            const { error: setErr } = await supabase.auth.setSession({
               access_token: manualSession.access_token,
               refresh_token: manualSession.refresh_token,
             });
-            clearTimeout(timeout);
-            console.log("[AuthCallback] setSession result", { setData, setErr });
             if (setErr) throw setErr;
           } catch (implicitErr) {
             console.error("[AuthCallback] implicit exchange failed:", implicitErr);
@@ -164,7 +155,7 @@ export default function AuthCallback() {
         }
 
         const waitMs = 1500;
-        const deadline = Date.now() + 10000; // wait up to 10s for Safari to persist session
+        const deadline = Date.now() + 12000; // wait up to 12s for Safari to persist session
         let authedUser = null;
         let lastErr = null;
         while (Date.now() < deadline && !authedUser) {
@@ -182,9 +173,7 @@ export default function AuthCallback() {
         }
         if (!authedUser) {
           console.error("[AuthCallback] No session user after retries", lastErr);
-          setMsg(
-            "Signed in, but Safari didn’t finish loading your account. Refresh this tab."
-          );
+          window.location.reload();
           return;
         }
         console.log("[AuthCallback] session user available:", authedUser.id);
