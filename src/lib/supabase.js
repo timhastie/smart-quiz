@@ -10,6 +10,7 @@ export const supabase = createClient(url, key, {
     autoRefreshToken: true,
     detectSessionInUrl: false,
     multiTab: false,
+    storage: typeof window !== "undefined" ? window.localStorage : undefined,
   },
 });
 

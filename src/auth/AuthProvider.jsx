@@ -1,10 +1,111 @@
+// src/auth/AuthProvider.jsx
 import { createContext, useContext, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { clearGuestId, readGuestId, storeGuestId } from "./guestStorage";
 
+const OAUTH_PENDING_KEY = "smartquiz_pending_oauth";
+const OAUTH_PENDING_COOKIE = "smartquiz_auth_pending=1";
+
+function readStorage(key, storageGetter) {
+  try {
+    const store = storageGetter();
+    return store ? store.getItem(key) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(key, value, storageGetter) {
+  try {
+    const store = storageGetter();
+    if (!store) return;
+    if (value === null) {
+      store.removeItem(key);
+    } else {
+      store.setItem(key, value);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function setCookieFlag(isSet) {
+  if (typeof document === "undefined") return;
+  const base = `${OAUTH_PENDING_COOKIE.split("=")[0]}=`;
+  if (isSet) {
+    document.cookie = `${OAUTH_PENDING_COOKIE}; Path=/; Max-Age=60; SameSite=Lax`;
+  } else {
+    document.cookie = `${base}; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+  }
+}
+
+function hasCookieFlag() {
+  if (typeof document === "undefined") return false;
+  return document.cookie.split(";").some((c) =>
+    c.trim().startsWith(OAUTH_PENDING_COOKIE.split("=")[0] + "=")
+  );
+}
+
+const getPendingOAuthState = () => {
+  if (typeof window === "undefined") return null;
+  return (
+    readStorage(OAUTH_PENDING_KEY, () => window.sessionStorage) ||
+    readStorage(OAUTH_PENDING_KEY, () => window.localStorage)
+  );
+};
+
+const setPendingOAuthState = (value) => {
+  if (typeof window === "undefined") return;
+  writeStorage(OAUTH_PENDING_KEY, value, () => window.sessionStorage);
+  writeStorage(OAUTH_PENDING_KEY, value, () => window.localStorage);
+  setCookieFlag(Boolean(value));
+};
+
+function clearPendingOAuthArtifacts(url) {
+  setPendingOAuthState(null);
+  if (url && url.searchParams?.get("from") === "auth") {
+    url.searchParams.delete("from");
+    window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+  }
+}
+
+async function waitForSupabaseSession(timeoutMs = 8000, intervalMs = 500) {
+  const deadline = Date.now() + timeoutMs;
+  let attempt = 0;
+  while (Date.now() < deadline) {
+    attempt += 1;
+    const { data, error } = await supabase.auth.getSession();
+    if (error) {
+      console.warn("[AuthProvider] waitForSupabaseSession error:", error);
+      break;
+    }
+    if (data?.session?.user) {
+      console.log(
+        "[AuthProvider] delayed session became available",
+        data.session.user.id,
+        "after",
+        attempt,
+        "polls"
+      );
+      return data.session;
+    }
+    const remaining = Math.max(0, deadline - Date.now());
+    console.log(
+      "[AuthProvider] waiting for Supabase session… attempt",
+      attempt,
+      "remaining",
+      `${remaining}ms`
+    );
+    await new Promise((res) => setTimeout(res, intervalMs));
+  }
+  console.warn("[AuthProvider] waitForSupabaseSession timed out");
+  return null;
+}
+
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
 
+// Build the callback URL; include the guest id when we have one.
 function buildRedirectURL(guestId) {
   if (typeof window === "undefined") return "/auth/callback";
   const url = new URL(`${window.location.origin}/auth/callback`);
@@ -20,6 +121,7 @@ function onAuthCallbackPath() {
   }
 }
 
+// Heuristic: does this user look anonymous?
 function isAnonymous(u) {
   if (!u) return false;
   const prov = u.app_metadata?.provider || null;
@@ -41,63 +143,111 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [ready, setReady] = useState(false);
 
+  // ---------------------------------------------------------------------------
+  // 1) Bootstrap session
+  //    - If there is an existing session, use it.
+  //    - Otherwise create an anonymous session (except on /auth/callback).
+  // ---------------------------------------------------------------------------
   useEffect(() => {
-    let mounted = true;
+  let mounted = true;
 
-    async function ensureSession() {
-      try {
-        console.log("[AuthProvider] bootstrap start, path:", window.location.pathname);
-        const { data: sess, error } = await supabase.auth.getSession();
-        if (error) {
-          console.error("[Auth] getSession error:", error);
-        }
+  async function ensureSession() {
+    try {
+      const url = new URL(window.location.href);
+      console.log("[AuthProvider] bootstrap start, path:", window.location.pathname);
+      let pendingOAuth = getPendingOAuthState();
+      if (!pendingOAuth && hasCookieFlag()) {
+        pendingOAuth = "cookie";
+      }
+      const fromAuthParam = url.searchParams.get("from") === "auth";
+      if (!pendingOAuth && fromAuthParam) {
+        console.log("[AuthProvider] pending OAuth inferred from URL");
+        pendingOAuth = "from-url";
+      }
+      if (pendingOAuth) {
+        console.log("[AuthProvider] pending OAuth detected via", pendingOAuth);
+      }
+      const { data: sess, error } = await supabase.auth.getSession();
+      if (error) {
+        console.error("[Auth] getSession error:", error);
+      }
 
-        if (mounted && sess?.session?.user) {
-          console.log("[AuthProvider] existing session user", sess.session.user.id);
-          setUser(sess.session.user);
+      // If we already have a user session, use it
+      if (mounted && sess?.session?.user) {
+        console.log("[AuthProvider] existing session user", sess.session.user.id);
+        clearPendingOAuthArtifacts(url);
+        setUser(sess.session.user);
+        return;
+      }
+
+      if (pendingOAuth) {
+        console.log("[AuthProvider] awaiting Supabase session after OAuth…");
+        const awaited = await waitForSupabaseSession();
+        if (awaited?.user) {
+          clearPendingOAuthArtifacts(url);
+          if (mounted) {
+            setUser(awaited.user);
+          }
           return;
         }
+        console.warn("[AuthProvider] session still missing after OAuth wait, continuing.");
+        clearPendingOAuthArtifacts(url);
+      }
 
-        if (!onAuthCallbackPath()) {
-          console.log("[AuthProvider] no session, creating anonymous user");
-          const { data: anonRes, error: anonErr } =
-            await supabase.auth.signInAnonymously();
-          if (anonErr) {
-            console.error("[Auth] Anonymous sign-in failed:", anonErr);
-            if (mounted) setUser(null);
-            return;
-          }
-          if (mounted) {
-            console.log("[AuthProvider] anonymous user ready", anonRes?.user?.id);
-            setUser(anonRes?.user ?? null);
-          }
+      // ❗ IMPORTANT:
+      // Only auto-create an anonymous user if we are NOT on /auth/callback
+      if (!onAuthCallbackPath()) {
+        console.log("[AuthProvider] no session, creating anonymous user");
+        const { data: anonRes, error: anonErr } =
+          await supabase.auth.signInAnonymously();
+        if (anonErr) {
+          console.error("[Auth] Anonymous sign-in failed:", anonErr);
+          if (mounted) setUser(null);
+          return;
         }
-      } finally {
-        if (mounted) setReady(true);
+        if (mounted) {
+          setPendingOAuthState(null);
+          console.log("[AuthProvider] anonymous user ready", anonRes?.user?.id);
+          setUser(anonRes?.user ?? null);
+        }
+      }
+    } finally {
+      if (mounted) {
+        setReady(true);
+        console.log("[AuthProvider] bootstrap complete");
       }
     }
+  }
 
-    ensureSession();
+  ensureSession();
 
-    const { data: listener } = supabase.auth.onAuthStateChange((evt, session) => {
-      console.log("[AuthProvider] onAuthStateChange", evt, session?.user?.id);
-      if (mounted) setUser(session?.user ?? null);
-    });
+  const { data: listener } = supabase.auth.onAuthStateChange((evt, session) => {
+    console.log("[AuthProvider] onAuthStateChange", evt, session?.user?.id);
+    if (mounted) setUser(session?.user ?? null);
+  });
 
-    return () => {
-      mounted = false;
-      listener?.subscription?.unsubscribe?.();
-    };
-  }, []);
+  return () => {
+    mounted = false;
+    listener?.subscription?.unsubscribe?.();
+  };
+}, []);
 
+  // ---------------------------------------------------------------------------
+  // 2) One-time adopt after login (fallback when callback didn't have ?guest=)
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     if (!ready || !user) return;
+    if (typeof window === "undefined") return;
     const oldId = readGuestId();
     if (!oldId) return;
-    if (isAnonymous(user)) return;
+    if (isAnonymous(user)) return; // only adopt once we are non-anon
 
     (async () => {
       try {
+        console.log("[AuthProvider] post-login adopt_guest start", {
+          oldId,
+          newUser: user.id,
+        });
         const { error } = await supabase.rpc("adopt_guest", {
           p_old_user: oldId,
         });
@@ -105,6 +255,7 @@ export function AuthProvider({ children }) {
           console.warn("adopt_guest (post-login) failed:", error);
           return;
         }
+        console.log("[AuthProvider] post-login adopt_guest success");
         clearGuestId();
       } catch (e) {
         console.warn("adopt_guest (post-login) threw:", e);
@@ -112,6 +263,10 @@ export function AuthProvider({ children }) {
     })();
   }, [ready, user?.id]);
 
+  // ---------------------------------------------------------------------------
+  // 3) Email/password: ALWAYS signUp (so they confirm email)
+  //    - When anonymous, store guest id so callback / post-login can adopt.
+  // ---------------------------------------------------------------------------
   async function signupOrLink(email, password) {
     const {
       data: { user: current } = {},
@@ -144,6 +299,9 @@ export function AuthProvider({ children }) {
     return supabase.auth.signInWithPassword({ email, password });
   }
 
+  // ---------------------------------------------------------------------------
+  // 4) Google sign-in (guest → real upgrade with quiz adoption)
+  // ---------------------------------------------------------------------------
   async function googleSignIn() {
     const {
       data: { user: current } = {},
@@ -156,6 +314,10 @@ export function AuthProvider({ children }) {
 
     const redirectTo = buildRedirectURL(guestId);
 
+    if (typeof window !== "undefined") {
+      setPendingOAuthState("starting");
+    }
+
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
@@ -167,6 +329,7 @@ export function AuthProvider({ children }) {
     });
 
     if (error) {
+      setPendingOAuthState(null);
       console.error("[Auth] googleSignIn error:", error);
       throw error;
     }
@@ -174,6 +337,9 @@ export function AuthProvider({ children }) {
     return { started: true };
   }
 
+  // ---------------------------------------------------------------------------
+  // 5) Sign out -> start fresh anonymous session again
+  // ---------------------------------------------------------------------------
   const signout = async () => {
     setReady(false);
     try {
