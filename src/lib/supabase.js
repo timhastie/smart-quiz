@@ -8,7 +8,7 @@ export const supabase = createClient(url, key, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: true,
+    detectSessionInUrl: false, // we process /auth/callback manually for reliable Safari support
     multiTab: false,
     storage: typeof window !== "undefined" ? window.localStorage : undefined,
   },
