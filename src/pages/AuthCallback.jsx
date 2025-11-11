@@ -157,6 +157,8 @@ export default function AuthCallback() {
         const waitMs = 1500;
         const deadline = Date.now() + 12000; // wait up to 12s for Safari to persist session
         let authedUser = null;
+        const { data: immediateUser } = await supabase.auth.getUser();
+        authedUser = immediateUser?.user || null;
         let lastErr = null;
         while (Date.now() < deadline && !authedUser) {
           const { data: finalSession, error: finalErr } =
@@ -173,7 +175,9 @@ export default function AuthCallback() {
         }
         if (!authedUser) {
           console.error("[AuthCallback] No session user after retries", lastErr);
-          window.location.reload();
+          setMsg(
+            "Signed in, but Safari didn’t finish loading your account. Refresh this tab."
+          );
           return;
         }
         console.log("[AuthCallback] session user available:", authedUser.id);
