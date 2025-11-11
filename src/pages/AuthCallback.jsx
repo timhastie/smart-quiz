@@ -128,10 +128,18 @@ export default function AuthCallback() {
               accessToken,
               refreshToken
             );
-            await supabase.auth.setSession({
+            console.log("[AuthCallback] manual refresh response", {
+              hasAccess: Boolean(manualSession?.access_token),
+              hasRefresh: Boolean(manualSession?.refresh_token),
+            });
+            const { data: setData, error: setErr } = await supabase.auth.setSession({
               access_token: manualSession.access_token,
               refresh_token: manualSession.refresh_token,
             });
+            if (setErr) {
+              throw setErr;
+            }
+            console.log("[AuthCallback] setSession after manual refresh", setData);
           } catch (implicitErr) {
             console.error("[AuthCallback] manual implicit exchange failed:", implicitErr);
             setMsg(implicitErr.message || "Could not finish sign-in.");
