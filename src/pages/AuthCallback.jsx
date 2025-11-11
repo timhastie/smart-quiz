@@ -122,30 +122,21 @@ export default function AuthCallback() {
         } else if (hasImplicitTokens) {
           setMsg("Finishing sign-in…");
           try {
-            const shouldForceManual = isSafariBrowser();
-            if (!shouldForceManual) {
-              const { error: directErr } = await supabase.auth.setSession({
-                access_token: accessToken,
-                refresh_token: refreshToken,
-              });
-              if (!directErr) {
-                // direct path succeeded
-              } else {
-                console.warn("[AuthCallback] direct setSession failed, retrying manual:", directErr);
-                const manualSession = await exchangeImplicitTokensManually(refreshToken);
-                const { error: setErr } = await supabase.auth.setSession({
-                  access_token: manualSession.access_token,
-                  refresh_token: manualSession.refresh_token,
-                });
-                if (setErr) throw setErr;
-              }
-            } else {
-              const manualSession = await exchangeImplicitTokensManually(refreshToken);
+            if (isSafariBrowser()) {
+              const manualSession = await exchangeImplicitTokensManually(
+                refreshToken
+              );
               const { error: setErr } = await supabase.auth.setSession({
                 access_token: manualSession.access_token,
                 refresh_token: manualSession.refresh_token,
               });
               if (setErr) throw setErr;
+            } else {
+              const { error: directErr } = await supabase.auth.setSession({
+                access_token: accessToken,
+                refresh_token: refreshToken,
+              });
+              if (directErr) throw directErr;
             }
           } catch (implicitErr) {
             console.error("[AuthCallback] implicit exchange failed:", implicitErr);
