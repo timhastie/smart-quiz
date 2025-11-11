@@ -103,15 +103,19 @@ export default function AuthCallback() {
 
         const guestParam = params.get("guest");
         if (guestParam) storeGuestId(guestParam);
-        const finishWithUser = async (user) => {
+        const finishWithUser = async (user, sourceLabel = "unknown") => {
           if (!user) return false;
-          console.log("[AuthCallback] session user available:", user.id);
+          console.log("[AuthCallback] session user available:", user.id, "via", sourceLabel);
           const guestId = readGuestId();
           if (
             guestId &&
             guestId !== user.id &&
             !isAnonymousUser(user)
           ) {
+            console.log("[AuthCallback] adopt_guest start", {
+              guestId,
+              newUser: user.id,
+            });
             setMsg("Moving your quizzes to this account…");
             try {
               const { error: adoptErr } = await supabase.rpc("adopt_guest", {
@@ -120,12 +124,14 @@ export default function AuthCallback() {
               if (adoptErr) {
                 console.warn("[AuthCallback] adopt_guest error:", adoptErr);
               } else {
+                console.log("[AuthCallback] adopt_guest success");
                 clearGuestId();
               }
             } catch (adoptError) {
               console.warn("[AuthCallback] adopt_guest threw:", adoptError);
             }
           }
+          console.log("[AuthCallback] redirecting home");
           setMsg("Signed in. Redirecting…");
           window.history.replaceState({}, document.title, "/");
           nav("/", { replace: true });
@@ -162,15 +168,19 @@ export default function AuthCallback() {
           const { data: userAfterCode } = await supabase.auth.getUser();
           if (await finishWithUser(userAfterCode?.user ?? null)) return;
         } else if (hasImplicitTokens) {
-          console.log("[AuthCallback] implicit tokens detected");
+          console.log("[AuthCallback] implicit tokens detected", {
+            isSafari: isSafariBrowser(),
+          });
           setMsg("Finishing sign-in…");
           try {
             let helperUser = null;
             if (isSafariBrowser()) {
+              console.log("[AuthCallback] Safari branch → helper first");
               helperUser = await applyHelperFromHash(hashParams);
               helperUsed = true;
-              if (await finishWithUser(helperUser)) return;
+              if (await finishWithUser(helperUser, "safari-helper")) return;
             } else {
+              console.log("[AuthCallback] attempting supabase.auth.setSession");
               const { error: setErr } = await supabase.auth.setSession({
                 access_token: accessToken,
                 refresh_token: refreshToken,
@@ -179,11 +189,22 @@ export default function AuthCallback() {
                 console.warn("[AuthCallback] setSession failed, falling back to helper", setErr);
                 helperUser = await applyHelperFromHash(hashParams);
                 helperUsed = true;
-                if (await finishWithUser(helperUser)) return;
+                if (
+                  await finishWithUser(helperUser, "helper-after-setSession-error")
+                )
+                  return;
+              } else {
+                console.log("[AuthCallback] setSession succeeded");
               }
             }
             const { data: userAfterImplicit } = await supabase.auth.getUser();
-            if (await finishWithUser(userAfterImplicit?.user ?? null)) return;
+            if (
+              await finishWithUser(
+                userAfterImplicit?.user ?? null,
+                "getUser-after-implicit"
+              )
+            )
+              return;
           } catch (implicitErr) {
             console.error("[AuthCallback] implicit helper flow failed:", implicitErr);
             setMsg(implicitErr.message || "Could not finish sign-in.");
@@ -210,18 +231,24 @@ export default function AuthCallback() {
             await supabase.auth.getSession();
           if (finalErr) {
             lastErr = finalErr;
+            console.warn("[AuthCallback] getSession error while waiting", finalErr);
             await new Promise((res) => setTimeout(res, waitMs));
             continue;
           }
           authedUser = finalSession?.session?.user || null;
           if (!authedUser) {
-              if (!helperUsed && !isSafariBrowser()) {
-                console.warn("[AuthCallback] still no user; applying helper fallback");
+            if (!helperUsed && !isSafariBrowser()) {
+              console.warn("[AuthCallback] still no user; applying helper fallback");
               const helperUser = await applyHelperFromHash(hashParams);
-              if (await finishWithUser(helperUser)) return;
+              if (await finishWithUser(helperUser, "helper-from-retry-loop")) return;
               helperUsed = true;
             }
             await new Promise((res) => setTimeout(res, waitMs));
+          }
+        }
+        if (authedUser) {
+          if (await finishWithUser(authedUser, "retry-loop-final")) {
+            return;
           }
         }
         if (!authedUser) {
