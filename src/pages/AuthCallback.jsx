@@ -146,9 +146,19 @@ export default function AuthCallback() {
             });
             setMsg("Moving your quizzes to this account…");
             try {
-              const { error: adoptErr } = await supabase.rpc("adopt_guest", {
-                p_old_user: guestId,
+              const adoptTimeoutMs = 7000;
+              let timerId;
+              const timeoutPromise = new Promise((_, reject) => {
+                timerId = setTimeout(
+                  () => reject(new Error("adopt_guest timeout")),
+                  adoptTimeoutMs
+                );
               });
+              const { error: adoptErr } = await Promise.race([
+                supabase.rpc("adopt_guest", { p_old_user: guestId }),
+                timeoutPromise,
+              ]);
+              clearTimeout(timerId);
               if (adoptErr) {
                 console.warn("[AuthCallback] adopt_guest error:", adoptErr);
               } else {
