@@ -98,35 +98,39 @@ export default function AuthCallback() {
           console.log("[AuthCallback] implicit tokens detected");
           setMsg("Finishing sign-in…");
           try {
-            const privGet =
-              typeof supabase.auth._getSessionFromURL === "function"
-                ? supabase.auth._getSessionFromURL.bind(supabase.auth)
-                : null;
-            const privSave =
-              typeof supabase.auth._saveSession === "function"
-                ? supabase.auth._saveSession.bind(supabase.auth)
-                : null;
-            const privNotify =
-              typeof supabase.auth._notifyAllSubscribers === "function"
-                ? supabase.auth._notifyAllSubscribers.bind(supabase.auth)
-                : null;
-            if (!privGet || !privSave || !privNotify) {
-              throw new Error("Supabase client missing internal helpers.");
+            if (isSafariBrowser()) {
+              const privGet =
+                typeof supabase.auth._getSessionFromURL === "function"
+                  ? supabase.auth._getSessionFromURL.bind(supabase.auth)
+                  : null;
+              const privSave =
+                typeof supabase.auth._saveSession === "function"
+                  ? supabase.auth._saveSession.bind(supabase.auth)
+                  : null;
+              const privNotify =
+                typeof supabase.auth._notifyAllSubscribers === "function"
+                  ? supabase.auth._notifyAllSubscribers.bind(supabase.auth)
+                  : null;
+              if (!privGet || !privSave || !privNotify) {
+                throw new Error("Supabase client missing internal helpers.");
+              }
+              const implicitEntries = Object.fromEntries(hashParams.entries());
+              const { data, error: implicitErr } = await privGet(
+                implicitEntries,
+                "implicit"
+              );
+              if (implicitErr) throw implicitErr;
+              const session = data?.session;
+              if (!session?.user) throw new Error("Supabase returned no session user.");
+              await privSave(session);
+              await privNotify("SIGNED_IN", session);
+            } else {
+              const { error: setErr } = await supabase.auth.setSession({
+                access_token: accessToken,
+                refresh_token: refreshToken,
+              });
+              if (setErr) throw setErr;
             }
-            const implicitEntries = Object.fromEntries(hashParams.entries());
-            const { data, error: implicitErr } = await privGet(
-              implicitEntries,
-              "implicit"
-            );
-            if (implicitErr) {
-              throw implicitErr;
-            }
-            const session = data?.session;
-            if (!session?.user) {
-              throw new Error("Supabase returned no session user.");
-            }
-            await privSave(session);
-            await privNotify("SIGNED_IN", session);
           } catch (implicitErr) {
             console.error("[AuthCallback] implicit helper flow failed:", implicitErr);
             setMsg(implicitErr.message || "Could not finish sign-in.");
