@@ -202,14 +202,14 @@ export default function AuthCallback() {
 
     (async () => {
       try {
-      if (isSafariBrowser()) {
-        await runSafariAutoHandler(hashParams);
-      }
         const url = new URL(window.location.href);
         const params = url.searchParams;
         const hashParams = new URLSearchParams(
           (window.location.hash || "").replace(/^#/, "")
         );
+        if (isSafariBrowser()) {
+          await runSafariAutoHandler(hashParams);
+        }
 
         console.log("[AuthCallback] location", url.toString());
 
