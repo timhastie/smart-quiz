@@ -4,6 +4,29 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { clearGuestId, readGuestId, storeGuestId } from "../auth/guestStorage";
 
+async function exchangeImplicitTokensManually(accessToken, refreshToken) {
+  const url = `${import.meta.env.VITE_SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`;
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+    },
+    body: JSON.stringify({
+      refresh_token: refreshToken,
+    }),
+  });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(text || `Failed to refresh session (${resp.status})`);
+  }
+  const data = await resp.json();
+  if (!data?.access_token || !data?.refresh_token) {
+    throw new Error("Supabase returned no session tokens.");
+  }
+  return data;
+}
+
 function isAnonymousUser(user) {
   if (!user) return false;
   const providers = Array.isArray(user.app_metadata?.providers)
@@ -98,19 +121,20 @@ export default function AuthCallback() {
             return;
           }
         } else if (hasImplicitTokens) {
-          console.log("[AuthCallback] using implicit flow helpers");
+          console.log("[AuthCallback] manual implicit token exchange");
           setMsg("Finishing sign-in…");
-          const timeout = setTimeout(() => {
-            console.warn("[AuthCallback] setSession taking >8s");
-          }, 8000);
-          const { error: sessionErr } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          });
-          clearTimeout(timeout);
-          if (sessionErr) {
-            console.error("[AuthCallback] setSession error:", sessionErr);
-            setMsg(sessionErr.message || "Could not finish sign-in.");
+          try {
+            const manualSession = await exchangeImplicitTokensManually(
+              accessToken,
+              refreshToken
+            );
+            await supabase.auth.setSession({
+              access_token: manualSession.access_token,
+              refresh_token: manualSession.refresh_token,
+            });
+          } catch (implicitErr) {
+            console.error("[AuthCallback] manual implicit exchange failed:", implicitErr);
+            setMsg(implicitErr.message || "Could not finish sign-in.");
             return;
           }
         } else {
