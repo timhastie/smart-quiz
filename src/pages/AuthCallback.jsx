@@ -32,34 +32,6 @@ async function applyHelperFromHash(hashParams) {
   console.log("[AuthCallback] helper stored session for", data.session.user.id);
 }
 
-async function applyImplicitFromHash(hashParams) {
-  const implicitEntries = Object.fromEntries(hashParams.entries());
-  const privGet =
-    typeof supabase.auth._getSessionFromURL === "function"
-      ? supabase.auth._getSessionFromURL.bind(supabase.auth)
-      : null;
-  const privSave =
-    typeof supabase.auth._saveSession === "function"
-      ? supabase.auth._saveSession.bind(supabase.auth)
-      : null;
-  const privNotify =
-    typeof supabase.auth._notifyAllSubscribers === "function"
-      ? supabase.auth._notifyAllSubscribers.bind(supabase.auth)
-      : null;
-  if (!privGet || !privSave || !privNotify) {
-    throw new Error("Supabase client missing internal helper methods.");
-  }
-  console.log("[AuthCallback] applying implicit session via helper");
-  const { data, error } = await privGet(implicitEntries, "implicit");
-  if (error) throw error;
-  if (!data?.session?.user) {
-    throw new Error("Supabase helper returned no session user.");
-  }
-  await privSave(data.session);
-  await privNotify("SIGNED_IN", data.session);
-  console.log("[AuthCallback] helper stored session for user", data.session.user.id);
-}
-
 function isSafariBrowser() {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent.toLowerCase();
@@ -130,6 +102,34 @@ export default function AuthCallback() {
 
         const guestParam = params.get("guest");
         if (guestParam) storeGuestId(guestParam);
+        const finishWithUser = async (user) => {
+          if (!user) return false;
+          console.log("[AuthCallback] session user available:", user.id);
+          const guestId = readGuestId();
+          if (
+            guestId &&
+            guestId !== user.id &&
+            !isAnonymousUser(user)
+          ) {
+            setMsg("Moving your quizzes to this account…");
+            try {
+              const { error: adoptErr } = await supabase.rpc("adopt_guest", {
+                p_old_user: guestId,
+              });
+              if (adoptErr) {
+                console.warn("[AuthCallback] adopt_guest error:", adoptErr);
+              } else {
+                clearGuestId();
+              }
+            } catch (adoptError) {
+              console.warn("[AuthCallback] adopt_guest threw:", adoptError);
+            }
+          }
+          setMsg("Signed in. Redirecting…");
+          window.history.replaceState({}, document.title, "/");
+          nav("/", { replace: true });
+          return true;
+        };
 
         const code =
           params.get("code") ||
@@ -158,6 +158,8 @@ export default function AuthCallback() {
             setMsg(exchErr.message || "Could not finish sign-in.");
             return;
           }
+          const { data: userAfterCode } = await supabase.auth.getUser();
+          if (await finishWithUser(userAfterCode?.user ?? null)) return;
         } else if (hasImplicitTokens) {
           console.log("[AuthCallback] implicit tokens detected");
           setMsg("Finishing sign-in…");
@@ -176,6 +178,8 @@ export default function AuthCallback() {
                 helperUsed = true;
               }
             }
+            const { data: userAfterImplicit } = await supabase.auth.getUser();
+            if (await finishWithUser(userAfterImplicit?.user ?? null)) return;
           } catch (implicitErr) {
             console.error("[AuthCallback] implicit helper flow failed:", implicitErr);
             setMsg(implicitErr.message || "Could not finish sign-in.");
@@ -222,31 +226,7 @@ export default function AuthCallback() {
           );
           return;
         }
-        console.log("[AuthCallback] session user available:", authedUser.id);
-
-        const guestId = readGuestId();
-        if (guestId && guestId !== authedUser.id && !isAnonymousUser(authedUser)) {
-          setMsg("Moving your quizzes to this account…");
-          try {
-            const { error: adoptErr } = await supabase.rpc("adopt_guest", {
-              p_old_user: guestId,
-            });
-            if (adoptErr) {
-              console.warn("[AuthCallback] adopt_guest error:", adoptErr);
-            } else {
-              clearGuestId();
-            }
-          } catch (adoptError) {
-            console.warn("[AuthCallback] adopt_guest threw:", adoptError);
-          }
-        }
-
-        setMsg("Signed in. Redirecting…");
-        console.log("[AuthCallback] redirecting to /");
-        window.history.replaceState({}, document.title, "/");
-        setTimeout(() => {
-          window.location.href = "/";
-        }, 100);
+        await finishWithUser(authedUser);
       } catch (err) {
         console.error("[AuthCallback] Unexpected error:", err);
         setMsg(err?.message || "Unexpected error finishing sign-in.");
