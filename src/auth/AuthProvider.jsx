@@ -71,18 +71,34 @@ function clearPendingOAuthArtifacts(url) {
 
 async function waitForSupabaseSession(timeoutMs = 8000, intervalMs = 500) {
   const deadline = Date.now() + timeoutMs;
+  let attempt = 0;
   while (Date.now() < deadline) {
+    attempt += 1;
     const { data, error } = await supabase.auth.getSession();
     if (error) {
       console.warn("[AuthProvider] waitForSupabaseSession error:", error);
       break;
     }
     if (data?.session?.user) {
-      console.log("[AuthProvider] delayed session became available", data.session.user.id);
+      console.log(
+        "[AuthProvider] delayed session became available",
+        data.session.user.id,
+        "after",
+        attempt,
+        "polls"
+      );
       return data.session;
     }
+    const remaining = Math.max(0, deadline - Date.now());
+    console.log(
+      "[AuthProvider] waiting for Supabase session… attempt",
+      attempt,
+      "remaining",
+      `${remaining}ms`
+    );
     await new Promise((res) => setTimeout(res, intervalMs));
   }
+  console.warn("[AuthProvider] waitForSupabaseSession timed out");
   return null;
 }
 
