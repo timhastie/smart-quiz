@@ -290,7 +290,7 @@ export function AuthProvider({ children }) {
 
       // ❗ IMPORTANT:
       // Only auto-create an anonymous user if we are NOT on /auth/callback
-      if (!onCallback && pathName !== "/auth/callback") {
+      if (!onCallback) {
         console.log("[AuthProvider] no session, creating anonymous user");
         // Wait a bit more for Safari before falling back to anonymous session
         await new Promise((res) => setTimeout(res, 1200));
