@@ -4,6 +4,62 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { clearGuestId, readGuestId, storeGuestId } from "../auth/guestStorage";
 
+async function applyHelperFromHash(hashParams) {
+  const privGet =
+    typeof supabase.auth._getSessionFromURL === "function"
+      ? supabase.auth._getSessionFromURL.bind(supabase.auth)
+      : null;
+  const privSave =
+    typeof supabase.auth._saveSession === "function"
+      ? supabase.auth._saveSession.bind(supabase.auth)
+      : null;
+  const privNotify =
+    typeof supabase.auth._notifyAllSubscribers === "function"
+      ? supabase.auth._notifyAllSubscribers.bind(supabase.auth)
+      : null;
+  if (!privGet || !privSave || !privNotify) {
+    throw new Error("Supabase client missing internal helper methods.");
+  }
+  const implicitEntries = Object.fromEntries(hashParams.entries());
+  console.log("[AuthCallback] applying helper from hash entries");
+  const { data, error } = await privGet(implicitEntries, "implicit");
+  if (error) throw error;
+  if (!data?.session?.user) {
+    throw new Error("Helper returned no session user.");
+  }
+  await privSave(data.session);
+  await privNotify("SIGNED_IN", data.session);
+  console.log("[AuthCallback] helper stored session for", data.session.user.id);
+}
+
+async function applyImplicitFromHash(hashParams) {
+  const implicitEntries = Object.fromEntries(hashParams.entries());
+  const privGet =
+    typeof supabase.auth._getSessionFromURL === "function"
+      ? supabase.auth._getSessionFromURL.bind(supabase.auth)
+      : null;
+  const privSave =
+    typeof supabase.auth._saveSession === "function"
+      ? supabase.auth._saveSession.bind(supabase.auth)
+      : null;
+  const privNotify =
+    typeof supabase.auth._notifyAllSubscribers === "function"
+      ? supabase.auth._notifyAllSubscribers.bind(supabase.auth)
+      : null;
+  if (!privGet || !privSave || !privNotify) {
+    throw new Error("Supabase client missing internal helper methods.");
+  }
+  console.log("[AuthCallback] applying implicit session via helper");
+  const { data, error } = await privGet(implicitEntries, "implicit");
+  if (error) throw error;
+  if (!data?.session?.user) {
+    throw new Error("Supabase helper returned no session user.");
+  }
+  await privSave(data.session);
+  await privNotify("SIGNED_IN", data.session);
+  console.log("[AuthCallback] helper stored session for user", data.session.user.id);
+}
+
 function isSafariBrowser() {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent.toLowerCase();
@@ -89,6 +145,8 @@ export default function AuthCallback() {
           guest: guestParam || null,
         });
 
+        let helperUsed = false;
+
         if (code) {
           console.log("[AuthCallback] exchanging code via Supabase");
           setMsg("Finishing sign-in…");
@@ -105,37 +163,18 @@ export default function AuthCallback() {
           setMsg("Finishing sign-in…");
           try {
             if (isSafariBrowser()) {
-              const privGet =
-                typeof supabase.auth._getSessionFromURL === "function"
-                  ? supabase.auth._getSessionFromURL.bind(supabase.auth)
-                  : null;
-              const privSave =
-                typeof supabase.auth._saveSession === "function"
-                  ? supabase.auth._saveSession.bind(supabase.auth)
-                  : null;
-              const privNotify =
-                typeof supabase.auth._notifyAllSubscribers === "function"
-                  ? supabase.auth._notifyAllSubscribers.bind(supabase.auth)
-                  : null;
-              if (!privGet || !privSave || !privNotify) {
-                throw new Error("Supabase client missing internal helpers.");
-              }
-              const implicitEntries = Object.fromEntries(hashParams.entries());
-              const { data, error: implicitErr } = await privGet(
-                implicitEntries,
-                "implicit"
-              );
-              if (implicitErr) throw implicitErr;
-              const session = data?.session;
-              if (!session?.user) throw new Error("Supabase returned no session user.");
-              await privSave(session);
-              await privNotify("SIGNED_IN", session);
+              await applyHelperFromHash(hashParams);
+              helperUsed = true;
             } else {
               const { error: setErr } = await supabase.auth.setSession({
                 access_token: accessToken,
                 refresh_token: refreshToken,
               });
-              if (setErr) throw setErr;
+              if (setErr) {
+                console.warn("[AuthCallback] setSession failed, falling back to helper", setErr);
+                await applyHelperFromHash(hashParams);
+                helperUsed = true;
+              }
             }
           } catch (implicitErr) {
             console.error("[AuthCallback] implicit helper flow failed:", implicitErr);
@@ -168,6 +207,11 @@ export default function AuthCallback() {
           }
           authedUser = finalSession?.session?.user || null;
           if (!authedUser) {
+            if (!helperUsed && !isSafariBrowser()) {
+              console.warn("[AuthCallback] still no user; applying helper fallback");
+              await applyHelperFromHash(hashParams);
+              helperUsed = true;
+            }
             await new Promise((res) => setTimeout(res, waitMs));
           }
         }
