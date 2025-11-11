@@ -139,18 +139,28 @@ export default function AuthCallback() {
           }
         }
 
-        const { data: finalSession, error: finalErr } =
-          await supabase.auth.getSession();
-        if (finalErr) {
-          console.error("[AuthCallback] final getSession error:", finalErr);
-          setMsg(finalErr.message || "Could not finish sign-in.");
-          return;
+        const waitMs = 1500;
+        const deadline = Date.now() + 10000; // wait up to 10s for Safari to persist session
+        let authedUser = null;
+        let lastErr = null;
+        while (Date.now() < deadline && !authedUser) {
+          const { data: finalSession, error: finalErr } =
+            await supabase.auth.getSession();
+          if (finalErr) {
+            lastErr = finalErr;
+            await new Promise((res) => setTimeout(res, waitMs));
+            continue;
+          }
+          authedUser = finalSession?.session?.user || null;
+          if (!authedUser) {
+            await new Promise((res) => setTimeout(res, waitMs));
+          }
         }
-
-        const authedUser = finalSession?.session?.user;
         if (!authedUser) {
-          console.error("[AuthCallback] Session established but no user found.");
-          setMsg("Signed in, but we could not load your account.");
+          console.error("[AuthCallback] No session user after retries", lastErr);
+          setMsg(
+            "Signed in, but Safari didn’t finish loading your account. Refresh this tab."
+          );
           return;
         }
 
