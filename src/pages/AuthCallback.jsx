@@ -35,12 +35,11 @@ export default function AuthCallback() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
+    let cancelled = false;
     let unsub = null;
-    let finished = false;
 
     const finishWithUser = async (user) => {
-      if (!user || finished) return false;
-      finished = true;
+      if (!user || cancelled) return false;
       console.log("[AuthCallback] session user available:", user.id);
       const guestId = readGuestId();
       if (guestId && guestId !== user.id && !isAnonymousUser(user)) {
@@ -64,7 +63,7 @@ export default function AuthCallback() {
       return true;
     };
 
-    const watchForSession = async () => {
+    const run = async () => {
       const url = new URL(window.location.href);
       const params = url.searchParams;
       const hashParams = new URLSearchParams(
@@ -93,38 +92,36 @@ export default function AuthCallback() {
       const guestParam = params.get("guest");
       if (guestParam) storeGuestId(guestParam);
 
-      const { data: existing } = await supabase.auth.getSession();
-      if (existing?.session?.user) {
-        if (await finishWithUser(existing.session.user)) return;
+      try {
+        const { data, error: sessionErr } = await supabase.auth.getSessionFromUrl({
+          storeSession: true,
+        });
+        if (cancelled) return;
+        if (sessionErr && !isIgnorableIdentityError(sessionErr.message)) {
+          console.error("[AuthCallback] getSessionFromUrl error:", sessionErr);
+          setMsg(sessionErr.message || "Could not finish sign-in.");
+          return;
+        }
+        const sessionUser = data?.session?.user;
+        if (sessionUser && (await finishWithUser(sessionUser))) {
+          return;
+        }
+      } catch (err) {
+        console.error("[AuthCallback] getSessionFromUrl threw:", err);
       }
 
-      const waitDeadline = Date.now() + 15000;
+      setMsg("Signed in. Finalizing session…");
       unsub = supabase.auth.onAuthStateChange((_event, session) => {
         if (session?.user) {
           finishWithUser(session.user);
         }
       });
-
-      while (!finished && Date.now() < waitDeadline) {
-        const { data } = await supabase.auth.getSession();
-        if (data?.session?.user && (await finishWithUser(data.session.user))) {
-          return;
-        }
-        await new Promise((res) => setTimeout(res, 800));
-      }
-
-      if (!finished) {
-        console.error("[AuthCallback] Timed out waiting for Supabase session");
-        setMsg(
-          "Signed in, but the session didn't load automatically. Refresh this tab."
-        );
-      }
     };
 
-    watchForSession();
+    run();
 
     return () => {
-      finished = true;
+      cancelled = true;
       unsub?.data?.subscription?.unsubscribe?.();
     };
   }, [nav]);
