@@ -250,10 +250,12 @@ export default function AuthCallback() {
           setPendingOAuthState("returning");
           const safari = isSafariBrowser();
           if (safari) {
-            console.log("[AuthCallback] Safari session captured; returning via SPA nav");
+            console.log("[AuthCallback] Safari session captured; forcing reload");
+            window.location.replace("/");
+          } else {
+            window.history.replaceState({}, document.title, "/");
+            nav("/", { replace: true });
           }
-          window.history.replaceState({}, document.title, "/");
-          nav("/", { replace: true });
           return true;
         };
 
