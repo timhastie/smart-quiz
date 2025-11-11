@@ -95,6 +95,19 @@ function storePendingTokens(session) {
   }
 }
 
+function createMemoryStorage() {
+  const store = new Map();
+  return {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => {
+      store.set(key, value);
+    },
+    removeItem: (key) => {
+      store.delete(key);
+    },
+  };
+}
+
 async function runSafariAutoHandler() {
   if (!isSafariBrowser()) return false;
   try {
@@ -109,9 +122,20 @@ async function runSafariAutoHandler() {
         detectSessionInUrl: true,
         persistSession: true,
         autoRefreshToken: true,
+        storage: createMemoryStorage(),
       },
     });
-    const { data } = await helperClient.auth.getSession();
+    if (typeof helperClient.auth.getSessionFromUrl !== "function") {
+      console.warn("[AuthCallback] helper client missing getSessionFromUrl");
+      return false;
+    }
+    const { data, error: helperErr } = await helperClient.auth.getSessionFromUrl({
+      storeSession: true,
+    });
+    if (helperErr) {
+      console.warn("[AuthCallback] helper client getSessionFromUrl error", helperErr);
+      return false;
+    }
     const helperSession = data?.session;
     if (helperSession?.access_token && helperSession?.refresh_token) {
       await supabase.auth.setSession({
