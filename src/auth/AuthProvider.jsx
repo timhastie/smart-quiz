@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabase";
 import { clearGuestId, readGuestId, storeGuestId } from "./guestStorage";
 
 const OAUTH_PENDING_KEY = "smartquiz_pending_oauth";
+const OAUTH_PENDING_COOKIE = "smartquiz_auth_pending=1";
 
 function readStorage(key, storageGetter) {
   try {
@@ -28,6 +29,23 @@ function writeStorage(key, value, storageGetter) {
   }
 }
 
+function setCookieFlag(isSet) {
+  if (typeof document === "undefined") return;
+  const base = `${OAUTH_PENDING_COOKIE.split("=")[0]}=`;
+  if (isSet) {
+    document.cookie = `${OAUTH_PENDING_COOKIE}; Path=/; Max-Age=60; SameSite=Lax`;
+  } else {
+    document.cookie = `${base}; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+  }
+}
+
+function hasCookieFlag() {
+  if (typeof document === "undefined") return false;
+  return document.cookie.split(";").some((c) =>
+    c.trim().startsWith(OAUTH_PENDING_COOKIE.split("=")[0] + "=")
+  );
+}
+
 const getPendingOAuthState = () => {
   if (typeof window === "undefined") return null;
   return (
@@ -40,7 +58,16 @@ const setPendingOAuthState = (value) => {
   if (typeof window === "undefined") return;
   writeStorage(OAUTH_PENDING_KEY, value, () => window.sessionStorage);
   writeStorage(OAUTH_PENDING_KEY, value, () => window.localStorage);
+  setCookieFlag(Boolean(value));
 };
+
+function clearPendingOAuthArtifacts(url) {
+  setPendingOAuthState(null);
+  if (url && url.searchParams?.get("from") === "auth") {
+    url.searchParams.delete("from");
+    window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+  }
+}
 
 async function waitForSupabaseSession(timeoutMs = 8000, intervalMs = 500) {
   const deadline = Date.now() + timeoutMs;
@@ -113,10 +140,16 @@ export function AuthProvider({ children }) {
       const url = new URL(window.location.href);
       console.log("[AuthProvider] bootstrap start, path:", window.location.pathname);
       let pendingOAuth = getPendingOAuthState();
+      if (!pendingOAuth && hasCookieFlag()) {
+        pendingOAuth = "cookie";
+      }
       const fromAuthParam = url.searchParams.get("from") === "auth";
       if (!pendingOAuth && fromAuthParam) {
         console.log("[AuthProvider] pending OAuth inferred from URL");
         pendingOAuth = "from-url";
+      }
+      if (pendingOAuth) {
+        console.log("[AuthProvider] pending OAuth detected via", pendingOAuth);
       }
       const { data: sess, error } = await supabase.auth.getSession();
       if (error) {
@@ -126,11 +159,7 @@ export function AuthProvider({ children }) {
       // If we already have a user session, use it
       if (mounted && sess?.session?.user) {
         console.log("[AuthProvider] existing session user", sess.session.user.id);
-        setPendingOAuthState(null);
-        if (fromAuthParam) {
-          url.searchParams.delete("from");
-          window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
-        }
+        clearPendingOAuthArtifacts(url);
         setUser(sess.session.user);
         return;
       }
@@ -139,22 +168,14 @@ export function AuthProvider({ children }) {
         console.log("[AuthProvider] awaiting Supabase session after OAuth...");
         const awaited = await waitForSupabaseSession();
         if (awaited?.user) {
-          setPendingOAuthState(null);
-          if (fromAuthParam) {
-            url.searchParams.delete("from");
-            window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
-          }
+          clearPendingOAuthArtifacts(url);
           if (mounted) {
             setUser(awaited.user);
           }
           return;
         }
         console.warn("[AuthProvider] session still missing after OAuth wait, continuing.");
-        setPendingOAuthState(null);
-        if (fromAuthParam) {
-          url.searchParams.delete("from");
-          window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
-        }
+        clearPendingOAuthArtifacts(url);
       }
 
       // ❗ IMPORTANT:
