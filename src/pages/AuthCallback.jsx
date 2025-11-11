@@ -152,8 +152,11 @@ export default function AuthCallback() {
           setPendingOAuthState("returning");
           const safari = isSafariBrowser();
           if (safari) {
-            console.log("[AuthCallback] redirecting via hard reload for Safari");
-            window.location.replace("/");
+            console.log("[AuthCallback] redirecting via forced reload for Safari");
+            const target = `${window.location.origin}/?from=auth#${Date.now()}`;
+            setTimeout(() => {
+              window.location.href = target;
+            }, 50);
           } else {
             window.history.replaceState({}, document.title, "/");
             nav("/", { replace: true });
