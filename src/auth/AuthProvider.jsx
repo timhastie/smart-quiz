@@ -6,6 +6,7 @@ import { clearGuestId, readGuestId, storeGuestId } from "./guestStorage";
 const OAUTH_PENDING_KEY = "smartquiz_pending_oauth";
 const OAUTH_PENDING_COOKIE = "smartquiz_auth_pending=1";
 const OAUTH_PENDING_TOKENS = "smartquiz_pending_tokens";
+const LAST_VISITED_ROUTE_KEY = "smartquiz_last_route";
 
 function readStorage(key, storageGetter) {
   try {
@@ -190,6 +191,10 @@ export function AuthProvider({ children }) {
     try {
       const url = new URL(window.location.href);
       console.log("[AuthProvider] bootstrap start, path:", window.location.pathname);
+      let lastRoute = null;
+      try {
+        lastRoute = window.sessionStorage.getItem(LAST_VISITED_ROUTE_KEY);
+      } catch {}
       let pendingOAuth = getPendingOAuthState();
       if (!pendingOAuth && hasCookieFlag()) {
         pendingOAuth = "cookie";
@@ -287,10 +292,11 @@ export function AuthProvider({ children }) {
       }
 
       const onCallback = onAuthCallbackPath();
+      const cameFromCallback = lastRoute === "/auth/callback";
 
       // ❗ IMPORTANT:
       // Only auto-create an anonymous user if we are NOT on /auth/callback
-      if (!onAuthCallbackPath()) {
+      if (!onCallback && !cameFromCallback) {
         console.log("[AuthProvider] no session, creating anonymous user");
         // Wait a bit more for Safari before falling back to anonymous session
         await new Promise((res) => setTimeout(res, 1200));
@@ -315,7 +321,7 @@ export function AuthProvider({ children }) {
           }
         }
       } else {
-        console.log("[AuthProvider] on /auth/callback with no real session; waiting for redirect");
+        console.log("[AuthProvider] skipping anonymous session (on or from callback)");
       }
     } finally {
       if (mounted) {
@@ -344,6 +350,11 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     if (!ready || !user) return;
     if (typeof window === "undefined") return;
+    try {
+      window.sessionStorage.setItem(LAST_VISITED_ROUTE_KEY, window.location.pathname);
+    } catch {
+      /* ignore */
+    }
     const oldId = readGuestId();
     if (!oldId) return;
     if (isAnonymous(user)) return; // only adopt once we are non-anon
