@@ -5,6 +5,7 @@ import { clearGuestId, readGuestId, storeGuestId } from "./guestStorage";
 
 const OAUTH_PENDING_KEY = "smartquiz_pending_oauth";
 const OAUTH_PENDING_COOKIE = "smartquiz_auth_pending=1";
+const OAUTH_PENDING_TOKENS = "smartquiz_pending_tokens";
 
 function readStorage(key, storageGetter) {
   try {
@@ -61,8 +62,42 @@ const setPendingOAuthState = (value) => {
   setCookieFlag(Boolean(value));
 };
 
+const storePendingTokens = (session) => {
+  if (typeof window === "undefined" || !session) return;
+  const payload = {
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
+    expires_at: session.expires_at,
+  };
+  try {
+    window.sessionStorage.setItem(OAUTH_PENDING_TOKENS, JSON.stringify(payload));
+  } catch {
+    /* ignore */
+  }
+};
+
+const readPendingTokens = () => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(OAUTH_PENDING_TOKENS);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const clearPendingTokens = () => {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(OAUTH_PENDING_TOKENS);
+  } catch {
+    /* ignore */
+  }
+};
+
 function clearPendingOAuthArtifacts(url) {
   setPendingOAuthState(null);
+  clearPendingTokens();
   if (url && url.searchParams?.get("from") === "auth") {
     url.searchParams.delete("from");
     window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
@@ -182,6 +217,23 @@ export function AuthProvider({ children }) {
 
       if (pendingOAuth) {
         console.log("[AuthProvider] awaiting Supabase session after OAuth…");
+        const pendingTokens = readPendingTokens();
+        if (pendingTokens?.access_token && pendingTokens?.refresh_token) {
+          try {
+            await supabase.auth.setSession(pendingTokens);
+            clearPendingTokens();
+            const { data: refreshed } = await supabase.auth.getSession();
+            if (refreshed?.session?.user) {
+              clearPendingOAuthArtifacts(url);
+              if (mounted) {
+                setUser(refreshed.session.user);
+              }
+              return;
+            }
+          } catch (tokenErr) {
+            console.warn("[AuthProvider] pending token setSession failed", tokenErr);
+          }
+        }
         const awaited = await waitForSupabaseSession();
         if (awaited?.user) {
           clearPendingOAuthArtifacts(url);
@@ -207,6 +259,7 @@ export function AuthProvider({ children }) {
         }
         if (mounted) {
           setPendingOAuthState(null);
+          clearPendingTokens();
           console.log("[AuthProvider] anonymous user ready", anonRes?.user?.id);
           setUser(anonRes?.user ?? null);
         }

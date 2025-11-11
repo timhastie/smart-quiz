@@ -1,6 +1,7 @@
 // src/pages/AuthCallback.jsx
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { createClient } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import { clearGuestId, readGuestId, storeGuestId } from "../auth/guestStorage";
 
@@ -39,12 +40,6 @@ async function applyHelperFromHash(hashParams) {
   return data.session.user;
 }
 
-function isSafariBrowser() {
-  if (typeof navigator === "undefined") return false;
-  const ua = navigator.userAgent.toLowerCase();
-  return ua.includes("safari") && !ua.includes("chrome") && !ua.includes("android");
-}
-
 function isAnonymousUser(user) {
   if (!user) return false;
   const providers = Array.isArray(user.app_metadata?.providers)
@@ -71,6 +66,8 @@ function isIgnorableIdentityError(error, desc) {
 }
 
 const OAUTH_PENDING_KEY = "smartquiz_pending_oauth";
+const SAFARI_HELPER_FLAG = "smartquiz_safari_helper";
+const OAUTH_PENDING_TOKENS = "smartquiz_pending_tokens";
 function setPendingOAuthState(value) {
   if (typeof window === "undefined") return;
   try {
@@ -82,6 +79,53 @@ function setPendingOAuthState(value) {
   } catch {
     /* ignore */
   }
+}
+
+function storePendingTokens(session) {
+  if (typeof window === "undefined" || !session) return;
+  const payload = {
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
+    expires_at: session.expires_at,
+  };
+  try {
+    window.sessionStorage.setItem(OAUTH_PENDING_TOKENS, JSON.stringify(payload));
+  } catch {
+    /* ignore */
+  }
+}
+
+async function runSafariAutoHandler() {
+  if (!isSafariBrowser()) return false;
+  try {
+    const flag = window.sessionStorage.getItem(SAFARI_HELPER_FLAG);
+    if (flag === "done") return false;
+    const url = import.meta.env.VITE_SUPABASE_URL;
+    const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    if (!url || !key) return false;
+    const helperClient = createClient(url, key, {
+      auth: {
+        detectSessionInUrl: true,
+        persistSession: true,
+        autoRefreshToken: true,
+      },
+    });
+    const { data } = await helperClient.auth.getSession();
+    const helperSession = data?.session;
+    if (helperSession?.access_token && helperSession?.refresh_token) {
+      await supabase.auth.setSession({
+        access_token: helperSession.access_token,
+        refresh_token: helperSession.refresh_token,
+      });
+      storePendingTokens(helperSession);
+      window.sessionStorage.setItem(SAFARI_HELPER_FLAG, "done");
+      console.log("[AuthCallback] Safari auto handler populated session");
+      return true;
+    }
+  } catch (err) {
+    console.warn("[AuthCallback] Safari auto handler failed", err);
+  }
+  return false;
 }
 
 export default function AuthCallback() {
@@ -121,6 +165,9 @@ export default function AuthCallback() {
 
     (async () => {
       try {
+        if (isSafariBrowser()) {
+          await runSafariAutoHandler();
+        }
         const url = new URL(window.location.href);
         const params = url.searchParams;
         const hashParams = new URLSearchParams(
@@ -155,6 +202,10 @@ export default function AuthCallback() {
           if (!user) return false;
           console.log("[AuthCallback] session user available:", user.id, "via", sourceLabel);
           setMsg("Signed in. Redirecting…");
+          const { data: currentSession } = await supabase.auth.getSession();
+          if (currentSession?.session) {
+            storePendingTokens(currentSession.session);
+          }
           setPendingOAuthState("returning");
           const safari = isSafariBrowser();
           if (safari) {
