@@ -1,43 +1,7 @@
-// src/pages/AuthCallback.jsx
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { clearGuestId, readGuestId, storeGuestId } from "../auth/guestStorage";
-
-async function applyHelperFromHash(hashParams) {
-  const privGet =
-    typeof supabase.auth._getSessionFromURL === "function"
-      ? supabase.auth._getSessionFromURL.bind(supabase.auth)
-      : null;
-  const privSave =
-    typeof supabase.auth._saveSession === "function"
-      ? supabase.auth._saveSession.bind(supabase.auth)
-      : null;
-  const privNotify =
-    typeof supabase.auth._notifyAllSubscribers === "function"
-      ? supabase.auth._notifyAllSubscribers.bind(supabase.auth)
-      : null;
-  if (!privGet || !privSave || !privNotify) {
-    throw new Error("Supabase client missing internal helper methods.");
-  }
-  const implicitEntries = Object.fromEntries(hashParams.entries());
-  console.log("[AuthCallback] applying helper from hash entries");
-  const { data, error } = await privGet(implicitEntries, "implicit");
-  if (error) throw error;
-  if (!data?.session?.user) {
-    throw new Error("Helper returned no session user.");
-  }
-  await privSave(data.session);
-  await privNotify("SIGNED_IN", data.session);
-  console.log("[AuthCallback] helper stored session for", data.session.user.id);
-  return data.session.user;
-}
-
-function isSafariBrowser() {
-  if (typeof navigator === "undefined") return false;
-  const ua = navigator.userAgent.toLowerCase();
-  return ua.includes("safari") && !ua.includes("chrome") && !ua.includes("android");
-}
 
 function isAnonymousUser(user) {
   if (!user) return false;
@@ -64,219 +28,105 @@ function isIgnorableIdentityError(error, desc) {
   );
 }
 
-const OAUTH_PENDING_KEY = "smartquiz_pending_oauth";
-function setPendingOAuthState(value) {
-  if (typeof window === "undefined") return;
-  try {
-    if (value) {
-      window.sessionStorage.setItem(OAUTH_PENDING_KEY, value);
-    } else {
-      window.sessionStorage.removeItem(OAUTH_PENDING_KEY);
-    }
-  } catch {
-    /* ignore */
-  }
-}
-
 export default function AuthCallback() {
   const nav = useNavigate();
   const [msg, setMsg] = useState("Completing sign-in…");
 
-  const attemptSetSession = async (tokens) => {
-    if (!tokens?.access_token || !tokens?.refresh_token) {
-      throw new Error("attemptSetSession called without tokens");
-    }
-    console.log("[AuthCallback] attempting supabase.auth.setSession");
-    const timeoutMs = 5000;
-    let timeoutId;
-    try {
-      const timeoutPromise = new Promise((_, reject) => {
-        timeoutId = setTimeout(() => {
-          reject(new Error("setSession timeout"));
-        }, timeoutMs);
-      });
-      const result = await Promise.race([
-        supabase.auth.setSession(tokens),
-        timeoutPromise,
-      ]);
-      clearTimeout(timeoutId);
-      console.log("[AuthCallback] setSession resolved", result?.error || "ok");
-      if (result?.error) throw result.error;
-      return true;
-    } catch (err) {
-      clearTimeout(timeoutId);
-      console.warn("[AuthCallback] setSession did not succeed:", err);
-      throw err;
-    }
-  };
-
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    (async () => {
-      try {
-        const url = new URL(window.location.href);
-        const params = url.searchParams;
-        const hashParams = new URLSearchParams(
-          (window.location.hash || "").replace(/^#/, "")
-        );
+    let unsub = null;
+    let finished = false;
 
-        console.log("[AuthCallback] location", url.toString());
-
-        const error =
-          params.get("error") || hashParams.get("error") || null;
-        const errorDesc =
-          params.get("error_description") ||
-          hashParams.get("error_description") ||
-          "";
-
-        if (error && !isIgnorableIdentityError(error, errorDesc)) {
-          const readable = `Auth error: ${error}${
-            errorDesc ? ` — ${decodeURIComponent(errorDesc)}` : ""
-          }`;
-          console.error("[AuthCallback]", readable);
-          setMsg(readable);
-          return;
-        } else if (error) {
-          setMsg(
-            "That Google account is already linked. Signing you into it now…"
-          );
-        }
-
-        const guestParam = params.get("guest");
-        if (guestParam) storeGuestId(guestParam);
-        const finishWithUser = async (user, sourceLabel = "unknown") => {
-          if (!user) return false;
-          console.log("[AuthCallback] session user available:", user.id, "via", sourceLabel);
-          setMsg("Signed in. Redirecting…");
-          setPendingOAuthState("returning");
-          const safari = isSafariBrowser();
-          if (safari) {
-            console.log("[AuthCallback] redirecting via forced reload for Safari");
-            const target = `${window.location.origin}/?from=auth#${Date.now()}`;
-            setTimeout(() => {
-              window.location.href = target;
-            }, 50);
+    const finishWithUser = async (user) => {
+      if (!user || finished) return false;
+      finished = true;
+      console.log("[AuthCallback] session user available:", user.id);
+      const guestId = readGuestId();
+      if (guestId && guestId !== user.id && !isAnonymousUser(user)) {
+        setMsg("Moving your quizzes to this account…");
+        try {
+          const { error } = await supabase.rpc("adopt_guest", {
+            p_old_user: guestId,
+          });
+          if (error) {
+            console.warn("[AuthCallback] adopt_guest error:", error);
           } else {
-            window.history.replaceState({}, document.title, "/");
-            nav("/", { replace: true });
+            clearGuestId();
           }
-          return true;
-        };
-
-        const code =
-          params.get("code") ||
-          params.get("token") ||
-          params.get("auth_code") ||
-          null;
-        const accessToken = hashParams.get("access_token");
-        const refreshToken = hashParams.get("refresh_token");
-        const hasImplicitTokens = accessToken && refreshToken;
-        console.log("[AuthCallback] parsed params", {
-          codePresent: Boolean(code),
-          hasImplicitTokens,
-          guest: guestParam || null,
-        });
-
-        let helperUsed = false;
-
-        if (code) {
-          console.log("[AuthCallback] exchanging code via Supabase");
-          setMsg("Finishing sign-in…");
-          const { error: exchErr } = await supabase.auth.exchangeCodeForSession(
-            code
-          );
-          if (exchErr) {
-            console.error("[AuthCallback] exchangeCodeForSession error:", exchErr);
-            setMsg(exchErr.message || "Could not finish sign-in.");
-            return;
-          }
-          const { data: userAfterCode } = await supabase.auth.getUser();
-          if (await finishWithUser(userAfterCode?.user ?? null)) return;
-        } else if (hasImplicitTokens) {
-          console.log("[AuthCallback] implicit tokens detected");
-          setMsg("Finishing sign-in…");
-          try {
-            let helperUser = null;
-            try {
-              console.log("[AuthCallback] using helper for implicit tokens");
-              helperUser = await applyHelperFromHash(hashParams);
-              helperUsed = true;
-              if (await finishWithUser(helperUser, "implicit-helper")) return;
-            } catch (helperErr) {
-              console.warn("[AuthCallback] helper failed, trying setSession", helperErr);
-              await attemptSetSession({
-                access_token: accessToken,
-                refresh_token: refreshToken,
-              });
-            }
-            const { data: userAfterImplicit } = await supabase.auth.getUser();
-            if (
-              await finishWithUser(
-                userAfterImplicit?.user ?? null,
-                "getUser-after-implicit"
-              )
-            )
-              return;
-          } catch (implicitErr) {
-            console.error("[AuthCallback] implicit helper flow failed:", implicitErr);
-            setMsg(implicitErr.message || "Could not finish sign-in.");
-            return;
-          }
-        } else {
-          console.log("[AuthCallback] no code/hash tokens, checking existing session");
-          const { data } = await supabase.auth.getSession();
-          if (!data?.session?.user) {
-            console.error("[AuthCallback] Missing auth code/tokens.");
-            setMsg("Missing auth code in callback. Please try again.");
-            return;
-          }
+        } catch (err) {
+          console.warn("[AuthCallback] adopt_guest threw:", err);
         }
+      }
+      setMsg("Signed in. Redirecting…");
+      window.history.replaceState({}, document.title, "/");
+      nav("/", { replace: true });
+      return true;
+    };
 
-        const waitMs = 1500;
-        const deadline = Date.now() + 12000; // wait up to 12s for Safari to persist session
-        let authedUser = null;
-        const { data: immediateUser } = await supabase.auth.getUser();
-        authedUser = immediateUser?.user || null;
-        let lastErr = null;
-        while (Date.now() < deadline && !authedUser) {
-          const { data: finalSession, error: finalErr } =
-            await supabase.auth.getSession();
-          if (finalErr) {
-            lastErr = finalErr;
-            console.warn("[AuthCallback] getSession error while waiting", finalErr);
-            await new Promise((res) => setTimeout(res, waitMs));
-            continue;
-          }
-          authedUser = finalSession?.session?.user || null;
-          if (!authedUser) {
-            if (!helperUsed && !isSafariBrowser()) {
-              console.warn("[AuthCallback] still no user; applying helper fallback");
-              const helperUser = await applyHelperFromHash(hashParams);
-              if (await finishWithUser(helperUser, "helper-from-retry-loop")) return;
-              helperUsed = true;
-            }
-            await new Promise((res) => setTimeout(res, waitMs));
-          }
+    const watchForSession = async () => {
+      const url = new URL(window.location.href);
+      const params = url.searchParams;
+      const hashParams = new URLSearchParams(
+        (window.location.hash || "").replace(/^#/, "")
+      );
+
+      console.log("[AuthCallback] location", url.toString());
+
+      const error = params.get("error") || hashParams.get("error") || null;
+      const errorDesc =
+        params.get("error_description") ||
+        hashParams.get("error_description") ||
+        "";
+
+      if (error && !isIgnorableIdentityError(error, errorDesc)) {
+        const readable = `Auth error: ${error}${
+          errorDesc ? ` — ${decodeURIComponent(errorDesc)}` : ""
+        }`;
+        console.error("[AuthCallback]", readable);
+        setMsg(readable);
+        return;
+      } else if (error) {
+        setMsg("That Google account is already linked. Signing you into it now…");
+      }
+
+      const guestParam = params.get("guest");
+      if (guestParam) storeGuestId(guestParam);
+
+      const { data: existing } = await supabase.auth.getSession();
+      if (existing?.session?.user) {
+        if (await finishWithUser(existing.session.user)) return;
+      }
+
+      const waitDeadline = Date.now() + 15000;
+      unsub = supabase.auth.onAuthStateChange((_event, session) => {
+        if (session?.user) {
+          finishWithUser(session.user);
         }
-        if (authedUser) {
-          if (await finishWithUser(authedUser, "retry-loop-final")) {
-            return;
-          }
-        }
-        if (!authedUser) {
-          console.error("[AuthCallback] No session user after retries", lastErr);
-          setMsg(
-            "Signed in, but Safari didn’t finish loading your account. Refresh this tab."
-          );
+      });
+
+      while (!finished && Date.now() < waitDeadline) {
+        const { data } = await supabase.auth.getSession();
+        if (data?.session?.user && (await finishWithUser(data.session.user))) {
           return;
         }
-        await finishWithUser(authedUser);
-      } catch (err) {
-        console.error("[AuthCallback] Unexpected error:", err);
-        setMsg(err?.message || "Unexpected error finishing sign-in.");
+        await new Promise((res) => setTimeout(res, 800));
       }
-    })();
+
+      if (!finished) {
+        console.error("[AuthCallback] Timed out waiting for Supabase session");
+        setMsg(
+          "Signed in, but the session didn't load automatically. Refresh this tab."
+        );
+      }
+    };
+
+    watchForSession();
+
+    return () => {
+      finished = true;
+      unsub?.data?.subscription?.unsubscribe?.();
+    };
   }, [nav]);
 
   return (
