@@ -131,45 +131,23 @@ export default function AuthCallback() {
           console.log("[AuthCallback] implicit tokens detected");
           setMsg("Finishing sign-in…");
           try {
-            if (isSafariBrowser()) {
-              console.log("[AuthCallback] using manual exchange (Safari)");
-              const manualSession = await exchangeImplicitTokensManually(
-                refreshToken
-              );
-              console.log("[AuthCallback] manual exchange response", {
-                hasAccess: Boolean(manualSession.access_token),
-                hasRefresh: Boolean(manualSession.refresh_token),
-              });
-              const { data: setData, error: setErr } = await supabase.auth.setSession({
-                access_token: manualSession.access_token,
-                refresh_token: manualSession.refresh_token,
-              });
-              console.log("[AuthCallback] setSession result (Safari)", { setData, setErr });
-              if (setErr) throw setErr;
-            } else {
-              console.log("[AuthCallback] using direct setSession");
-              const { data: directData, error: directErr } = await supabase.auth.setSession({
-                access_token: accessToken,
-                refresh_token: refreshToken,
-              });
-              console.log("[AuthCallback] direct setSession result", { directData, directErr });
-              if (directErr) {
-                console.warn("[AuthCallback] direct setSession failed; retrying manual", directErr);
-                const manualSession = await exchangeImplicitTokensManually(
-                  refreshToken
-                );
-                console.log("[AuthCallback] manual exchange response (fallback)", {
-                  hasAccess: Boolean(manualSession.access_token),
-                  hasRefresh: Boolean(manualSession.refresh_token),
-                });
-                const { data: fallbackData, error: setErr } = await supabase.auth.setSession({
-                  access_token: manualSession.access_token,
-                  refresh_token: manualSession.refresh_token,
-                });
-                console.log("[AuthCallback] fallback setSession result", { fallbackData, setErr });
-                if (setErr) throw setErr;
-              }
-            }
+            const manualSession = await exchangeImplicitTokensManually(
+              refreshToken
+            );
+            console.log("[AuthCallback] manual exchange response", {
+              hasAccess: Boolean(manualSession.access_token),
+              hasRefresh: Boolean(manualSession.refresh_token),
+            });
+            const timeout = setTimeout(() => {
+              console.warn("[AuthCallback] setSession taking >8s");
+            }, 8000);
+            const { data: setData, error: setErr } = await supabase.auth.setSession({
+              access_token: manualSession.access_token,
+              refresh_token: manualSession.refresh_token,
+            });
+            clearTimeout(timeout);
+            console.log("[AuthCallback] setSession result", { setData, setErr });
+            if (setErr) throw setErr;
           } catch (implicitErr) {
             console.error("[AuthCallback] implicit exchange failed:", implicitErr);
             setMsg(implicitErr.message || "Could not finish sign-in.");
