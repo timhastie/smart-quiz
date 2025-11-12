@@ -183,39 +183,66 @@ export default function AuthCallback() {
         if (safari) {
           const a = hashParams.get("access_token");
           const r = hashParams.get("refresh_token");
-          const exp = Number(hashParams.get("expires_at")) || Math.floor(Date.now() / 1000) + 3600;
+          const exp =
+            Number(hashParams.get("expires_at")) ||
+            Math.floor(Date.now() / 1000) + 3600;
 
           if (a && r) {
-            console.log("[AuthCallback] SAFARI FAST PATH: tokens from hash → setSession + stash + delayed redirect");
+            console.log(
+              "[AuthCallback] SAFARI FAST PATH: tokens from hash → setSession + stash + delayed redirect"
+            );
 
-            // 1) Put tokens into the main client NOW so "/" lands already signed in
+            // 1) Try to set session on the main client (helps some Safari builds)
             try {
-              const rr = await supabase.auth.setSession({ access_token: a, refresh_token: r });
-              console.log("[AuthCallback] Safari fast: setSession result:", rr?.error || "ok");
+              const rr = await supabase.auth.setSession({
+                access_token: a,
+                refresh_token: r,
+              });
+              console.log(
+                "[AuthCallback] Safari fast: setSession result:",
+                rr?.error || "ok"
+              );
             } catch (e) {
               console.warn("[AuthCallback] Safari fast: setSession threw:", e);
             }
 
-            // 2) Stash for AuthProvider and mark callback
-            storePendingTokens({ access_token: a, refresh_token: r, expires_at: exp });
+            // 2) Stash tokens + mark last route for AuthProvider to skip anon bootstrap once
+            storePendingTokens({
+              access_token: a,
+              refresh_token: r,
+              expires_at: exp,
+            });
             try {
-              sessionStorage.setItem(LAST_VISITED_ROUTE_KEY, "/auth/callback");
+              sessionStorage.setItem(
+                LAST_VISITED_ROUTE_KEY,
+                "/auth/callback"
+              );
               setPendingOAuthState("returning");
             } catch {}
 
             setMsg("Signed in. Redirecting…");
 
-            // 3) Give Safari a brief moment to flush storage, then leave callback
+            // 3) Give WebKit a tick to flush sessionStorage, then redirect
             await new Promise((res) => setTimeout(res, 250));
+            console.log(
+              "[AuthCallback] Safari fast: redirect → /?source=safari-fast"
+            );
             window.location.replace("/?source=safari-fast");
 
-            // 4) Failsafe: if somehow still here, try again
+            // 4) Failsafes if Safari ignores the first navigation:
             setTimeout(() => {
               if (location.pathname.startsWith("/auth/callback")) {
-                console.warn("[AuthCallback] Safari fast failsafe → forcing redirect again");
-                window.location.replace("/?source=safari-fallback");
+                console.warn("[AuthCallback] Safari fast failsafe #1 → assign");
+                window.location.assign("/?source=safari-fast-2");
               }
-            }, 1200);
+            }, 900);
+
+            setTimeout(() => {
+              if (location.pathname.startsWith("/auth/callback")) {
+                console.warn("[AuthCallback] Safari fast failsafe #2 → href");
+                window.location.href = "/?source=safari-fast-3";
+              }
+            }, 1800);
 
             return; // Safari early-exit
           }
