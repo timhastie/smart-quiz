@@ -25,24 +25,32 @@ async function applyHelperFromHash(hashParams) {
     typeof supabase.auth._notifyAllSubscribers === "function"
       ? supabase.auth._notifyAllSubscribers.bind(supabase.auth)
       : null;
-
   if (!privGet || !privSave || !privNotify) {
     console.warn("[AuthCallback] applyHelperFromHash: missing private helpers");
     throw new Error("Supabase client missing internal helper methods.");
   }
-
   const entries = Object.fromEntries(hashParams.entries());
   console.log("[AuthCallback] applyHelperFromHash entries:", entries);
-
   const { data, error } = await privGet(entries, "implicit");
   if (error) throw error;
   if (!data?.session?.user) throw new Error("Helper returned no session user.");
-
   await privSave(data.session);
   await privNotify("SIGNED_IN", data.session);
   console.log("[AuthCallback] helper stored session for", data.session.user.id);
+  return data.session.user;
+}
 
-  return data.session; // return full session (tokens + user)
+function isAnonymousUser(user) {
+  if (!user) return false;
+  const providers = Array.isArray(user.app_metadata?.providers) ? user.app_metadata.providers : [];
+  return (
+    user.is_anonymous === true ||
+    user.user_metadata?.is_anonymous === true ||
+    user.app_metadata?.provider === "anonymous" ||
+    providers.includes("anonymous") ||
+    (Array.isArray(user.identities) && user.identities.some((i) => i?.provider === "anonymous")) ||
+    (!user.email && (providers.length === 0 || providers.includes("anonymous")))
+  );
 }
 
 function isIgnorableIdentityError(error, desc) {
@@ -103,19 +111,12 @@ async function runSafariAutoHandler(hashParams) {
       auth: { detectSessionInUrl: true, persistSession: true, autoRefreshToken: true, storage: createMemoryStorage() },
     });
 
-    // A) Try helper.getSessionFromUrl
     if (typeof helper.auth.getSessionFromUrl === "function") {
       console.log("[AuthCallback] Safari auto: helper.getSessionFromUrl");
       const { data, error } = await helper.auth.getSessionFromUrl({ storeSession: true });
       if (!error && data?.session?.user) {
         const s = data.session;
-        // make main client aware immediately
-        try {
-          const r = await supabase.auth.setSession({ access_token: s.access_token, refresh_token: s.refresh_token });
-          console.log("[AuthCallback] Safari auto: main setSession result:", r?.error || "ok");
-        } catch (e) {
-          console.warn("[AuthCallback] Safari auto: main setSession threw:", e);
-        }
+        await supabase.auth.setSession({ access_token: s.access_token, refresh_token: s.refresh_token });
         storePendingTokens(s);
         const { data: post } = await supabase.auth.getUser();
         console.log("[AuthCallback] Safari auto: main client populated via helper");
@@ -124,27 +125,22 @@ async function runSafariAutoHandler(hashParams) {
       if (error) console.warn("[AuthCallback] Safari auto: getSessionFromUrl error", error);
     }
 
-    // B) Fallback: use private helper on main client
     const hasHash = hashParams && Array.from(hashParams.keys()).length > 0;
     if (hasHash) {
       console.log("[AuthCallback] Safari auto: fallback applyHelperFromHash");
       try {
-        const s = await applyHelperFromHash(hashParams); // full session
-        // ensure tokens are on main client
-        try {
-          const r = await supabase.auth.setSession({ access_token: s.access_token, refresh_token: s.refresh_token });
-          console.log("[AuthCallback] Safari auto: setSession after helper:", r?.error || "ok");
-        } catch (e) {
-          console.warn("[AuthCallback] Safari auto: setSession after helper threw:", e);
+        const helperUser = await applyHelperFromHash(hashParams);
+        const { data: after } = await supabase.auth.getSession();
+        if (after?.session?.access_token && after?.session?.refresh_token) {
+          const s = after.session;
+          storePendingTokens(s);
+          return { user: helperUser, tokens: { access_token: s.access_token, refresh_token: s.refresh_token } };
         }
-        storePendingTokens(s);
-        return { user: s.user, tokens: { access_token: s.access_token, refresh_token: s.refresh_token } };
       } catch (e) {
         console.warn("[AuthCallback] Safari auto: applyHelperFromHash error", e);
       }
     }
 
-    // C) Last try: check main client
     const { data: main } = await supabase.auth.getSession();
     if (main?.session?.user && main.session.access_token && main.session.refresh_token) {
       const s = main.session;
@@ -179,99 +175,44 @@ export default function AuthCallback() {
         console.log("[AuthCallback] location:", url.toString());
         console.log("[AuthCallback] hash keys:", Array.from(hashParams.keys()));
 
-        // ====================== SAFARI FAST PATH (ONLY SAFARI) ======================
+        // ---------- SAFARI FAST PATH: do setSession here, then redirect ----------
         if (safari) {
           const a = hashParams.get("access_token");
           const r = hashParams.get("refresh_token");
-          const exp =
-            Number(hashParams.get("expires_at")) ||
-            Math.floor(Date.now() / 1000) + 3600;
+          const exp = Number(hashParams.get("expires_at")) || Math.floor(Date.now() / 1000) + 3600;
 
           if (a && r) {
-            console.log(
-              "[AuthCallback] SAFARI FAST PATH: tokens in hash → STASH + MULTI-REDIRECT (no awaits)"
-            );
-
-            // 1) Stash tokens immediately so AuthProvider can pick them up on /
+            console.log("[AuthCallback] SAFARI FAST PATH: tokens in hash → STASH + setSession + MULTI-REDIRECT (no awaits)");
+            storePendingTokens({ access_token: a, refresh_token: r, expires_at: exp });
             try {
-              storePendingTokens({
-                access_token: a,
-                refresh_token: r,
-                expires_at: exp,
-              });
               sessionStorage.setItem(LAST_VISITED_ROUTE_KEY, "/auth/callback");
               setPendingOAuthState("returning");
-            } catch (e) {
-              console.warn("[AuthCallback] Safari fast: stash error", e);
-            }
+            } catch {}
 
-            // 2) Fire-and-forget setSession (do NOT await; Safari can freeze if we do)
+            // *** Critical difference: install the session NOW (Safari-only) ***
             try {
-              // eslint-disable-next-line no-floating-promise
-              supabase.auth
-                .setSession({ access_token: a, refresh_token: r })
-                .then((res) =>
-                  console.log(
-                    "[AuthCallback] Safari fast: setSession (background) →",
-                    res?.error || "ok"
-                  )
-                )
-                .catch((e) =>
-                  console.warn("[AuthCallback] Safari fast: setSession threw", e)
-                );
+              console.log("[AuthCallback] fast-path setSession(...)");
+              await supabase.auth.setSession({ access_token: a, refresh_token: r });
+              const { data: afterUser } = await supabase.auth.getUser();
+              console.log("[AuthCallback] fast-path setSession user →", afterUser?.user?.id || null);
             } catch (e) {
-              console.warn("[AuthCallback] Safari fast: setSession setup error", e);
+              console.warn("[AuthCallback] fast-path setSession error:", e);
             }
 
             setMsg("Signed in. Redirecting…");
-
-            // 3) Hammer Safari with three escalating navigations.
-            const kick = (label, fn) => {
-              try {
-                console.log("[AuthCallback] Safari fast redirect →", label);
-                fn();
-              } catch (e) {
-                console.warn("[AuthCallback] Safari fast redirect failed:", label, e);
-              }
-            };
-
-            // T0 (immediate): href — highest coercion in some WebKit builds
+            // Small tick helps WebKit flush storage before navigation
             setTimeout(() => {
-              if (location.pathname.startsWith("/auth/callback")) {
-                kick("href /?source=safari-fast", () => {
-                  window.location.href = "/?source=safari-fast";
-                });
-              }
-            }, 0);
-
-            // T1 (250ms): assign
-            setTimeout(() => {
-              if (location.pathname.startsWith("/auth/callback")) {
-                kick("assign /?source=safari-fast-2", () => {
-                  window.location.assign("/?source=safari-fast-2");
-                });
-              }
-            }, 250);
-
-            // T2 (800ms): replace
-            setTimeout(() => {
-              if (location.pathname.startsWith("/auth/callback")) {
-                kick("replace /?source=safari-fast-3", () => {
-                  window.location.replace("/?source=safari-fast-3");
-                });
-              }
-            }, 800);
-
-            return; // Safari early-exit — do not continue the normal flow
+              window.location.replace("/?source=safari-fast");
+            }, 50);
+            return;
           }
         }
-        // ===========================================================================
+        // ------------------------------------------------------------------------
 
-        // Normal error handling (shared)
         const error = params.get("error") || hashParams.get("error") || null;
         const errorDesc = params.get("error_description") || hashParams.get("error_description") || "";
         if (error && !isIgnorableIdentityError(error, errorDesc)) {
-          const readable = `Auth error: ${error}${errorDesc ? ` — ${decodeURIComponent(errorDesc)}` : ""}`;
+          const readable = `Auth error: ${error}${decodeURIComponent(errorDesc ? ` — ${errorDesc}` : "")}`;
           console.error("[AuthCallback]", readable);
           setMsg(readable);
           return;
@@ -304,17 +245,14 @@ export default function AuthCallback() {
 
           setMsg("Signed in. Redirecting…");
           if (isSafariBrowser()) {
-            // hard redirect keeps Chrome flow untouched
             window.location.replace("/?source=finish");
           } else {
-            // ---- CHROME/GENERAL FLOW: UNCHANGED ----
             window.history.replaceState({}, document.title, "/");
             nav("/", { replace: true });
           }
           return true;
         };
 
-        // Safari helper (only if fast path didn’t run)
         let safariResult = null;
         if (safari) {
           safariResult = await runSafariAutoHandler(hashParams);
@@ -328,7 +266,6 @@ export default function AuthCallback() {
           }
         }
 
-        // ------------------------- CHROME/GENERAL (UNCHANGED) -------------------------
         const code = params.get("code") || params.get("token") || params.get("auth_code") || null;
         const a2 = hashParams.get("access_token");
         const r2 = hashParams.get("refresh_token");
@@ -354,8 +291,7 @@ export default function AuthCallback() {
             let helperUser = null;
             try {
               console.log("[AuthCallback] using helper for implicit tokens");
-              const session = await applyHelperFromHash(hashParams); // returns full session
-              helperUser = session.user;
+              helperUser = await applyHelperFromHash(hashParams);
               if (await finishWithUser(helperUser, "implicit-helper", { access_token: a2, refresh_token: r2 })) return;
             } catch (helperErr) {
               console.warn("[AuthCallback] helper failed, trying setSession", helperErr);
@@ -378,9 +314,7 @@ export default function AuthCallback() {
           }
           if (await finishWithUser(data.session.user, "existing-session")) return;
         }
-        // -----------------------------------------------------------------------------
 
-        // Final small wait loop (unchanged behavior)
         const waitMs = 1000;
         const deadline = Date.now() + 8000;
         let authedUser = (await supabase.auth.getUser())?.data?.user || null;
