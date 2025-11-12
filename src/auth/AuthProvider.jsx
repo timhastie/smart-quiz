@@ -6,6 +6,7 @@ const AuthCtx = createContext(null);
 
 const LS_GUEST_ID = "guest_id_before_oauth";
 const onAuthCallbackPath = () =>
+  typeof window !== "undefined" &&
   window.location.pathname.startsWith("/auth/callback");
 
 export function AuthProvider({ children }) {
@@ -13,74 +14,102 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [ready, setReady] = useState(false);
 
-  // --- central: ensure we actually HAVE a session (creates anon if needed)
-  async function ensureSession(reason = "unknown") {
-    console.log("[ensureSession] reason:", reason);
-    let { data: s } = await supabase.auth.getSession();
-
-    if (!s.session && !onAuthCallbackPath()) {
-      // create anon and wait until it’s truly available
-      console.log("[ensureSession] no session -> signInAnonymously()");
-      await supabase.auth.signInAnonymously();
-
-      // wait loop until a session exists (tight, but bounded)
-      const started = Date.now();
-      while (true) {
-        const { data: s2 } = await supabase.auth.getSession();
-        if (s2.session?.user?.id) {
-          s = s2;
-          break;
-        }
-        if (Date.now() - started > 2500) {
-          console.warn("[ensureSession] timed out waiting for anon session");
-          break;
-        }
-        await new Promise((r) => setTimeout(r, 150));
-      }
+  // ---------- helpers ----------
+  async function waitForSession(timeoutMs = 2500) {
+    const start = Date.now();
+    while (true) {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.user?.id) return data.session;
+      if (Date.now() - start > timeoutMs) return null;
+      await new Promise((r) => setTimeout(r, 120));
     }
-
-    if (s?.session?.user?.id) {
-      setSession(s.session);
-      setUser(s.session.user);
-    }
-    return s?.session ?? null;
   }
 
+  async function resetToAnonymous(tag = "reset") {
+    console.warn(`[Auth] ${tag}: resetting to anonymous`);
+    await supabase.auth.signOut();
+    const { error: anonErr } = await supabase.auth.signInAnonymously();
+    if (anonErr) {
+      console.error("[Auth] anon sign-in failed", anonErr);
+      return null;
+    }
+    const s = await waitForSession();
+    if (s) {
+      setSession(s);
+      setUser(s.user);
+    }
+    return s;
+  }
+
+  // --- central: ensure we actually HAVE a valid session (creates anon if needed)
+  async function ensureSession(reason = "unknown") {
+    console.log("[ensureSession] reason:", reason);
+
+    // If we are on /auth/callback, don’t touch session bootstrap here.
+    if (onAuthCallbackPath()) {
+      const { data } = await supabase.auth.getSession();
+      setSession(data.session ?? null);
+      setUser(data.session?.user ?? null);
+      return data.session ?? null;
+    }
+
+    // 1) Do we have any session?
+    let { data: s } = await supabase.auth.getSession();
+    if (!s?.session) {
+      console.log("[ensureSession] no session -> anon sign-in");
+      return await resetToAnonymous("no-session");
+    }
+
+    // 2) Probe the token with /auth/v1/user. If 401/403 or missing user, self-heal.
+    const probe = await supabase.auth.getUser();
+    const bad =
+      probe.error?.status === 401 ||
+      probe.error?.status === 403 ||
+      !probe.data?.user;
+
+    if (bad) {
+      console.warn("[ensureSession] stale/invalid token → self-heal");
+      return await resetToAnonymous("stale-token");
+    }
+
+    // 3) Looks good; persist state.
+    setSession(s.session);
+    setUser(s.session.user);
+    return s.session;
+  }
+
+  // ---------- boot ----------
   useEffect(() => {
     let unsub;
     (async () => {
       console.log("[AuthBoot] start");
+
+      // prime local state with whatever exists
       const { data } = await supabase.auth.getSession();
       setSession(data.session ?? null);
       setUser(data.session?.user ?? null);
       console.log("[AuthBoot] initial session:", data.session);
       console.log("[AuthBoot] initial user:", data.session?.user);
 
+      // subscribe to changes
       unsub = supabase.auth.onAuthStateChange((event, newSession) => {
         console.log("[AuthStateChange]", { event, newSession });
         setSession(newSession ?? null);
         setUser(newSession?.user ?? null);
       }).data.subscription;
 
-      // block app until we’re sure the token exists (unless we’re on callback)
-      if (!onAuthCallbackPath()) {
-        await ensureSession("boot");
-      } else {
-        console.log("[AuthBoot] on /auth/callback -> skip anon bootstrap");
-      }
-
+      // self-heal / create anon unless we're on the OAuth callback route
+      await ensureSession("boot");
       setReady(true);
     })();
 
     return () => unsub?.unsubscribe();
   }, []);
 
-  // --- Google OAuth as sign-in (not link)
+  // ---------- sign-in / sign-up / oauth ----------
   async function oauthOrLink(provider) {
     const current = (await supabase.auth.getUser()).data.user;
     const currentId = current?.id ?? null;
-
-    // remember the guest we want to adopt later
     if (currentId) {
       try {
         localStorage.setItem(LS_GUEST_ID, currentId);
@@ -90,7 +119,7 @@ export function AuthProvider({ children }) {
       }
     }
 
-    // sign out locally first to avoid identity linking
+    // local sign-out avoids identity linking; the redirect flow will auth afresh
     console.log("[oauthOrLink] signOut(local) before redirect");
     await supabase.auth.signOut({ scope: "local" });
 
@@ -106,15 +135,21 @@ export function AuthProvider({ children }) {
   }
 
   async function signin(email, password) {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
     if (error) return { error };
+    await ensureSession("after-password-signin");
     return { user: data.user };
   }
 
   async function signup(email, password) {
     const current = (await supabase.auth.getUser()).data.user;
     if (current?.id) {
-      try { localStorage.setItem(LS_GUEST_ID, current.id); } catch {}
+      try {
+        localStorage.setItem(LS_GUEST_ID, current.id);
+      } catch {}
     }
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) return { error };
@@ -124,7 +159,7 @@ export function AuthProvider({ children }) {
   async function signout() {
     await supabase.auth.signOut();
     if (!onAuthCallbackPath()) {
-      await ensureSession("signout"); // recreate anon and wait
+      await resetToAnonymous("signout");
     }
   }
 
@@ -133,8 +168,7 @@ export function AuthProvider({ children }) {
       ready,
       session,
       user,
-      // expose this so callers can await it before hitting protected endpoints
-      ensureSession,
+      ensureSession, // callers (e.g., Generate button) can await this
       oauthOrLink,
       signin,
       signup,
@@ -144,7 +178,7 @@ export function AuthProvider({ children }) {
     [ready, session, user]
   );
 
-  // Optionally gate rendering until we have a token to prevent early 401s
+  // Gate UI until we know the token is valid to avoid early 401s
   if (!ready) {
     return (
       <div className="min-h-screen grid place-items-center text-slate-100">
