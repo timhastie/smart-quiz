@@ -4,14 +4,26 @@ import { supabase } from "../lib/supabase";
 
 const AuthCtx = createContext(null);
 
-// Path helper
+// Path helper — keep this in sync with your router path for the callback page
 function onAuthCallbackPath() {
-  // keep this in sync with your router path for the callback page
-  return window.location.pathname.startsWith("/auth/callback");
+  return typeof window !== "undefined" && window.location.pathname.startsWith("/auth/callback");
 }
 
 // LocalStorage keys
 const LS_GUEST_ID = "guest_id_before_oauth";
+
+// Utility: detect anonymous user reliably
+function isAnonymousUser(u) {
+  if (!u) return false;
+  if (u.is_anonymous === true) return true;
+  if (u.user_metadata?.is_anonymous === true) return true;
+  const prov = u.app_metadata?.provider || null;
+  const provs = Array.isArray(u.app_metadata?.providers) ? u.app_metadata.providers : [];
+  if (prov === "anonymous" || provs.includes("anonymous")) return true;
+  if (Array.isArray(u.identities) && u.identities.some((i) => i?.provider === "anonymous"))
+    return true;
+  return false;
+}
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
@@ -51,47 +63,42 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  // Google OAuth (or any provider)
-  async function oauthOrLink(provider) {
-    // Record the current (guest) user id so we can adopt data after OAuth
-    const current = (await supabase.auth.getUser()).data.user;
-    if (current?.id) {
-      try {
-        localStorage.setItem(LS_GUEST_ID, current.id);
-      } catch {}
-    }
+  // Google OAuth (or any provider) — links if current user is anonymous, otherwise signs in
+  async function oauthOrLink(provider = "google") {
+    try {
+      const { data: ures } = await supabase.auth.getUser();
+      const me = ures?.user || null;
 
-    const redirectTo = `${window.location.origin}/auth/callback`;
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: {
-        redirectTo,
-        queryParams: {
-          // optional UX polish
-          access_type: "online",
-          prompt: "select_account",
-        },
-      },
-    });
-    if (error) throw error;
+      // Persist the current (guest) user id so /auth/callback can adopt it
+      try {
+        if (me?.id) localStorage.setItem(LS_GUEST_ID, me.id);
+      } catch {}
+
+      const redirectTo = `${window.location.origin}/auth/callback`;
+
+      const res = isAnonymousUser(me)
+        ? await supabase.auth.linkIdentity({ provider, options: { redirectTo } })
+        : await supabase.auth.signInWithOAuth({ provider, options: { redirectTo } });
+
+      if (res?.error) throw res.error;
+    } catch (e) {
+      console.error("[oauthOrLink] failed:", e);
+      alert(e?.message || "Sign-in failed. Please try again.");
+    }
   }
 
   async function signin(email, password) {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return { error };
     return { user: data.user };
   }
 
   async function signup(email, password) {
-    const current = (await supabase.auth.getUser()).data.user;
-    if (current?.id) {
-      try {
-        localStorage.setItem(LS_GUEST_ID, current.id);
-      } catch {}
-    }
+    const { data: ures } = await supabase.auth.getUser();
+    const me = ures?.user || null;
+    try {
+      if (me?.id) localStorage.setItem(LS_GUEST_ID, me.id);
+    } catch {}
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) return { error };
     return { user: data.user };
@@ -105,6 +112,9 @@ export function AuthProvider({ children }) {
       const { data } = await supabase.auth.getSession();
       setSession(data.session ?? null);
       setUser(data.session?.user ?? null);
+    } else {
+      setSession(null);
+      setUser(null);
     }
   }
 
