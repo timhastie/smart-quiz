@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
-const LS_KEYS = ["guest_id_before_oauth", "guest_to_adopt"];
+const LS_GUEST_ID = "guest_id_before_oauth";
 
 export default function AuthCallback() {
   const nav = useNavigate();
@@ -12,53 +12,41 @@ export default function AuthCallback() {
   useEffect(() => {
     (async () => {
       try {
-        // Ensure OAuth session exists (Supabase sets it on return)
+        // 1) Exchange the OAuth "code" in the URL for a session (PKCE flow)
+        //    Different supabase-js versions accept either no arg or the full URL.
+        //    Try the recommended call; fall back to URL variant if needed.
+        let exchErr = null;
+        try {
+          const { error } = await supabase.auth.exchangeCodeForSession();
+          exchErr = error || null;
+        } catch (e) {
+          // Older builds sometimes expect the URL passed explicitly:
+          const { error } = await supabase.auth.exchangeCodeForSession(window.location.href);
+          exchErr = error || null;
+        }
+        if (exchErr) throw exchErr;
+
+        // 2) Confirm session exists
         const { data: sessData, error: sessErr } = await supabase.auth.getSession();
         if (sessErr) throw sessErr;
-        const session = sessData?.session;
-        const newUser = session?.user;
-        if (!newUser?.id) throw new Error("No OAuth user session found.");
+        const newUser = sessData.session?.user;
+        if (!newUser?.id) throw new Error("No OAuth user session found after exchange.");
 
-        // Read any stored guest id (support both old/new keys)
+        // 3) Optional guest → member adoption
         let oldGuestId = null;
-        try {
-          for (const k of LS_KEYS) {
-            const v = localStorage.getItem(k);
-            if (v) {
-              oldGuestId = v;
-              break;
-            }
-          }
-        } catch {}
-
-        // If we have a prior guest different from current user, adopt its rows
+        try { oldGuestId = localStorage.getItem(LS_GUEST_ID) || null; } catch {}
         if (oldGuestId && oldGuestId !== newUser.id) {
           setStatus("Migrating your quizzes…");
-
-          const { error: adoptErr } = await supabase.rpc("adopt_guest", {
-            p_old_user: oldGuestId,
-          });
+          const { error: adoptErr } = await supabase.rpc("adopt_guest", { p_old_user: oldGuestId });
           if (adoptErr) throw adoptErr;
-
-          // Optional clean-up of old anon via Edge Function (if deployed)
-          try {
-            await supabase.functions.invoke("adopt-and-delete", {
-              body: { old_user_id: oldGuestId },
-            });
-          } catch {
-            // Non-fatal if function isn't deployed
-          }
-
-          try {
-            for (const k of LS_KEYS) localStorage.removeItem(k);
-          } catch {}
+          try { localStorage.removeItem(LS_GUEST_ID); } catch {}
         }
 
         setStatus("All set. Redirecting…");
         nav("/", { replace: true });
       } catch (e) {
         console.error(e);
-        setStatus("Sign-in completed, but adoption step failed. You can retry from the app.");
+        setStatus("Sign-in finished, but adoption/finalize failed. You'll be redirected…");
         setTimeout(() => nav("/", { replace: true }), 900);
       }
     })();
