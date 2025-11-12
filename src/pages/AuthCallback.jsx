@@ -4,89 +4,92 @@ import { supabase } from "../lib/supabase";
 
 const LS_GUEST_ID = "guest_id_before_oauth";
 
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 export default function AuthCallback() {
   const [msg, setMsg] = useState("Finishing sign-in...");
 
   useEffect(() => {
     (async () => {
       try {
+        console.log("[AuthCallback] start");
         console.log("[AuthCallback] URL:", window.location.href);
 
-        // Show what came back in the URL (useful when implicit flow is used)
-        const hash = window.location.hash ?? "";
-        const qp = window.location.search ?? "";
-        console.log("[AuthCallback] location.hash:", hash);
-        console.log("[AuthCallback] location.search:", qp);
+        // Let Supabase finish exchanging tokens (implicit) then poll briefly
+        let { data: s0 } = await supabase.auth.getSession();
+        console.log("[AuthCallback] initial getSession:", s0?.session);
 
-        // Get the (possibly newly-established) session
-        const { data: s1 } = await supabase.auth.getSession();
-        console.log("[AuthCallback] initial getSession:", s1?.session);
-
-        // If not populated yet, wait briefly and retry once
-        let session = s1.session;
-        if (!session) {
-          console.log("[AuthCallback] no session yet -> small wait");
-          await new Promise((r) => setTimeout(r, 400));
-          const { data: s2 } = await supabase.auth.getSession();
-          session = s2.session;
-          console.log("[AuthCallback] getSession after wait:", session);
+        let session = s0?.session ?? null;
+        for (let i = 0; !session && i < 6; i++) {
+          await sleep(250);
+          const { data: sn } = await supabase.auth.getSession();
+          session = sn?.session ?? null;
+          console.log(`[AuthCallback] getSession poll ${i + 1}:`, session);
         }
 
         if (!session?.user?.id) {
-          console.error("[AuthCallback] no session after OAuth. Aborting.");
+          console.error("[AuthCallback] no session after OAuth — abort");
           setMsg("OAuth error: no session");
           return;
         }
 
         const newUserId = session.user.id;
-        const guestId = localStorage.getItem(LS_GUEST_ID);
-        console.log("[AuthCallback] new signed-in user:", newUserId);
+        const guestId = localStorage.getItem(LS_GUEST_ID) || null;
+
+        console.log("[AuthCallback] new user id:", newUserId);
         console.log("[AuthCallback] stored guest id:", guestId);
 
-        // --- ADOPT GUEST DATA (Edge Function) ---
+        // === RPC-only ADOPTION ===
         if (guestId && guestId !== newUserId) {
-          setMsg("Adopting your previous guest data...");
-          console.log("[AuthCallback] invoking adopt-and-delete for", { old_id: guestId });
-
-          const { data, error } = await supabase.functions.invoke("adopt-and-delete", {
-            body: { old_id: guestId },
-            headers: { "x-client": "web" }, // shows in function logs if you print it
+          setMsg("Linking your guest data...");
+          console.log("[AuthCallback] calling RPC adopt_guest with", {
+            p_old_user: guestId,
           });
 
-          console.log("[AuthCallback] adopt response:", { data, error });
+          const { data, error } = await supabase.rpc("adopt_guest", {
+            p_old_user: guestId,
+          });
+
+          console.log("[AuthCallback] adopt_guest result:", { data, error });
 
           if (error) {
-            console.warn("[AuthCallback] adopt error:", error);
+            console.error("[AuthCallback] adopt_guest error:", error);
             setMsg(`Adopt error: ${error.message ?? String(error)}`);
           } else {
-            setMsg("Success! Finishing up...");
+            // Expected shape from our updated function:
+            // { ok: true, old_id, new_id, moved: { quizzes, groups, quiz_scores } }
+            const moved = data?.moved ?? {};
+            console.log(
+              "[AuthCallback] moved counts:",
+              moved.quizzes,
+              moved.groups,
+              moved.quiz_scores
+            );
+            setMsg("Success! Bringing your quizzes over…");
           }
         } else {
-          console.log("[AuthCallback] no adopt needed (no guest id or same user)");
+          console.log("[AuthCallback] no adoption needed (no guestId or same user)");
         }
-        // --- END ADOPT ---
 
-        // Clean up the localStorage flag either way
+        // Clean up local flag regardless of outcome
         try {
           localStorage.removeItem(LS_GUEST_ID);
           console.log("[AuthCallback] cleared LS guest id");
-        } catch (e) {
-          console.warn("[AuthCallback] LS cleanup warn:", e);
-        }
+        } catch {}
 
-        // Optional: strip tokens from URL for a clean history entry
+        // Optional: strip tokens from URL
         try {
-          const clean = window.location.origin + "/auth/callback";
+          const clean = `${window.location.origin}/auth/callback`;
           window.history.replaceState({}, "", clean);
           console.log("[AuthCallback] cleaned URL");
-        } catch (e) {
-          console.warn("[AuthCallback] URL clean warn:", e);
-        }
+        } catch {}
 
-        // Go to dashboard; if adopt worked, your quizzes should be attached now
+        // Go home
         window.location.replace("/");
       } catch (e) {
-        console.error("[AuthCallback] fatal error:", e);
+        console.error("[AuthCallback] fatal:", e);
         setMsg(`OAuth error: ${e?.message ?? String(e)}`);
       }
     })();
