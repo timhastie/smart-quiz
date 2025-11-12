@@ -175,6 +175,60 @@ function isAnonymous(u) {
   );
 }
 
+/* -------------------------------------------
+   OAuth adoption helper (Safari-safe)
+   Returns true if we adopted and anon should be skipped.
+-------------------------------------------- */
+function clearOAuthReturnFlags() {
+  try {
+    sessionStorage.removeItem(OAUTH_PENDING_KEY);
+    sessionStorage.removeItem(LAST_VISITED_ROUTE_KEY);
+    sessionStorage.removeItem(OAUTH_PENDING_TOKENS);
+  } catch {}
+}
+
+async function adoptOAuthIfPending(supabaseClient) {
+  try {
+    const last = sessionStorage.getItem(LAST_VISITED_ROUTE_KEY);
+    const pending = sessionStorage.getItem(OAUTH_PENDING_KEY);
+    const tokensRaw = readPendingTokens();
+
+    console.log("[AuthProvider] adoptOAuthIfPending check →", {
+      last,
+      pending,
+      hasTokens: !!(tokensRaw?.access_token && tokensRaw?.refresh_token),
+    });
+
+    if (last !== "/auth/callback" && pending !== "returning") return false;
+
+    let tokens = tokensRaw;
+    if (!tokens?.access_token || !tokens?.refresh_token) {
+      await new Promise((r) => setTimeout(r, 200));
+      const again = readPendingTokens();
+      if (again?.access_token && again?.refresh_token) tokens = again;
+    }
+    if (!tokens?.access_token || !tokens?.refresh_token) {
+      console.warn("[AuthProvider] adoptOAuthIfPending → no tokens found");
+      return false;
+    }
+
+    console.log("[AuthProvider] adopting OAuth session via setSession()");
+    const { error } = await supabaseClient.auth.setSession({
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+    });
+    if (error) console.warn("[AuthProvider] setSession error during adoption:", error);
+
+    await new Promise((r) => setTimeout(r, 150));
+    clearOAuthReturnFlags();
+    console.log("[AuthProvider] adoption complete, flags cleared");
+    return true;
+  } catch (e) {
+    console.warn("[AuthProvider] adoptOAuthIfPending threw:", e);
+    return false;
+  }
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [ready, setReady] = useState(false);
@@ -183,175 +237,187 @@ export function AuthProvider({ children }) {
   // 1) Bootstrap session
   //    - If there is an existing session, use it.
   //    - Otherwise create an anonymous session (except on /auth/callback).
+  //    - NEW: adoptOAuthIfPending() runs before any anon bootstrap.
   // ---------------------------------------------------------------------------
   useEffect(() => {
-  let mounted = true;
+    let mounted = true;
 
-  async function ensureSession() {
-    try {
-      const url = new URL(window.location.href);
-      console.log("[AuthProvider] bootstrap start, path:", window.location.pathname);
-      let lastRoute = null;
+    async function ensureSession() {
       try {
-        lastRoute = window.sessionStorage.getItem(LAST_VISITED_ROUTE_KEY);
-        console.log("[AuthProvider] last recorded route", lastRoute);
-      } catch (err) {
-        console.warn("[AuthProvider] unable to read last route", err);
-      }
-      let pendingOAuth = getPendingOAuthState();
-      if (!pendingOAuth && hasCookieFlag()) {
-        pendingOAuth = "cookie";
-      }
-      const fromAuthParam = url.searchParams.get("from") === "auth";
-      if (!pendingOAuth && fromAuthParam) {
-        console.log("[AuthProvider] pending OAuth inferred from URL");
-        pendingOAuth = "from-url";
-      }
-      if (pendingOAuth) {
-        console.log("[AuthProvider] pending OAuth detected via", pendingOAuth);
-      }
-      let sessionUser = null;
-      let shouldIgnoreExisting = false;
-      const guestId = readGuestId();
-      try {
-        const { data: sess, error } = await supabase.auth.getSession();
-        if (error) {
-          console.error("[Auth] getSession error:", error);
-        }
-        sessionUser = sess?.session?.user ?? null;
-        shouldIgnoreExisting = Boolean(
-          pendingOAuth &&
-            sessionUser &&
-            (isAnonymous(sessionUser) || (guestId && guestId === sessionUser.id))
-        );
-      } catch (err) {
-        console.error("[Auth] getSession threw:", err);
-      }
+        const url = new URL(window.location.href);
+        console.log("[AuthProvider] bootstrap start, path:", window.location.pathname);
 
-      if (mounted && sessionUser && !shouldIgnoreExisting) {
-        console.log("[AuthProvider] existing session user", sessionUser.id);
-        clearPendingOAuthArtifacts(url);
-        setUser(sessionUser);
-        return;
-      }
-
-      if (sessionUser && shouldIgnoreExisting) {
-        console.log(
-          "[AuthProvider] ignoring anonymous session during OAuth",
-          sessionUser.id
-        );
-      }
-
-      if (pendingOAuth) {
-        console.log("[AuthProvider] awaiting Supabase session after OAuth…");
-        const pendingTokens = readPendingTokens();
-        console.log("[AuthProvider] pending tokens read", pendingTokens);
-        if (pendingTokens?.access_token && pendingTokens?.refresh_token) {
-          try {
-            console.log("[AuthProvider] applying pending tokens");
-            await supabase.auth.setSession(pendingTokens);
-            console.log("[AuthProvider] pending tokens applied, fetching session");
-            clearPendingTokens();
-            const { data: refreshed } = await supabase.auth.getSession();
-            if (refreshed?.session?.user) {
-              clearPendingOAuthArtifacts(url);
-              if (mounted) {
-                setUser(refreshed.session.user);
-              }
-              return;
-            }
-          } catch (tokenErr) {
-            console.warn("[AuthProvider] pending token setSession failed", tokenErr);
+        // ***** EARLY OAUTH ADOPTION BARRIER (Chrome-safe) *****
+        const adopted = await adoptOAuthIfPending(supabase);
+        if (adopted) {
+          const { data: after } = await supabase.auth.getSession();
+          const u = after?.session?.user || null;
+          console.log("[AuthProvider] post-adopt user →", u?.id || null);
+          if (u && mounted) {
+            clearPendingOAuthArtifacts(url);
+            setUser(u);
+            setReady(true);
+            return;
           }
-        } else {
-          console.log("[AuthProvider] no pending tokens available");
         }
-        const awaited = await waitForSupabaseSession();
-        if (awaited?.user) {
+        // ******************************************************
+
+        let lastRoute = null;
+        try {
+          lastRoute = window.sessionStorage.getItem(LAST_VISITED_ROUTE_KEY);
+          console.log("[AuthProvider] last recorded route", lastRoute);
+        } catch (err) {
+          console.warn("[AuthProvider] unable to read last route", err);
+        }
+        let pendingOAuth = getPendingOAuthState();
+        if (!pendingOAuth && hasCookieFlag()) {
+          pendingOAuth = "cookie";
+        }
+        const fromAuthParam = url.searchParams.get("from") === "auth";
+        if (!pendingOAuth && fromAuthParam) {
+          console.log("[AuthProvider] pending OAuth inferred from URL");
+          pendingOAuth = "from-url";
+        }
+        if (pendingOAuth) {
+          console.log("[AuthProvider] pending OAuth detected via", pendingOAuth);
+        }
+        let sessionUser = null;
+        let shouldIgnoreExisting = false;
+        const guestId = readGuestId();
+        try {
+          const { data: sess, error } = await supabase.auth.getSession();
+          if (error) {
+            console.error("[Auth] getSession error:", error);
+          }
+          sessionUser = sess?.session?.user ?? null;
+          shouldIgnoreExisting = Boolean(
+            pendingOAuth &&
+              sessionUser &&
+              (isAnonymous(sessionUser) || (guestId && guestId === sessionUser.id))
+          );
+        } catch (err) {
+          console.error("[Auth] getSession threw:", err);
+        }
+
+        if (mounted && sessionUser && !shouldIgnoreExisting) {
+          console.log("[AuthProvider] existing session user", sessionUser.id);
           clearPendingOAuthArtifacts(url);
-          if (mounted) {
-            setUser(awaited.user);
-          }
+          setUser(sessionUser);
           return;
         }
-        // Safari sometimes needs a little extra time to surface the new session.
-        // Wait briefly before falling back to anonymous creation.
-        console.log("[AuthProvider] extra delay before fallback after OAuth wait");
-        await new Promise((res) => setTimeout(res, 1500));
-        try {
-          const { data: delayedCheck } = await supabase.auth.getSession();
-          const delayedUser = delayedCheck?.session?.user || null;
-          if (delayedUser && !isAnonymous(delayedUser)) {
-            console.log("[AuthProvider] session became available after delay", delayedUser.id);
+
+        if (sessionUser && shouldIgnoreExisting) {
+          console.log(
+            "[AuthProvider] ignoring anonymous session during OAuth",
+            sessionUser.id
+          );
+        }
+
+        if (pendingOAuth) {
+          console.log("[AuthProvider] awaiting Supabase session after OAuth…");
+          const pendingTokens = readPendingTokens();
+          console.log("[AuthProvider] pending tokens read", pendingTokens);
+          if (pendingTokens?.access_token && pendingTokens?.refresh_token) {
+            try {
+              console.log("[AuthProvider] applying pending tokens");
+              await supabase.auth.setSession(pendingTokens);
+              console.log("[AuthProvider] pending tokens applied, fetching session");
+              clearPendingTokens();
+              const { data: refreshed } = await supabase.auth.getSession();
+              if (refreshed?.session?.user) {
+                clearPendingOAuthArtifacts(url);
+                if (mounted) {
+                  setUser(refreshed.session.user);
+                }
+                return;
+              }
+            } catch (tokenErr) {
+              console.warn("[AuthProvider] pending token setSession failed", tokenErr);
+            }
+          } else {
+            console.log("[AuthProvider] no pending tokens available");
+          }
+          const awaited = await waitForSupabaseSession();
+          if (awaited?.user) {
             clearPendingOAuthArtifacts(url);
-            if (mounted) setUser(delayedUser);
+            if (mounted) {
+              setUser(awaited.user);
+            }
             return;
           }
-        } catch (delayErr) {
-          console.warn("[AuthProvider] delayed session check failed", delayErr);
-        }
-        console.warn("[AuthProvider] session still missing after OAuth wait, continuing.");
-        clearPendingOAuthArtifacts(url);
-      }
-
-      const onCallback = onAuthCallbackPath();
-      const cameFromCallback = lastRoute === "/auth/callback";
-      console.log("[AuthProvider] route states", {
-        onCallback,
-        lastRoute,
-        cameFromCallback,
-        path: window.location.pathname,
-      });
-
-      // ❗ IMPORTANT:
-      // Only auto-create an anonymous user if we are NOT on /auth/callback
-      if (!onCallback && !cameFromCallback) {
-        console.log("[AuthProvider] no session, creating anonymous user");
-        // Wait a bit more for Safari before falling back to anonymous session
-        await new Promise((res) => setTimeout(res, 1200));
-        const { data: lateSession } = await supabase.auth.getSession();
-        if (lateSession?.session?.user && !isAnonymous(lateSession.session.user)) {
-          console.log("[AuthProvider] session appeared before anonymous fallback", lateSession.session.user.id);
+          console.log("[AuthProvider] extra delay before fallback after OAuth wait");
+          await new Promise((res) => setTimeout(res, 1500));
+          try {
+            const { data: delayedCheck } = await supabase.auth.getSession();
+            const delayedUser = delayedCheck?.session?.user || null;
+            if (delayedUser && !isAnonymous(delayedUser)) {
+              console.log("[AuthProvider] session became available after delay", delayedUser.id);
+              clearPendingOAuthArtifacts(url);
+              if (mounted) setUser(delayedUser);
+              return;
+            }
+          } catch (delayErr) {
+            console.warn("[AuthProvider] delayed session check failed", delayErr);
+          }
+          console.warn("[AuthProvider] session still missing after OAuth wait, continuing.");
           clearPendingOAuthArtifacts(url);
-          if (mounted) setUser(lateSession.session.user);
-        } else {
-          const { data: anonRes, error: anonErr } =
-            await supabase.auth.signInAnonymously();
-          if (anonErr) {
-            console.error("[Auth] Anonymous sign-in failed:", anonErr);
-            if (mounted) setUser(null);
-            return;
-          }
-          if (mounted) {
-            setPendingOAuthState(null);
-            clearPendingTokens();
-            console.log("[AuthProvider] anonymous user ready", anonRes?.user?.id);
-            setUser(anonRes?.user ?? null);
-          }
         }
-      } else {
-        console.log("[AuthProvider] skipping anonymous session (on or from callback)");
-      }
-    } finally {
-      if (mounted) {
-        setReady(true);
-        console.log("[AuthProvider] bootstrap complete");
+
+        const onCallback = onAuthCallbackPath();
+        const cameFromCallback = lastRoute === "/auth/callback";
+        console.log("[AuthProvider] route states", {
+          onCallback,
+          lastRoute,
+          cameFromCallback,
+          path: window.location.pathname,
+        });
+
+        if (!onCallback && !cameFromCallback) {
+          console.log("[AuthProvider] no session, creating anonymous user");
+          await new Promise((res) => setTimeout(res, 1200));
+          const { data: lateSession } = await supabase.auth.getSession();
+          if (lateSession?.session?.user && !isAnonymous(lateSession.session.user)) {
+            console.log("[AuthProvider] session appeared before anonymous fallback", lateSession.session.user.id);
+            clearPendingOAuthArtifacts(url);
+            if (mounted) setUser(lateSession.session.user);
+          } else {
+            const { data: anonRes, error: anonErr } =
+              await supabase.auth.signInAnonymously();
+            if (anonErr) {
+              console.error("[Auth] Anonymous sign-in failed:", anonErr);
+              if (mounted) setUser(null);
+              return;
+            }
+            if (mounted) {
+              setPendingOAuthState(null);
+              clearPendingTokens();
+              console.log("[AuthProvider] anonymous user ready", anonRes?.user?.id);
+              setUser(anonRes?.user ?? null);
+            }
+          }
+        } else {
+          console.log("[AuthProvider] skipping anonymous session (on or from callback)");
+        }
+      } finally {
+        if (mounted) {
+          setReady(true);
+          console.log("[AuthProvider] bootstrap complete");
+        }
       }
     }
-  }
 
-  ensureSession();
+    ensureSession();
 
-  const { data: listener } = supabase.auth.onAuthStateChange((evt, session) => {
-    console.log("[AuthProvider] onAuthStateChange", evt, session?.user?.id);
-    if (mounted) setUser(session?.user ?? null);
-  });
+    const { data: listener } = supabase.auth.onAuthStateChange((evt, session) => {
+      console.log("[AuthProvider] onAuthStateChange", evt, session?.user?.id);
+      if (mounted) setUser(session?.user ?? null);
+    });
 
-  return () => {
-    mounted = false;
-    listener?.subscription?.unsubscribe?.();
-  };
-}, []);
+    return () => {
+      mounted = false;
+      listener?.subscription?.unsubscribe?.();
+    };
+  }, []);
 
   // ---------------------------------------------------------------------------
   // 2) One-time adopt after login (fallback when callback didn't have ?guest=)
@@ -359,15 +425,15 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     if (!ready || !user) return;
     if (typeof window === "undefined") return;
-      try {
-        window.sessionStorage.setItem(LAST_VISITED_ROUTE_KEY, window.location.pathname);
-        console.log("[AuthProvider] stored last route", window.location.pathname);
-      } catch (err) {
-        console.warn("[AuthProvider] unable to store last route", err);
-      }
+    try {
+      window.sessionStorage.setItem(LAST_VISITED_ROUTE_KEY, window.location.pathname);
+      console.log("[AuthProvider] stored last route", window.location.pathname);
+    } catch (err) {
+      console.warn("[AuthProvider] unable to store last route", err);
+    }
     const oldId = readGuestId();
     if (!oldId) return;
-    if (isAnonymous(user)) return; // only adopt once we are non-anon
+    if (isAnonymous(user)) return;
 
     (async () => {
       try {
@@ -392,7 +458,6 @@ export function AuthProvider({ children }) {
 
   // ---------------------------------------------------------------------------
   // 3) Email/password: ALWAYS signUp (so they confirm email)
-  //    - When anonymous, store guest id so callback / post-login can adopt.
   // ---------------------------------------------------------------------------
   async function signupOrLink(email, password) {
     const {
@@ -427,7 +492,7 @@ export function AuthProvider({ children }) {
   }
 
   // ---------------------------------------------------------------------------
-  // 4) Google sign-in (guest → real upgrade with quiz adoption)
+  // 4) Google sign-in
   // ---------------------------------------------------------------------------
   async function googleSignIn() {
     const {
@@ -449,9 +514,7 @@ export function AuthProvider({ children }) {
       provider: "google",
       options: {
         redirectTo,
-        queryParams: {
-          prompt: "select_account",
-        },
+        queryParams: { prompt: "select_account" },
       },
     });
 
