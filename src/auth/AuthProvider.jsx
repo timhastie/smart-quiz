@@ -459,6 +459,36 @@ export function AuthProvider({ children }) {
     })();
   }, [ready, user?.id]);
 
+  // FINAL-RESORT SAFARI REDIRECT: if we are still on /auth/callback
+  // and a *non-anonymous* session exists, force navigation to "/".
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onCallback = window.location.pathname.startsWith("/auth/callback");
+    if (!ready || !onCallback) return;
+
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const u = data?.session?.user || null;
+        const nonAnon = u && !isAnonymous(u);
+        console.log("[AuthProvider] callback redirect check →", {
+          onCallback,
+          userId: u?.id || null,
+          nonAnon,
+        });
+        if (!nonAnon) return;
+
+        const target = "/?from=callback";
+        try { window.history.replaceState({}, "", target); } catch {}
+        setTimeout(() => { try { window.location.replace(target); } catch {} }, 10);
+        setTimeout(() => { try { window.location.assign(target); } catch {} }, 60);
+        setTimeout(() => { try { window.location.href = target; } catch {} }, 140);
+      } catch (e) {
+        console.warn("[AuthProvider] callback redirect check error:", e);
+      }
+    })();
+  }, [ready, user?.id]);
+
   async function signupOrLink(email, password) {
     const { data: { user: current } = {} } = await supabase.auth.getUser();
     if (current?.is_anonymous) {
