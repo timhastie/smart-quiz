@@ -90,8 +90,7 @@ GlobalWorkerOptions.workerSrc = workerSrc;
 /* ========================================================================== */
 export default function Dashboard() {
   const nav = useNavigate();
-  const { user, ready, signout, signupOrLink, signin, googleSignIn } = useAuth();
-  
+  const { user, ready, signout, signupOrLink, signin, oauthOrLink } = useAuth();
 
 const [allRevisitScore, setAllRevisitScore] = useState(null);
 const [groupRevisitScores, setGroupRevisitScores] = useState(new Map());
@@ -240,14 +239,18 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
   }
 
   async function continueWithGoogle() {
-    try {
-      await googleSignIn();
-    } catch (e) {
-      console.error(e);
-      alert("Google sign-in failed. Please try again.");
+  try {
+    // If current session is anonymous, stash the guest id so AuthCallback can adopt it.
+    const { data: { user: current } = {} } = await supabase.auth.getUser();
+    if (current?.is_anonymous) {
+      localStorage.setItem("guest_to_adopt", current.id);
     }
+    await oauthOrLink("google");
+  } catch (e) {
+    console.error(e);
+    alert("Google sign-in failed. Please try again.");
   }
-
+}
   async function handleSignOut() {
     await signout();
     setAuthMessage(
