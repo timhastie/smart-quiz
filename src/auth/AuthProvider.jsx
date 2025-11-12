@@ -18,8 +18,7 @@ function isAnonymousUser(u) {
   const prov = u.app_metadata?.provider || null;
   const provs = Array.isArray(u.app_metadata?.providers) ? u.app_metadata.providers : [];
   if (prov === "anonymous" || provs.includes("anonymous")) return true;
-  if (Array.isArray(u.identities) && u.identities.some((i) => i?.provider === "anonymous"))
-    return true;
+  if (Array.isArray(u.identities) && u.identities.some((i) => i?.provider === "anonymous")) return true;
   return false;
 }
 
@@ -67,14 +66,7 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  /**
-   * IMPORTANT: Do NOT use linkIdentity here.
-   * Reason: If that Google identity is already tied to any account, Supabase returns
-   * “Identity is already linked to another user.” That’s your screenshot.
-   *
-   * Instead: Always redirect with signInWithOAuth().
-   * On /auth/callback we adopt/merge the guest into the new Google user.
-   */
+  // Always redirect; do NOT call linkIdentity (causes "Identity already linked" when reused Google).
   async function oauthOrLink(provider = "google") {
     try {
       const { data: ures } = await supabase.auth.getUser();
@@ -100,11 +92,16 @@ export function AuthProvider({ children }) {
       }
 
       const redirectTo = `${window.location.origin}/auth/callback`;
-      console.log("[oauthOrLink] redirecting to provider:", provider, "redirectTo:", redirectTo);
+      console.log("[oauthOrLink] redirecting to provider:", provider, "redirectTo:", redirectTo, "flowType: pkce");
 
+      // Use PKCE/code flow (preferred)
       const { error } = await supabase.auth.signInWithOAuth({
         provider,
-        options: { redirectTo, queryParams: { prompt: "select_account", access_type: "online" } },
+        options: {
+          redirectTo,
+          queryParams: { prompt: "select_account", access_type: "online" },
+          flowType: "pkce",
+        },
       });
 
       if (error) {
@@ -145,7 +142,7 @@ export function AuthProvider({ children }) {
       console.error("[signup] error:", error);
       return { error };
     }
-    console.log("[signup] initiated; confirm email required. data:", data);
+    console.log("[signup] initiated (confirm email may be required). data:", data);
     return { user: data.user };
   }
 
