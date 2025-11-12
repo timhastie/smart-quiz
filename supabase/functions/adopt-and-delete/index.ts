@@ -3,144 +3,122 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const ANON_KEY     = Deno.env.get("SUPABASE_ANON_KEY")!;
+const SERVICE_KEY  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-// CORS helpers
-function corsHeaders(req: Request): Headers {
-  const h = new Headers();
-  const origin = req.headers.get("Origin") ?? "*";
-  h.set("Access-Control-Allow-Origin", origin);
-  h.set("Vary", "Origin");
-  h.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-  // IMPORTANT: allow the headers Supabase client sends
-  h.set(
-    "Access-Control-Allow-Headers",
-    "authorization, x-client-info, apikey, content-type",
-  );
-  h.set("Access-Control-Max-Age", "86400");
-  return h;
+/** Allow production + local dev */
+const ALLOW_ORIGINS = new Set([
+  "https://www.smart-quiz.app",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+]);
+
+function corsHeaders(origin: string | null) {
+  const o = origin && ALLOW_ORIGINS.has(origin) ? origin : "";
+  return {
+    "Access-Control-Allow-Origin": o, // empty string -> no wildcard; OK for preflight read
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers":
+      "authorization, x-client-info, apikey, content-type, x-client",
+    "Vary": "Origin",
+  };
 }
 
 serve(async (req) => {
-  const t0 = performance.now();
-  const cors = corsHeaders(req);
+  const origin = req.headers.get("Origin");
+  const baseHeaders = corsHeaders(origin);
 
-  // Preflight
+  // Always answer preflight nicely
   if (req.method === "OPTIONS") {
-    console.log("[adopt] OPTIONS from", req.headers.get("Origin"));
-    return new Response(null, { status: 204, headers: cors });
+    console.log("[adopt] OPTIONS from", origin);
+    return new Response(null, { status: 204, headers: baseHeaders });
   }
 
   try {
-    console.log("[adopt] START", {
-      method: req.method,
-      origin: req.headers.get("Origin"),
-      hasAuth: !!req.headers.get("Authorization"),
-      xClientInfo: req.headers.get("x-client-info") ?? null,
-    });
-
-    if (req.method !== "POST") {
-      return new Response(JSON.stringify({ error: "POST required" }), {
-        status: 405,
-        headers: cors,
-      });
-    }
-
-    const body = await req.json().catch(() => ({}));
-    const old_id: string | undefined = body?.old_id;
-    console.log("[adopt] body:", body);
-
+    const { old_id } = await req.json().catch(() => ({}));
     if (!old_id) {
+      console.log("[adopt] missing old_id");
       return new Response(JSON.stringify({ error: "old_id required" }), {
         status: 400,
-        headers: cors,
+        headers: { ...baseHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Caller-scoped client (uses caller's JWT)
+    // Caller’s JWT client (runs SECURITY DEFINER RPC)
     const userClient = createClient(SUPABASE_URL, ANON_KEY, {
       global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
     });
 
-    // Must be authenticated (the new real user)
     const me = await userClient.auth.getUser();
-    const newUser = me.data.user;
-    if (!newUser) {
+    if (!me.data.user) {
       console.log("[adopt] unauthorized");
       return new Response(JSON.stringify({ error: "unauthorized" }), {
         status: 401,
-        headers: cors,
+        headers: { ...baseHeaders, "Content-Type": "application/json" },
       });
     }
-    console.log("[adopt] newUser.id:", newUser.id, "old_id:", old_id);
 
-    // 1) Move rows via SECURITY DEFINER RPC
-    const rpcStart = performance.now();
-    const { data: rpcData, error: rpcErr } = await userClient.rpc("adopt_guest", {
-      p_old_user: old_id,
-    });
-    console.log("[adopt] RPC adopt_guest result:", { rpcData, rpcErr, ms: Math.round(performance.now() - rpcStart) });
-    if (rpcErr) {
-      return new Response(JSON.stringify({ error: rpcErr.message }), {
+    const newUserId = me.data.user.id;
+    console.log("[adopt] start", { newUserId, old_id });
+
+    // Run your SECURITY DEFINER RPC to move rows
+    const rpc = await userClient.rpc("adopt_guest", { p_old_user: old_id });
+    if (rpc.error) {
+      console.error("[adopt] adopt_guest error", rpc.error);
+      return new Response(JSON.stringify({ error: rpc.error.message }), {
         status: 400,
-        headers: cors,
+        headers: { ...baseHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // 2) Delete old anonymous user (service role)
+    // Admin delete of old anon (best-effort)
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
 
     const getOld = await admin.auth.admin.getUserById(old_id);
-    console.log("[adopt] getUserById:", {
-      error: getOld.error?.message ?? null,
-      found: !!getOld.data?.user,
-    });
-
     let deleted = false;
-    let deleteWarn: string | null = null;
+    let deleteWarn: string | undefined;
 
-    if (getOld.data?.user) {
-      const app = getOld.data.user.app_metadata ?? {};
-      const providers: string[] = Array.isArray(app.providers) ? app.providers : [];
-      const provider = app.provider as string | undefined;
-      const isAnon = provider === "anonymous" || providers.includes("anonymous");
+    if (getOld.error) {
+      console.warn("[adopt] getUserById error", getOld.error.message);
+    } else {
+      const u = getOld.data.user;
+      const isAnon =
+        u?.app_metadata?.provider === "anonymous" ||
+        (Array.isArray(u?.app_metadata?.providers) &&
+         u!.app_metadata!.providers.includes("anonymous"));
 
       if (isAnon) {
-        const delStart = performance.now();
-        const delRes = await admin.auth.admin.deleteUser(old_id);
-        deleted = !delRes.error;
-        deleteWarn = delRes.error?.message ?? null;
-        console.log("[adopt] deleteUser:", {
-          deleted,
-          deleteWarn,
-          ms: Math.round(performance.now() - delStart),
-        });
+        const del = await admin.auth.admin.deleteUser(old_id);
+        if (del.error) {
+          deleteWarn = del.error.message;
+          console.warn("[adopt] deleteUser warn", deleteWarn);
+        } else {
+          deleted = true;
+          console.log("[adopt] deleted old anon", old_id);
+        }
       } else {
-        console.log("[adopt] old_id is NOT anonymous; skipping delete.");
+        console.log("[adopt] old user not anon, skipping delete");
       }
-    } else {
-      console.log("[adopt] old user not found; skipping delete.");
     }
 
-    const ms = Math.round(performance.now() - t0);
-    return new Response(
-      JSON.stringify({
-        ok: true,
-        new_user_id: newUser.id,
-        old_id,
-        rpc: rpcData ?? null,
-        deleted_old_user: deleted,
-        delete_warn: deleteWarn,
-        ms,
-      }),
-      { status: 200, headers: cors },
-    );
+    const body = {
+      ok: true,
+      new_user_id: newUserId,
+      old_id,
+      rpc: rpc.data ?? null, // surface any row counts your function returns
+      deleted_old_user: deleted,
+      delete_warn: deleteWarn,
+    };
+
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { ...baseHeaders, "Content-Type": "application/json" },
+    });
   } catch (e) {
-    console.error("[adopt] FATAL:", e);
+    console.error("[adopt] fatal", e);
     return new Response(JSON.stringify({ error: String(e?.message ?? e) }), {
       status: 500,
-      headers: cors,
+      headers: { ...corsHeaders(req.headers.get("Origin")), "Content-Type": "application/json" },
     });
   }
 });
