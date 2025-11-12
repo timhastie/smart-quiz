@@ -33,17 +33,15 @@ export default function AuthProvider({ children }) {
   const [ready, setReady] = useState(false);
   const [user, setUser] = useState(null);
 
-  // Don’t auto-create anon user on the callback route
+  // Bootstrap session, but do NOT auto-create anon on the callback route
   useEffect(() => {
     let mounted = true;
 
     (async () => {
-      // Bootstrap session
       const { data } = await supabase.auth.getUser();
       if (!mounted) return;
 
       if (!data?.user && !onAuthCallbackPath()) {
-        // ensure a guest session exists for first-time visitors
         await supabase.auth.signInAnonymously();
         const { data: d2 } = await supabase.auth.getUser();
         if (!mounted) return;
@@ -56,7 +54,6 @@ export default function AuthProvider({ children }) {
       setReady(true);
     })();
 
-    // react to auth changes
     const { data: sub } = supabase.auth.onAuthStateChange((_ev, session) => {
       setUser(session?.user ?? null);
     });
@@ -70,7 +67,6 @@ export default function AuthProvider({ children }) {
   async function signupOrLink(email, password) {
     const u = (await supabase.auth.getUser()).data?.user;
     if (isAnonUser(u)) {
-      // upgrade the guest via email/password linking
       const { data, error } = await supabase.auth.linkIdentity({
         provider: "email",
         email,
@@ -97,29 +93,42 @@ export default function AuthProvider({ children }) {
   }
 
   /**
-   * Start OAuth (Google by default). We do NOT call linkIdentity for OAuth
-   * because it can redirect immediately and we can't catch the "already linked"
-   * case reliably. We rely on /auth/callback to adopt/merge any guest data.
+   * OAuth (Google default).
+   * IMPORTANT: If a guest session exists, Supabase would try to LINK.
+   * To avoid "identity already linked to another user", we:
+   *  1) remember the guest id
+   *  2) sign out the guest (clears session)
+   *  3) start a normal OAuth sign-in
+   * /auth/callback will adopt the remembered guest id.
    */
   async function oauthOrLink(provider = "google", opts = {}) {
     const curUser = (await supabase.auth.getUser()).data?.user;
+    const isGuest = isAnonUser(curUser);
+
     const redirectTo = buildRedirectURL("/auth/callback", {
-      guest: isAnonUser(curUser) ? "1" : "",
+      guest: isGuest ? "1" : "",
       provider,
     });
+
+    if (isGuest) {
+      try {
+        // persist the guest id so callback can adopt it
+        localStorage.setItem("pending_guest_id", curUser.id);
+      } catch {}
+      // kill the guest session so OAuth becomes a *sign-in*, not a link
+      await supabase.auth.signOut();
+    }
 
     await supabase.auth.signInWithOAuth({
       provider,
       options: {
         redirectTo,
-        // helps users choose the right Google account:
         queryParams: { prompt: "select_account" },
         ...opts?.options,
       },
     });
   }
 
-  // convenience for UI
   async function googleSignIn() {
     return oauthOrLink("google");
   }
