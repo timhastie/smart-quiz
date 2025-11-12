@@ -293,6 +293,12 @@ export function AuthProvider({ children }) {
 
       const onCallback = onAuthCallbackPath();
       const cameFromCallback = lastRoute === "/auth/callback";
+      console.log("[AuthProvider] route states", {
+        onCallback,
+        lastRoute,
+        cameFromCallback,
+        path: window.location.pathname,
+      });
 
       // ❗ IMPORTANT:
       // Only auto-create an anonymous user if we are NOT on /auth/callback

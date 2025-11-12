@@ -66,6 +66,7 @@ function isIgnorableIdentityError(error, desc) {
 }
 
 const OAUTH_PENDING_KEY = "smartquiz_pending_oauth";
+const LAST_VISITED_ROUTE_KEY = "smartquiz_last_route";
 const SAFARI_HELPER_FLAG = "smartquiz_safari_helper";
 const OAUTH_PENDING_TOKENS = "smartquiz_pending_tokens";
 function setPendingOAuthState(value) {
@@ -256,6 +257,11 @@ export default function AuthCallback() {
             console.log("[AuthCallback] stored fallback tokens for", user.id);
           }
           setPendingOAuthState("returning");
+          try {
+            window.sessionStorage.setItem(LAST_VISITED_ROUTE_KEY, "/auth/callback");
+          } catch {
+            /* ignore */
+          }
           const safari = isSafariBrowser();
           if (safari) {
             console.log("[AuthCallback] Safari session captured; forcing reload");
