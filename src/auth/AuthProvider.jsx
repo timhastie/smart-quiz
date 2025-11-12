@@ -194,7 +194,10 @@ export function AuthProvider({ children }) {
       let lastRoute = null;
       try {
         lastRoute = window.sessionStorage.getItem(LAST_VISITED_ROUTE_KEY);
-      } catch {}
+        console.log("[AuthProvider] last recorded route", lastRoute);
+      } catch (err) {
+        console.warn("[AuthProvider] unable to read last route", err);
+      }
       let pendingOAuth = getPendingOAuthState();
       if (!pendingOAuth && hasCookieFlag()) {
         pendingOAuth = "cookie";
@@ -356,11 +359,12 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     if (!ready || !user) return;
     if (typeof window === "undefined") return;
-    try {
-      window.sessionStorage.setItem(LAST_VISITED_ROUTE_KEY, window.location.pathname);
-    } catch {
-      /* ignore */
-    }
+      try {
+        window.sessionStorage.setItem(LAST_VISITED_ROUTE_KEY, window.location.pathname);
+        console.log("[AuthProvider] stored last route", window.location.pathname);
+      } catch (err) {
+        console.warn("[AuthProvider] unable to store last route", err);
+      }
     const oldId = readGuestId();
     if (!oldId) return;
     if (isAnonymous(user)) return; // only adopt once we are non-anon

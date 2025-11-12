@@ -207,6 +207,12 @@ export default function AuthCallback() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    try {
+      window.sessionStorage.setItem(LAST_VISITED_ROUTE_KEY, window.location.pathname);
+      console.log("[AuthCallback] initial route stored", window.location.pathname);
+    } catch (err) {
+      console.warn("[AuthCallback] unable to store initial route", err);
+    }
 
     (async () => {
       try {
