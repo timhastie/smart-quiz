@@ -177,36 +177,77 @@ export default function AuthCallback() {
 
         // ---------- SAFARI FAST PATH: do setSession here, then redirect ----------
         if (safari) {
-          const a = hashParams.get("access_token");
-          const r = hashParams.get("refresh_token");
-          const exp = Number(hashParams.get("expires_at")) || Math.floor(Date.now() / 1000) + 3600;
+  const a = hashParams.get("access_token");
+  const r = hashParams.get("refresh_token");
+  const exp = Number(hashParams.get("expires_at")) || Math.floor(Date.now() / 1000) + 3600;
 
-          if (a && r) {
-            console.log("[AuthCallback] SAFARI FAST PATH: tokens in hash → STASH + setSession + MULTI-REDIRECT (no awaits)");
-            storePendingTokens({ access_token: a, refresh_token: r, expires_at: exp });
-            try {
-              sessionStorage.setItem(LAST_VISITED_ROUTE_KEY, "/auth/callback");
-              setPendingOAuthState("returning");
-            } catch {}
+  if (a && r) {
+    console.log("[AuthCallback] SAFARI FAST PATH: tokens in hash → STASH + setSession + robust redirect");
+    // 1) Stash for AuthProvider (paranoia)
+    try {
+      sessionStorage.setItem(LAST_VISITED_ROUTE_KEY, "/auth/callback");
+      setPendingOAuthState("returning");
+    } catch {}
+    try {
+      sessionStorage.setItem(
+        OAUTH_PENDING_TOKENS,
+        JSON.stringify({ access_token: a, refresh_token: r, expires_at: exp })
+      );
+    } catch {}
 
-            // *** Critical difference: install the session NOW (Safari-only) ***
-            try {
-              console.log("[AuthCallback] fast-path setSession(...)");
-              await supabase.auth.setSession({ access_token: a, refresh_token: r });
-              const { data: afterUser } = await supabase.auth.getUser();
-              console.log("[AuthCallback] fast-path setSession user →", afterUser?.user?.id || null);
-            } catch (e) {
-              console.warn("[AuthCallback] fast-path setSession error:", e);
-            }
+    // 2) Install session NOW (key difference vs Chrome)
+    try {
+      console.log("[AuthCallback] fast-path setSession(...)");
+      await supabase.auth.setSession({ access_token: a, refresh_token: r });
+      const { data: afterUser } = await supabase.auth.getUser();
+      console.log("[AuthCallback] fast-path setSession user →", afterUser?.user?.id || null);
+    } catch (e) {
+      console.warn("[AuthCallback] fast-path setSession error:", e);
+    }
 
-            setMsg("Signed in. Redirecting…");
-            // Small tick helps WebKit flush storage before navigation
-            setTimeout(() => {
-              window.location.replace("/?source=safari-fast");
-            }, 50);
-            return;
-          }
-        }
+    // 3) Belt-and-suspenders redirect: several methods with tiny delays
+    setMsg("Signed in. Redirecting…");
+
+    const target = "/?source=safari-fast";
+    const hardRedirect = () => {
+      try { window.location.href = target; } catch {}
+    };
+
+    try {
+      // Try replace() immediately
+      console.log("[AuthCallback] safari redirect: replace()");
+      window.location.replace(target);
+    } catch {}
+
+    // Nudge history (sometimes makes WebKit cooperate)
+    try {
+      console.log("[AuthCallback] safari redirect: history.replaceState()");
+      window.history.replaceState({}, "", target);
+    } catch {}
+
+    // Staggered fallbacks (micro-delays)
+    setTimeout(() => {
+      try { console.log("[AuthCallback] safari redirect: assign()"); window.location.assign(target); } catch {}
+    }, 40);
+    setTimeout(() => {
+      console.log("[AuthCallback] safari redirect: href fallback");
+      hardRedirect();
+    }, 120);
+    setTimeout(() => {
+      // Last-resort meta refresh injection (still same page, no external script)
+      try {
+        console.log("[AuthCallback] safari redirect: meta refresh fallback");
+        const meta = document.createElement("meta");
+        meta.httpEquiv = "refresh";
+        meta.content = `0;url=${target}`;
+        document.head.appendChild(meta);
+      } catch {}
+    }, 250);
+
+    // IMPORTANT: stop further processing on this page
+    return;
+  }
+}
         // ------------------------------------------------------------------------
 
         const error = params.get("error") || hashParams.get("error") || null;
