@@ -189,62 +189,80 @@ export default function AuthCallback() {
 
           if (a && r) {
             console.log(
-              "[AuthCallback] SAFARI FAST PATH: tokens from hash → setSession + stash + delayed redirect"
+              "[AuthCallback] SAFARI FAST PATH: tokens in hash → STASH + MULTI-REDIRECT (no awaits)"
             );
 
-            // 1) Try to set session on the main client (helps some Safari builds)
+            // 1) Stash tokens immediately so AuthProvider can pick them up on /
             try {
-              const rr = await supabase.auth.setSession({
+              storePendingTokens({
                 access_token: a,
                 refresh_token: r,
+                expires_at: exp,
               });
-              console.log(
-                "[AuthCallback] Safari fast: setSession result:",
-                rr?.error || "ok"
-              );
+              sessionStorage.setItem(LAST_VISITED_ROUTE_KEY, "/auth/callback");
+              setPendingOAuthState("returning");
             } catch (e) {
-              console.warn("[AuthCallback] Safari fast: setSession threw:", e);
+              console.warn("[AuthCallback] Safari fast: stash error", e);
             }
 
-            // 2) Stash tokens + mark last route for AuthProvider to skip anon bootstrap once
-            storePendingTokens({
-              access_token: a,
-              refresh_token: r,
-              expires_at: exp,
-            });
+            // 2) Fire-and-forget setSession (do NOT await; Safari can freeze if we do)
             try {
-              sessionStorage.setItem(
-                LAST_VISITED_ROUTE_KEY,
-                "/auth/callback"
-              );
-              setPendingOAuthState("returning");
-            } catch {}
+              // eslint-disable-next-line no-floating-promise
+              supabase.auth
+                .setSession({ access_token: a, refresh_token: r })
+                .then((res) =>
+                  console.log(
+                    "[AuthCallback] Safari fast: setSession (background) →",
+                    res?.error || "ok"
+                  )
+                )
+                .catch((e) =>
+                  console.warn("[AuthCallback] Safari fast: setSession threw", e)
+                );
+            } catch (e) {
+              console.warn("[AuthCallback] Safari fast: setSession setup error", e);
+            }
 
             setMsg("Signed in. Redirecting…");
 
-            // 3) Give WebKit a tick to flush sessionStorage, then redirect
-            await new Promise((res) => setTimeout(res, 250));
-            console.log(
-              "[AuthCallback] Safari fast: redirect → /?source=safari-fast"
-            );
-            window.location.replace("/?source=safari-fast");
+            // 3) Hammer Safari with three escalating navigations.
+            const kick = (label, fn) => {
+              try {
+                console.log("[AuthCallback] Safari fast redirect →", label);
+                fn();
+              } catch (e) {
+                console.warn("[AuthCallback] Safari fast redirect failed:", label, e);
+              }
+            };
 
-            // 4) Failsafes if Safari ignores the first navigation:
+            // T0 (immediate): href — highest coercion in some WebKit builds
             setTimeout(() => {
               if (location.pathname.startsWith("/auth/callback")) {
-                console.warn("[AuthCallback] Safari fast failsafe #1 → assign");
-                window.location.assign("/?source=safari-fast-2");
+                kick("href /?source=safari-fast", () => {
+                  window.location.href = "/?source=safari-fast";
+                });
               }
-            }, 900);
+            }, 0);
 
+            // T1 (250ms): assign
             setTimeout(() => {
               if (location.pathname.startsWith("/auth/callback")) {
-                console.warn("[AuthCallback] Safari fast failsafe #2 → href");
-                window.location.href = "/?source=safari-fast-3";
+                kick("assign /?source=safari-fast-2", () => {
+                  window.location.assign("/?source=safari-fast-2");
+                });
               }
-            }, 1800);
+            }, 250);
 
-            return; // Safari early-exit
+            // T2 (800ms): replace
+            setTimeout(() => {
+              if (location.pathname.startsWith("/auth/callback")) {
+                kick("replace /?source=safari-fast-3", () => {
+                  window.location.replace("/?source=safari-fast-3");
+                });
+              }
+            }, 800);
+
+            return; // Safari early-exit — do not continue the normal flow
           }
         }
         // ===========================================================================
