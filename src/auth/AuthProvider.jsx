@@ -247,185 +247,69 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let mounted = true;
 
-    async function ensureSession() {
+    async function bootstrap() {
       try {
-        const url = new URL(window.location.href);
         console.log("[AuthProvider] bootstrap start, path:", window.location.pathname);
 
-        // ***** EARLY: adopt OAuth (must run before any anon creation) *****
-        const adoptResult = await adoptOAuthIfPending(supabase);
-        if (adoptResult.adopted) {
-          if (adoptResult.user) {
-            console.log("[AuthProvider] early-adopt SUCCESS →", adoptResult.user.id);
-            if (mounted) {
-              clearPendingOAuthArtifacts(url);
-              setUser(adoptResult.user);
-              setReady(true);
-              return;
+        // 1) If we just came back from OAuth (hash tokens present), finish it here.
+        const hash = typeof window !== "undefined" ? window.location.hash || "" : "";
+        const hasImplicit =
+          hash.includes("access_token=") || hash.includes("refresh_token=") || hash.includes("expires_at=");
+
+        if (hasImplicit) {
+          console.log("[AuthProvider] finishing OAuth via getSessionFromUrl()");
+          try {
+            const { data, error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
+            if (error) {
+              console.warn("[AuthProvider] getSessionFromUrl error:", error);
+            } else {
+              console.log("[AuthProvider] OAuth session stored for user:", data?.session?.user?.id || null);
             }
-          } else {
-            console.log("[AuthProvider] early-adopt no user; entering wait loop");
-            const sess = await waitForSupabaseSession(8000, 300);
-            if (sess?.user && mounted) {
-              clearPendingOAuthArtifacts(url);
-              setUser(sess.user);
-              setReady(true);
-              return;
-            }
-            // Last-resort: Safari one-time reload to unstick WebKit storage observers.
-            if (isSafari()) {
-              const already = sessionStorage.getItem(SAFARI_RELOAD_ONCE_KEY);
-              console.warn("[AuthProvider] Safari still no session; reloadOnce flag =", already);
-              if (!already) {
-                sessionStorage.setItem(SAFARI_RELOAD_ONCE_KEY, "1");
-                console.warn("[AuthProvider] Safari safety reload");
-                window.location.reload(); // one-time
-                return;
-              }
-            }
-            console.warn("[AuthProvider] early-adopt exhausted; proceeding without anon (to avoid clobber).");
+          } catch (e) {
+            console.warn("[AuthProvider] getSessionFromUrl threw:", e);
           }
-        }
-        // ********************************************************
-
-        let lastRoute = null;
-        try {
-          lastRoute = window.sessionStorage.getItem(LAST_VISITED_ROUTE_KEY);
-          console.log("[AuthProvider] last recorded route", lastRoute);
-        } catch (err) {
-          console.warn("[AuthProvider] unable to read last route", err);
+          // Always leave the hash/callback immediately (Safari-safe).
+          window.location.replace("/");
+          return;
         }
 
-        let pendingOAuth = getPendingOAuthState();
-        if (!pendingOAuth && hasCookieFlag()) pendingOAuth = "cookie";
-        const fromAuthParam = url.searchParams.get("from") === "auth";
-        if (!pendingOAuth && fromAuthParam) {
-          console.log("[AuthProvider] pending OAuth inferred from URL");
-          pendingOAuth = "from-url";
-        }
-        if (pendingOAuth) console.log("[AuthProvider] pending OAuth detected via", pendingOAuth);
+        // 2) Use existing session if we have one.
+        const { data: sessRes, error: sessErr } = await supabase.auth.getSession();
+        if (sessErr) console.warn("[AuthProvider] getSession error:", sessErr);
 
-        let sessionUser = null;
-        let shouldIgnoreExisting = false;
-        const guestId = readGuestId();
-        try {
-          const { data: sess, error } = await supabase.auth.getSession();
-          if (error) console.error("[Auth] getSession error:", error);
-          sessionUser = sess?.session?.user ?? null;
-          shouldIgnoreExisting = Boolean(
-            pendingOAuth &&
-              sessionUser &&
-              (isAnonymous(sessionUser) || (guestId && guestId === sessionUser.id))
-          );
-        } catch (err) {
-          console.error("[Auth] getSession threw:", err);
-        }
-
-        if (mounted && sessionUser && !shouldIgnoreExisting) {
-          console.log("[AuthProvider] existing session user", sessionUser.id);
-          clearPendingOAuthArtifacts(url);
-          setUser(sessionUser);
+        const currentUser = sessRes?.session?.user || null;
+        if (mounted && currentUser) {
+          console.log("[AuthProvider] existing session user:", currentUser.id);
+          setUser(currentUser);
           setReady(true);
           return;
         }
 
-        if (sessionUser && shouldIgnoreExisting) {
-          console.log("[AuthProvider] ignoring anonymous session during OAuth", sessionUser.id);
-        }
-
-        if (pendingOAuth) {
-          console.log("[AuthProvider] awaiting session after OAuth…");
-          const pendingTokens = readPendingTokens();
-          console.log("[AuthProvider] pending tokens read", pendingTokens);
-          if (pendingTokens?.access_token && pendingTokens?.refresh_token) {
-            try {
-              console.log("[AuthProvider] applying pending tokens");
-              await supabase.auth.setSession(pendingTokens);
-              console.log("[AuthProvider] pending tokens applied; fetching session");
-              clearPendingTokens();
-              const { data: refreshed } = await supabase.auth.getSession();
-              if (refreshed?.session?.user) {
-                clearPendingOAuthArtifacts(url);
-                if (mounted) {
-                  setUser(refreshed.session.user);
-                  setReady(true);
-                }
-                return;
-              }
-            } catch (tokenErr) {
-              console.warn("[AuthProvider] pending token setSession failed", tokenErr);
-            }
-          } else {
-            console.log("[AuthProvider] no pending tokens available");
-          }
-
-          const awaited = await waitForSupabaseSession(8000, 300);
-          if (awaited?.user) {
-            clearPendingOAuthArtifacts(url);
-            if (mounted) {
-              setUser(awaited.user);
-              setReady(true);
-            }
-            return;
-          }
-
-          console.warn("[AuthProvider] session still missing after OAuth wait, continuing (no anon here).");
-          clearPendingOAuthArtifacts(url);
-        }
-
-        const onCallback = onAuthCallbackPath();
-        const cameFromCallback = lastRoute === "/auth/callback";
-        console.log("[AuthProvider] route states", {
-          onCallback,
-          lastRoute,
-          cameFromCallback,
-          path: window.location.pathname,
-        });
-
-        // Only auto-create anon when NOT on/after callback
-        if (!onCallback && !cameFromCallback) {
-          console.log("[AuthProvider] no session, creating anonymous user");
-          await new Promise((res) => setTimeout(res, 1200)); // Safari grace
-          const { data: lateSession } = await supabase.auth.getSession();
-          if (lateSession?.session?.user && !isAnonymous(lateSession.session.user)) {
-            console.log("[AuthProvider] session appeared before anon fallback", lateSession.session.user.id);
-            clearPendingOAuthArtifacts(url);
-            if (mounted) setUser(lateSession.session.user);
-          } else {
-            const { data: anonRes, error: anonErr } = await supabase.auth.signInAnonymously();
-            if (anonErr) {
-              console.error("[Auth] Anonymous sign-in failed:", anonErr);
-              if (mounted) setUser(null);
-              setReady(true);
-              return;
-            }
-            if (mounted) {
-              setPendingOAuthState(null);
-              clearPendingTokens();
-              console.log("[AuthProvider] anonymous user ready", anonRes?.user?.id);
-              setUser(anonRes?.user ?? null);
-            }
-          }
+        // 3) No session → create anonymous (simple, reliable, Chrome/Safari-safe).
+        console.log("[AuthProvider] no session, creating anonymous user…");
+        const { data: anonRes, error: anonErr } = await supabase.auth.signInAnonymously();
+        if (anonErr) {
+          console.error("[AuthProvider] anonymous sign-in failed:", anonErr);
+          setUser(null);
         } else {
-          console.log("[AuthProvider] skipping anonymous session (on or from callback)");
+          console.log("[AuthProvider] anonymous user ready:", anonRes?.user?.id || null);
+          setUser(anonRes?.user ?? null);
         }
       } finally {
-        if (mounted) {
-          setReady(true);
-          console.log("[AuthProvider] bootstrap complete");
-        }
+        if (mounted) setReady(true);
       }
     }
 
-    ensureSession();
+    bootstrap();
 
-    const { data: listener } = supabase.auth.onAuthStateChange((evt, session) => {
-      console.log("[AuthProvider] onAuthStateChange", evt, session?.user?.id);
-      setUser(session?.user ?? null);
+    const { data: sub } = supabase.auth.onAuthStateChange((evt, session) => {
+      console.log("[AuthProvider] onAuthStateChange:", evt, session?.user?.id || null);
+      if (mounted) setUser(session?.user ?? null);
     });
 
     return () => {
-      listener?.subscription?.unsubscribe?.();
+      mounted = false;
+      sub?.subscription?.unsubscribe?.();
     };
   }, []);
 
