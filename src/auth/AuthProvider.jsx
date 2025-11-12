@@ -4,13 +4,48 @@ import { supabase } from "../lib/supabase";
 
 const AuthCtx = createContext(null);
 
-// --- Helpers ---------------------------------------------------------------
+// ---- Helpers --------------------------------------------------------------
 function onAuthCallbackPath() {
   return window.location.pathname.startsWith("/auth/callback");
 }
 const LS_GUEST_ID = "guest_id_before_oauth";
 
-// --- Provider --------------------------------------------------------------
+/**
+ * Create (or reuse) an anonymous session.
+ * IMPORTANT: Only sets LS_GUEST_ID if it is currently empty.
+ */
+async function ensureAnon(tag = "boot") {
+  console.log(`[AuthBoot] ensureAnon(${tag})`);
+  const { data: s0 } = await supabase.auth.getSession();
+  if (s0.session?.user) {
+    console.log("[AuthBoot] already have session:", s0.session.user.id);
+    return s0.session;
+  }
+
+  await supabase.auth.signInAnonymously();
+  const { data: s1 } = await supabase.auth.getSession();
+  const anonId = s1.session?.user?.id;
+  console.log("[AuthBoot] created anon:", anonId);
+
+  try {
+    const already = localStorage.getItem(LS_GUEST_ID);
+    if (!already && anonId) {
+      localStorage.setItem(LS_GUEST_ID, anonId);
+      console.log("[AuthBoot] stored first guest id:", anonId);
+    } else if (already && already !== anonId) {
+      console.log("[AuthBoot] NOT overwriting existing guest id", {
+        existing: already,
+        newAnon: anonId,
+      });
+    }
+  } catch (e) {
+    console.warn("[AuthBoot] failed to write LS_GUEST_ID:", e);
+  }
+
+  return s1.session ?? null;
+}
+
+// ---- Provider -------------------------------------------------------------
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [user, setUser] = useState(null);
@@ -25,7 +60,7 @@ export function AuthProvider({ children }) {
       setSession(data.session ?? null);
       setUser(data.session?.user ?? null);
       console.log("[AuthBoot] initial session:", data.session);
-      console.log("[AuthBoot] initial user:", data.session?.user);
+      console.log("[AuthBoot] initial user:", data.session?.user?.id);
 
       unsub = supabase.auth.onAuthStateChange((event, newSession) => {
         console.log("[AuthStateChange]", { event, newSession });
@@ -33,15 +68,11 @@ export function AuthProvider({ children }) {
         setUser(newSession?.user ?? null);
       }).data.subscription;
 
-      // Create or reuse an anonymous session unless we’re on the OAuth callback page
       if (!onAuthCallbackPath()) {
         if (!data.session) {
-          console.log("[AuthBoot] no session -> signInAnonymously");
-          await supabase.auth.signInAnonymously();
-          const { data: s2 } = await supabase.auth.getSession();
-          setSession(s2.session ?? null);
-          setUser(s2.session?.user ?? null);
-          console.log("[AuthBoot] post-anon session:", s2.session);
+          const s = await ensureAnon("boot");
+          setSession(s ?? null);
+          setUser(s?.user ?? null);
         } else {
           console.log("[AuthBoot] session exists, skip anon sign-in");
         }
@@ -57,32 +88,31 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  // --- OAuth as SIGN-IN (not link). We explicitly sign out first. -----------
+  // ---- OAuth sign-in (NOT link) ------------------------------------------
   async function oauthOrLink(provider) {
-    const current = (await supabase.auth.getUser()).data.user;
-    const currentId = current?.id ?? null;
-    const isAnon = !!current?.app_metadata?.provider?.includes?.("anonymous") ||
-                   (current?.app_metadata?.provider === "anonymous");
+    const { data: me } = await supabase.auth.getUser();
+    const currentId = me.user?.id ?? null;
 
     console.log("[oauthOrLink] start", {
       currentUserId: currentId,
-      isAnon,
       provider,
       path: window.location.pathname,
     });
 
-    // Remember the guest we want to adopt later
-    if (currentId) {
-      try {
+    // Record the FIRST guest id only (do not overwrite if already set)
+    try {
+      const already = localStorage.getItem(LS_GUEST_ID);
+      if (!already && currentId) {
         localStorage.setItem(LS_GUEST_ID, currentId);
         console.log("[oauthOrLink] stored guest id:", currentId);
-      } catch (e) {
-        console.warn("[oauthOrLink] failed to store guest id:", e);
+      } else {
+        console.log("[oauthOrLink] keeping existing guest id:", already);
       }
+    } catch (e) {
+      console.warn("[oauthOrLink] failed to store guest id:", e);
     }
 
-    // Critical: sign out so Supabase does NOT try to link the identity
-    // (linking causes "Identity is already linked to another user")
+    // Sign out so Supabase doesn’t try to LINK identities
     console.log("[oauthOrLink] signing out BEFORE OAuth to avoid linking");
     await supabase.auth.signOut({ scope: "local" });
 
@@ -93,14 +123,9 @@ export function AuthProvider({ children }) {
       provider,
       options: {
         redirectTo,
-        // These are UX niceties; they don’t affect linking behavior
-        queryParams: {
-          access_type: "online",
-          prompt: "select_account",
-        },
+        queryParams: { access_type: "online", prompt: "select_account" },
       },
     });
-
     if (error) {
       console.error("[oauthOrLink] signInWithOAuth error:", error);
       throw error;
@@ -109,10 +134,7 @@ export function AuthProvider({ children }) {
 
   async function signin(email, password) {
     console.log("[password signin] start", { email });
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
       console.error("[password signin] error:", error);
       return { error };
@@ -122,15 +144,22 @@ export function AuthProvider({ children }) {
   }
 
   async function signup(email, password) {
-    const current = (await supabase.auth.getUser()).data.user;
-    if (current?.id) {
-      try {
-        localStorage.setItem(LS_GUEST_ID, current.id);
-        console.log("[signup] stored guest id:", current.id);
-      } catch (e) {
-        console.warn("[signup] failed to store guest id:", e);
+    const { data: me } = await supabase.auth.getUser();
+    const currentId = me.user?.id ?? null;
+
+    // Preserve first guest id only
+    try {
+      const already = localStorage.getItem(LS_GUEST_ID);
+      if (!already && currentId) {
+        localStorage.setItem(LS_GUEST_ID, currentId);
+        console.log("[signup] stored guest id:", currentId);
+      } else {
+        console.log("[signup] keeping existing guest id:", already);
       }
+    } catch (e) {
+      console.warn("[signup] failed to store guest id:", e);
     }
+
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) {
       console.error("[signup] error:", error);
@@ -145,11 +174,10 @@ export function AuthProvider({ children }) {
     await supabase.auth.signOut();
     console.log("[signout] recreate anonymous session");
     if (!onAuthCallbackPath()) {
-      await supabase.auth.signInAnonymously();
-      const { data } = await supabase.auth.getSession();
-      setSession(data.session ?? null);
-      setUser(data.session?.user ?? null);
-      console.log("[signout] anon session:", data.session);
+      const s = await ensureAnon("signout");
+      setSession(s ?? null);
+      setUser(s?.user ?? null);
+      console.log("[signout] anon session:", s);
     }
   }
 
