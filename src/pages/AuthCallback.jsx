@@ -1,129 +1,113 @@
 // src/pages/AuthCallback.jsx
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
+import { onAuthCallbackPath } from "../auth/AuthProvider";
 
 const LS_GUEST_ID = "guest_id_before_oauth";
 
-// Small helper to print clearly
-function log(label, data) {
-  // eslint-disable-next-line no-console
-  console.log(`[AuthCallback] ${label}:`, data);
-}
-
 export default function AuthCallback() {
-  const nav = useNavigate();
-  const [status, setStatus] = useState("Finalizing sign-in…");
+  const [msg, setMsg] = useState("Finishing sign-in…");
+  const [err, setErr] = useState("");
 
   useEffect(() => {
     (async () => {
       try {
         const url = new URL(window.location.href);
-        const code = url.searchParams.get("code");
-        const state = url.searchParams.get("state");
-        const error = url.searchParams.get("error");
-        const error_description = url.searchParams.get("error_description");
+        console.log("[AuthCallback] URL:", url.toString());
 
-        log("URL", window.location.href);
-        log("params", { code, state, error, error_description });
+        const qp = Object.fromEntries(url.searchParams.entries());
+        console.log("[AuthCallback] params:", qp);
 
-        if (error) {
-          setStatus(`OAuth error: ${error_description || error}`);
-          log("STOP (OAuth error)", { error, error_description });
+        // If the provider sent back an error (like your screenshot)
+        const rawError = qp.error || qp.error_code || null;
+        const rawDesc = qp.error_description || qp.error_message || null;
+        if (rawError) {
+          console.error("[AuthCallback] OAuth error from provider:", rawError, rawDesc);
+          setErr(`${rawDesc || rawError}`);
+          setMsg("OAuth error. See console for details.");
           return;
         }
 
-        // Supabase PKCE needs this localStorage key to exist (set during signInWithOAuth redirect)
-        const PKCE_KEY = "sb-pkce-code-verifier";
-        const hasPkce = !!localStorage.getItem(PKCE_KEY);
-        log("PKCE verifier present?", hasPkce);
+        // Get the current session (should now be Google/email user, not anon)
+        const { data: sres } = await supabase.auth.getSession();
+        const newUser = sres?.session?.user || null;
+        console.log("[AuthCallback] session:", sres?.session);
+        console.log("[AuthCallback] new user:", newUser);
 
-        if (!code) {
-          setStatus("No OAuth code in URL. Did the provider redirect here?");
-          log("STOP (no code)", null);
+        // Read stored guest id (if we started sign-in as a guest)
+        const guestId = localStorage.getItem(LS_GUEST_ID) || null;
+        console.log("[AuthCallback] stored guest id:", guestId);
+
+        if (!newUser?.id) {
+          console.warn("[AuthCallback] no authenticated user after redirect.");
+          setMsg("No authenticated user. You can close this tab and try again.");
           return;
         }
 
-        // ---- 1) Exchange the code for a session (try both call signatures, log results) ----
-        setStatus("Exchanging code for session…");
-        let try1Err = null;
-        let try2Err = null;
+        // If we have a guest id and it differs from new user, adopt it.
+        if (guestId && guestId !== newUser.id) {
+          console.log("[AuthCallback] adopting guest → new user", { guestId, newId: newUser.id });
 
-        // Preferred signature (supabase-js v2): pass full URL
-        // Some builds require object signature; we’ll try both to be safe and log either failure.
-        const t1 = performance.now();
-        const r1 = await supabase.auth.exchangeCodeForSession(window.location.href);
-        const t1ms = Math.round(performance.now() - t1);
-        try1Err = r1?.error || null;
-        log("exchangeCodeForSession(url)", { took_ms: t1ms, error: try1Err?.message || null });
+          // OPTION A: Edge Function “adopt-and-delete” (recommended; you already have it)
+          // Body includes access token for auth
+          const { data: sess } = await supabase.auth.getSession();
+          const accessToken = sess?.session?.access_token || null;
 
-        if (try1Err) {
-          const t2 = performance.now();
-          const r2 = await supabase.auth.exchangeCodeForSession({ code });
-          const t2ms = Math.round(performance.now() - t2);
-          try2Err = r2?.error || null;
-          log("exchangeCodeForSession({code})", { took_ms: t2ms, error: try2Err?.message || null });
-
-          if (try2Err) {
-            setStatus("Code exchange failed.");
-            throw try2Err;
-          }
-        }
-
-        // ---- 2) Confirm session & user ----
-        setStatus("Fetching session…");
-        const { data: sessData, error: sessErr } = await supabase.auth.getSession();
-        log("getSession", { error: sessErr?.message || null, user: sessData?.session?.user || null });
-
-        if (sessErr || !sessData?.session?.user?.id) {
-          setStatus("Session missing after exchange.");
-          throw sessErr || new Error("No user after exchange.");
-        }
-
-        const newUser = sessData.session.user;
-
-        // ---- 3) Adoption (guest → user), with detailed logging ----
-        let oldGuestId = null;
-        try {
-          oldGuestId = localStorage.getItem(LS_GUEST_ID);
-        } catch {}
-        log("adoption - oldGuestId", oldGuestId);
-
-        if (oldGuestId && oldGuestId !== newUser.id) {
-          setStatus("Migrating your quizzes…");
-          const { error: adoptErr } = await supabase.rpc("adopt_guest", { p_old_user: oldGuestId });
-          log("adopt_guest RPC", { error: adoptErr?.message || null });
-
-          if (adoptErr) {
-            // Not fatal for login—surface clearly then continue
-            setStatus("Signed in, but quiz migration failed.");
-            // eslint-disable-next-line no-console
-            console.error("[AuthCallback] adopt_guest failed:", adoptErr);
+          if (!accessToken) {
+            console.error("[AuthCallback] missing access token for adopt-and-delete");
           } else {
             try {
-              localStorage.removeItem(LS_GUEST_ID);
-            } catch {}
+              const { error: fnError } = await supabase.functions.invoke("adopt-and-delete", {
+                body: { old_user_id: guestId, new_user_id: newUser.id, accessToken },
+              });
+              if (fnError) {
+                console.error("[AuthCallback] adopt-and-delete error:", fnError);
+              } else {
+                console.log("[AuthCallback] adopt completed via adopt-and-delete.");
+              }
+            } catch (e) {
+              console.error("[AuthCallback] adopt-and-delete threw:", e);
+            }
           }
+
+          // OPTION B (fallback): direct RPC if you use it instead
+          // await supabase.rpc("adopt_guest", { p_old_user: guestId });
+
+          try {
+            localStorage.removeItem(LS_GUEST_ID);
+          } catch {}
+        } else {
+          console.log("[AuthCallback] no adoption needed (no guest id or same user).");
         }
 
-        // ---- 4) Cleanup URL (remove ?code, etc.) and go home ----
-        setStatus("All set. Redirecting…");
-        // Remove querystring noise without an extra render
-        window.history.replaceState({}, "", `${window.location.origin}/auth/callback`);
-        nav("/", { replace: true });
+        setMsg("Sign-in complete. You can close this tab.");
+        // Small delay so the user sees success, then return home
+        setTimeout(() => (window.location.href = "/"), 600);
       } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error("[AuthCallback] FATAL", e);
-        setStatus(`Sign-in failed: ${e?.message || e}`);
+        console.error("[AuthCallback] unexpected error:", e);
+        setErr(e?.message || "Unexpected error.");
+        setMsg("Something went wrong. See console for details.");
       }
     })();
-  }, [nav]);
+  }, []);
 
   return (
-    <div className="min-h-screen grid place-items-center px-4">
-      <div className="text-center text-slate-200 space-y-2">
-        <p className="text-lg font-medium">{status}</p>
-        <p className="text-sm opacity-70">Open DevTools → Console for detailed logs.</p>
+    <div className="min-h-screen grid place-items-center text-white">
+      <div className="surface-card p-6 max-w-lg text-center">
+        {err ? (
+          <>
+            <h1 className="text-2xl font-bold mb-2">OAuth error</h1>
+            <p className="text-red-300">{err}</p>
+            <p className="text-white/70 mt-3 text-sm">
+              Open DevTools → Console to see detailed logs.
+            </p>
+          </>
+        ) : (
+          <>
+            <h1 className="text-2xl font-bold mb-2">Please wait…</h1>
+            <p className="text-white/80">{msg}</p>
+          </>
+        )}
       </div>
     </div>
   );

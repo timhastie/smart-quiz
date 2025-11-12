@@ -4,15 +4,13 @@ import { supabase } from "../lib/supabase";
 
 const AuthCtx = createContext(null);
 
-// Path helper — keep this in sync with your router path for the callback page
-function onAuthCallbackPath() {
+// Keep in sync with your router
+export function onAuthCallbackPath() {
   return typeof window !== "undefined" && window.location.pathname.startsWith("/auth/callback");
 }
 
-// LocalStorage keys
 const LS_GUEST_ID = "guest_id_before_oauth";
 
-// Utility: detect anonymous user reliably
 function isAnonymousUser(u) {
   if (!u) return false;
   if (u.is_anonymous === true) return true;
@@ -30,84 +28,132 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [ready, setReady] = useState(false);
 
-  // Boot: ensure a session exists (anonymous by default), but never on the OAuth callback route
   useEffect(() => {
     let unsub = null;
-
     (async () => {
       const { data } = await supabase.auth.getSession();
       setSession(data.session ?? null);
       setUser(data.session?.user ?? null);
 
-      // Subscribe to auth changes
-      unsub = supabase.auth.onAuthStateChange((_event, newSession) => {
+      console.log("[AuthBoot] initial session:", data.session);
+      console.log("[AuthBoot] initial user:", data.session?.user);
+
+      unsub = supabase.auth.onAuthStateChange((event, newSession) => {
+        console.log("[AuthStateChange]", { event, newSession, user: newSession?.user });
         setSession(newSession ?? null);
         setUser(newSession?.user ?? null);
       }).data.subscription;
 
-      // Create or reuse an anonymous session unless we’re on the OAuth callback page
       if (!onAuthCallbackPath()) {
         if (!data.session) {
+          console.log("[AuthBoot] no session → signInAnonymously()");
           await supabase.auth.signInAnonymously();
           const { data: s2 } = await supabase.auth.getSession();
+          console.log("[AuthBoot] anon session created:", s2.session);
           setSession(s2.session ?? null);
           setUser(s2.session?.user ?? null);
+        } else {
+          console.log("[AuthBoot] session exists, skip anon sign-in");
         }
+      } else {
+        console.log("[AuthBoot] on /auth/callback, skip anon bootstrap");
       }
 
       setReady(true);
     })();
 
     return () => {
-      if (unsub) unsub.unsubscribe();
+      try { unsub?.unsubscribe(); } catch {}
     };
   }, []);
 
-  // Google OAuth (or any provider) — links if current user is anonymous, otherwise signs in
+  /**
+   * IMPORTANT: Do NOT use linkIdentity here.
+   * Reason: If that Google identity is already tied to any account, Supabase returns
+   * “Identity is already linked to another user.” That’s your screenshot.
+   *
+   * Instead: Always redirect with signInWithOAuth().
+   * On /auth/callback we adopt/merge the guest into the new Google user.
+   */
   async function oauthOrLink(provider = "google") {
     try {
       const { data: ures } = await supabase.auth.getUser();
       const me = ures?.user || null;
+      const isAnon = isAnonymousUser(me);
 
-      // Persist the current (guest) user id so /auth/callback can adopt it
+      console.log("[oauthOrLink] start", {
+        currentUserId: me?.id || null,
+        isAnon,
+        providers: me?.app_metadata?.providers || null,
+      });
+
       try {
-        if (me?.id) localStorage.setItem(LS_GUEST_ID, me.id);
-      } catch {}
+        if (me?.id && isAnon) {
+          localStorage.setItem(LS_GUEST_ID, me.id);
+          console.log("[oauthOrLink] stored guest id:", me.id);
+        } else {
+          localStorage.removeItem(LS_GUEST_ID);
+          console.log("[oauthOrLink] cleared guest id (not anon).");
+        }
+      } catch (e) {
+        console.warn("[oauthOrLink] localStorage error:", e);
+      }
 
       const redirectTo = `${window.location.origin}/auth/callback`;
+      console.log("[oauthOrLink] redirecting to provider:", provider, "redirectTo:", redirectTo);
 
-      const res = isAnonymousUser(me)
-        ? await supabase.auth.linkIdentity({ provider, options: { redirectTo } })
-        : await supabase.auth.signInWithOAuth({ provider, options: { redirectTo } });
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: { redirectTo, queryParams: { prompt: "select_account", access_type: "online" } },
+      });
 
-      if (res?.error) throw res.error;
+      if (error) {
+        console.error("[oauthOrLink] signInWithOAuth error:", error);
+        alert(error.message || "Sign-in failed.");
+      }
     } catch (e) {
-      console.error("[oauthOrLink] failed:", e);
-      alert(e?.message || "Sign-in failed. Please try again.");
+      console.error("[oauthOrLink] unexpected error:", e);
+      alert(e?.message || "Sign-in failed.");
     }
   }
 
   async function signin(email, password) {
+    console.log("[signin] with email:", email);
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) return { error };
+    if (error) {
+      console.error("[signin] error:", error);
+      return { error };
+    }
+    console.log("[signin] success user:", data.user);
     return { user: data.user };
   }
 
   async function signup(email, password) {
+    console.log("[signup] with email:", email);
     const { data: ures } = await supabase.auth.getUser();
     const me = ures?.user || null;
-    try {
-      if (me?.id) localStorage.setItem(LS_GUEST_ID, me.id);
-    } catch {}
+    if (me?.id) {
+      try {
+        localStorage.setItem(LS_GUEST_ID, me.id);
+        console.log("[signup] stored guest id for adoption:", me.id);
+      } catch (e) {
+        console.warn("[signup] localStorage error:", e);
+      }
+    }
     const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) return { error };
+    if (error) {
+      console.error("[signup] error:", error);
+      return { error };
+    }
+    console.log("[signup] initiated; confirm email required. data:", data);
     return { user: data.user };
   }
 
   async function signout() {
+    console.log("[signout] signing out…");
     await supabase.auth.signOut();
-    // Immediately recreate anonymous session (outside callback path)
     if (!onAuthCallbackPath()) {
+      console.log("[signout] recreate anonymous session");
       await supabase.auth.signInAnonymously();
       const { data } = await supabase.auth.getSession();
       setSession(data.session ?? null);
@@ -119,15 +165,7 @@ export function AuthProvider({ children }) {
   }
 
   const value = useMemo(
-    () => ({
-      ready,
-      session,
-      user,
-      oauthOrLink,
-      signin,
-      signup,
-      signout,
-    }),
+    () => ({ ready, session, user, oauthOrLink, signin, signup, signout }),
     [ready, session, user]
   );
 
