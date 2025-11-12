@@ -207,12 +207,6 @@ export default function AuthCallback() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    try {
-      window.sessionStorage.setItem(LAST_VISITED_ROUTE_KEY, window.location.pathname);
-      console.log("[AuthCallback] initial route stored", window.location.pathname);
-    } catch (err) {
-      console.warn("[AuthCallback] unable to store initial route", err);
-    }
 
     (async () => {
       try {
@@ -270,8 +264,8 @@ export default function AuthCallback() {
           }
           const safari = isSafariBrowser();
           if (safari) {
-            console.log("[AuthCallback] Safari session captured; forcing hard reload to /");
-            window.location.href = "/?source=auth";
+            console.log("[AuthCallback] Safari session captured; forcing reload");
+            window.location.replace("/");
           } else {
             window.history.replaceState({}, document.title, "/");
             nav("/", { replace: true });
