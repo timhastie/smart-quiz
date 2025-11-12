@@ -90,7 +90,7 @@ GlobalWorkerOptions.workerSrc = workerSrc;
 /* ========================================================================== */
 export default function Dashboard() {
   const nav = useNavigate();
-  const { user, ready, signout, signin, signup, oauthOrLink } = useAuth();
+  const { user, ready, signout, signin, signup, oauthOrLink, ensureSession } = useAuth();
 
 const [allRevisitScore, setAllRevisitScore] = useState(null);
 const [groupRevisitScores, setGroupRevisitScores] = useState(new Map());
@@ -801,142 +801,144 @@ function enqueueEmptyGroups(ids) {
   }
 
   async function generateQuiz() {
-    try {
-      if (generating) return;
-      const allowed = await ensureCanCreate();
-      if (!allowed) return;
-      setGenerating(true);
+  try {
+    if (generating) return;
 
-      const { data: sessionRes } = await supabase.auth.getSession();
-      const jwt = sessionRes?.session?.access_token;
-      const count = Math.max(1, Math.min(Number(gCount) || 10, 30));
+    // ✅ make sure we *have* a session before reading jwt / calling functions
+    await ensureSession("before-generate");
 
-      const targetGroupIdForNoRepeat =
-        (gGroupId && gGroupId !== "") ||
-        (filterGroupId && filterGroupId !== NO_GROUP)
-          ? gGroupId || (filterGroupId !== NO_GROUP ? filterGroupId : "")
-          : "";
+    const allowed = await ensureCanCreate();
+    if (!allowed) return;
+    setGenerating(true);
 
-      let file_id = null;
-      if (gFile) {
-        let rawDoc = "";
-        try {
-          rawDoc = await extractTextFromFile(gFile);
-        } catch (e) {
-          alert(`Couldn't read file "${gFile.name}".\n\n${e}`);
-          setGenerating(false);
-          return;
-        }
-        const LIMIT = 500_000;
-        if (rawDoc.length > LIMIT) rawDoc = rawDoc.slice(0, LIMIT);
+    const { data: sessionRes } = await supabase.auth.getSession();
+    const jwt = sessionRes?.session?.access_token;
+    const count = Math.max(1, Math.min(Number(gCount) || 10, 30));
 
-        const idxRes = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/index-source`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
-            },
-            body: JSON.stringify({ text: rawDoc, file_name: gFile.name }),
-          }
-        );
-        const idxText = await idxRes.text();
-        if (!idxRes.ok) {
-          alert(`Failed to index document (${idxRes.status}):\n${idxText}`);
-          setGenerating(false);
-          return;
-        }
-        let idxOut = {};
-        try {
-          idxOut = idxText ? JSON.parse(idxText) : {};
-        } catch {}
-        file_id = idxOut?.file_id ?? null;
-        if (!file_id) {
-          alert("Indexing returned no file_id.");
-          setGenerating(false);
-          return;
-        }
+    const targetGroupIdForNoRepeat =
+      (gGroupId && gGroupId !== "") ||
+      (filterGroupId && filterGroupId !== NO_GROUP)
+        ? gGroupId || (filterGroupId !== NO_GROUP ? filterGroupId : "")
+        : "";
+
+    let file_id = null;
+    if (gFile) {
+      let rawDoc = "";
+      try {
+        rawDoc = await extractTextFromFile(gFile);
+      } catch (e) {
+        alert(`Couldn't read file "${gFile.name}".\n\n${e}`);
+        setGenerating(false);
+        return;
       }
+      const LIMIT = 500_000;
+      if (rawDoc.length > LIMIT) rawDoc = rawDoc.slice(0, LIMIT);
 
-      let avoid_prompts = [];
-      if (gNoRepeat && targetGroupIdForNoRepeat) {
-        const { data: prior, error: priorErr } = await supabase
-          .from("quizzes")
-          .select("questions")
-          .eq("user_id", user.id)
-          .eq("group_id", targetGroupIdForNoRepeat);
-        if (!priorErr && Array.isArray(prior)) {
-          const all = [];
-          for (const row of prior) {
-            const qs = Array.isArray(row?.questions) ? row.questions : [];
-            for (const q of qs) {
-              const p = (q?.prompt || "").toString().trim();
-              if (p) all.push(p);
-            }
-          }
-          const seen = new Set();
-          for (const p of all) {
-            const key = p.toLowerCase();
-            if (!seen.has(key)) {
-              seen.add(key);
-              avoid_prompts.push(p);
-            }
-            if (avoid_prompts.length >= 300) break;
-          }
-        }
-      }
-
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-quiz`,
+      const idxRes = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/index-source`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
           },
-          body: JSON.stringify({
-            title: (gTitle || "").trim() || "Bash Top 10",
-            topic:
-              (gTopic || "").trim() ||
-              "Create 10 questions that test the 10 most-used Bash commands.",
-            count,
-            group_id: gGroupId || null,
-            file_id,
-            no_repeat: !!gNoRepeat,
-            avoid_prompts,
-          }),
+          body: JSON.stringify({ text: rawDoc, file_name: gFile.name }),
         }
       );
-
-      let raw = "";
-      try {
-        raw = await res.text();
-      } catch {}
-
-      if (!res.ok) {
-        if (res.status === 403)
-          openSignupModal(
-            "Free trial limit reached. Create an account to make more quizzes."
-          );
-        else
-          alert(
-            `Failed to generate quiz (${res.status}):\n${raw || "Unknown error"}`
-          );
+      const idxText = await idxRes.text();
+      if (!idxRes.ok) {
+        alert(`Failed to index document (${idxRes.status}):\n${idxText}`);
         setGenerating(false);
         return;
       }
-
-      setGenOpen(false);
-      if (gFile) setGFile(null);
-      setGenerating(false);
-      await load();
-    } catch (e) {
-      console.error(e);
-      alert("Failed to generate quiz. Please try again.");
-      setGenerating(false);
+      let idxOut = {};
+      try {
+        idxOut = idxText ? JSON.parse(idxText) : {};
+      } catch {}
+      file_id = idxOut?.file_id ?? null;
+      if (!file_id) {
+        alert("Indexing returned no file_id.");
+        setGenerating(false);
+        return;
+      }
     }
+
+    let avoid_prompts = [];
+    if (gNoRepeat && targetGroupIdForNoRepeat) {
+      const { data: prior, error: priorErr } = await supabase
+        .from("quizzes")
+        .select("questions")
+        .eq("user_id", user.id)
+        .eq("group_id", targetGroupIdForNoRepeat);
+      if (!priorErr && Array.isArray(prior)) {
+        const all = [];
+        for (const row of prior) {
+          const qs = Array.isArray(row?.questions) ? row.questions : [];
+          for (const q of qs) {
+            const p = (q?.prompt || "").toString().trim();
+            if (p) all.push(p);
+          }
+        }
+        const seen = new Set();
+        for (const p of all) {
+          const key = p.toLowerCase();
+          if (!seen.has(key)) {
+            seen.add(key);
+            avoid_prompts.push(p);
+          }
+          if (avoid_prompts.length >= 300) break;
+        }
+      }
+    }
+
+    const res = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-quiz`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+        },
+        body: JSON.stringify({
+          title: (gTitle || "").trim() || "Bash Top 10",
+          topic:
+            (gTopic || "").trim() ||
+            "Create 10 questions that test the 10 most-used Bash commands.",
+          count,
+          group_id: gGroupId || null,
+          file_id,
+          no_repeat: !!gNoRepeat,
+          avoid_prompts,
+        }),
+      }
+    );
+
+    let raw = "";
+    try {
+      raw = await res.text();
+    } catch {}
+
+    if (!res.ok) {
+      if (res.status === 403)
+        openSignupModal(
+          "Free trial limit reached. Create an account to make more quizzes."
+        );
+      else
+        alert(`Failed to generate quiz (${res.status}):\n${raw || "Unknown error"}`);
+      setGenerating(false);
+      return;
+    }
+
+    setGenOpen(false);
+    if (gFile) setGFile(null);
+    setGenerating(false);
+    await load();
+  } catch (e) {
+    console.error(e);
+    alert("Failed to generate quiz. Please try again.");
+    setGenerating(false);
   }
+}
 
   async function createGroupForModal() {
     if (!gNewName.trim() || gCreatingGroup) return;
