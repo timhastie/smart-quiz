@@ -102,6 +102,7 @@ export default function AuthProvider({ children }) {
    * /auth/callback will adopt the remembered guest id.
    */
   async function oauthOrLink(provider = "google", opts = {}) {
+    console.info("[Auth] oauthOrLink() called — this uses linkIdentity first!");
     const curUser = (await supabase.auth.getUser()).data?.user;
     const isGuest = isAnonUser(curUser);
 
@@ -130,6 +131,7 @@ export default function AuthProvider({ children }) {
   }
 
   async function googleSignIn() {
+    console.info("[Auth] googleSignIn() → signOut guest + signInWithOAuth");
     return oauthOrLink("google");
   }
 
