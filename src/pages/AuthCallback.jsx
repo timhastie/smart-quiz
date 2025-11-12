@@ -271,10 +271,7 @@ export default function AuthCallback() {
           const safari = isSafariBrowser();
           if (safari) {
             console.log("[AuthCallback] Safari session captured; forcing hard reload to /");
-            window.location.replace("/");
-            setTimeout(() => {
-              window.location.href = "/";
-            }, 50);
+            window.location.href = "/?source=auth";
           } else {
             window.history.replaceState({}, document.title, "/");
             nav("/", { replace: true });
