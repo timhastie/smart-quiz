@@ -1,141 +1,96 @@
 // src/pages/AuthCallback.jsx
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
-import { onAuthCallbackPath } from "../auth/AuthProvider";
 
 const LS_GUEST_ID = "guest_id_before_oauth";
 
-function parseHash(hash) {
-  // "#access_token=...&refresh_token=..." → { access_token, refresh_token, ... }
-  if (!hash) return {};
-  const raw = hash.startsWith("#") ? hash.slice(1) : hash;
-  return Object.fromEntries(new URLSearchParams(raw).entries());
-}
-
 export default function AuthCallback() {
-  const [msg, setMsg] = useState("Finishing sign-in…");
-  const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("Finishing sign-in...");
 
   useEffect(() => {
     (async () => {
       try {
-        const url = new URL(window.location.href);
-        console.log("[AuthCallback] URL:", url.toString());
-        console.log("[AuthCallback] location.search:", window.location.search);
-        console.log("[AuthCallback] location.hash:", window.location.hash);
+        console.log("[AuthCallback] URL:", window.location.href);
 
-        const searchParams = Object.fromEntries(new URLSearchParams(url.search).entries());
-        const hashParams = parseHash(window.location.hash);
+        // Try to read tokens from URL (implicit) or wait for auth state
+        const hash = window.location.hash ?? "";
+        const qp = window.location.search ?? "";
+        console.log("[AuthCallback] location.hash:", hash);
+        console.log("[AuthCallback] location.search:", qp);
 
-        console.log("[AuthCallback] search params:", searchParams);
-        console.log("[AuthCallback] hash params:", {
-          keys: Object.keys(hashParams),
-          has_access_token: Boolean(hashParams.access_token),
-          has_refresh_token: Boolean(hashParams.refresh_token),
-        });
+        // Supabase v2 usually handles exchanging tokens automatically.
+        // Just fetch the current session after redirect.
+        const { data: s1 } = await supabase.auth.getSession();
+        console.log("[AuthCallback] initial getSession:", s1?.session);
 
-        // If provider sent an error in query string
-        const rawError = searchParams.error || searchParams.error_code || null;
-        const rawDesc = searchParams.error_description || searchParams.error_message || null;
-        if (rawError) {
-          console.error("[AuthCallback] OAuth error from provider:", rawError, rawDesc);
-          setErr(`${rawDesc || rawError}`);
-          setMsg("OAuth error. See console for details.");
+        // Wait a moment if session hasn’t populated yet
+        let session = s1.session;
+        if (!session) {
+          console.log("[AuthCallback] no session yet -> small wait");
+          await new Promise((r) => setTimeout(r, 400));
+          const { data: s2 } = await supabase.auth.getSession();
+          session = s2.session;
+          console.log("[AuthCallback] getSession after wait:", session);
+        }
+
+        if (!session?.user?.id) {
+          console.error("[AuthCallback] no session after OAuth. Aborting.");
+          setMsg("OAuth error: no session");
           return;
         }
 
-        // Safety net: if implicit tokens are in hash, set session explicitly
-        if (hashParams.access_token && hashParams.refresh_token) {
-          console.log("[AuthCallback] setSession from hash tokens (implicit flow fallback)");
-          const { data: setRes, error: setErrRes } = await supabase.auth.setSession({
-            access_token: hashParams.access_token,
-            refresh_token: hashParams.refresh_token,
-          });
-          console.log("[AuthCallback] setSession result:", { setRes, setErrRes });
-          if (setErrRes) {
-            console.error("[AuthCallback] setSession error:", setErrRes);
-          }
-        }
-
-        // Poll briefly until we have a session/user (covers PKCE auto-exchange)
-        let tries = 0;
-        let got = null;
-        while (tries < 20) {
-          const { data: sres } = await supabase.auth.getSession();
-          if (sres?.session?.user) {
-            got = sres.session;
-            break;
-          }
-          await new Promise((r) => setTimeout(r, 100));
-          tries++;
-        }
-
-        console.log("[AuthCallback] final session:", got);
-        const newUser = got?.user || null;
-        console.log("[AuthCallback] final user:", newUser);
-
-        if (!newUser?.id) {
-          console.warn("[AuthCallback] no authenticated user after redirect.");
-          setMsg("No authenticated user. You can close this tab and try again.");
-          return;
-        }
-
-        // Adoption: move guest data → new user if needed
-        const guestId = localStorage.getItem(LS_GUEST_ID) || null;
+        const newUserId = session.user.id;
+        const guestId = localStorage.getItem(LS_GUEST_ID);
+        console.log("[AuthCallback] new signed-in user:", newUserId);
         console.log("[AuthCallback] stored guest id:", guestId);
 
-        if (guestId && guestId !== newUser.id) {
-          console.log("[AuthCallback] adopting guest → new user", { guestId, newId: newUser.id });
+        if (guestId && guestId !== newUserId) {
+          setMsg("Adopting your previous guest data...");
+          console.log("[AuthCallback] invoking adopt-and-delete for", { old_id: guestId });
 
-          const { data: sess } = await supabase.auth.getSession();
-          const accessToken = sess?.session?.access_token || null;
-          if (!accessToken) {
-            console.error("[AuthCallback] missing access token for adopt-and-delete");
+          // Use Functions invoke (uses current JWT automatically)
+          const { data, error } = await supabase.functions.invoke("adopt-and-delete", {
+            body: { old_id: guestId },
+          });
+
+          console.log("[AuthCallback] adopt response:", { data, error });
+          if (error) {
+            console.error("[AuthCallback] adopt error:", error);
+            setMsg(`Adopt error: ${error.message ?? error.toString()}`);
           } else {
-            try {
-              const { error: fnError } = await supabase.functions.invoke("adopt-and-delete", {
-                body: { old_user_id: guestId, new_user_id: newUser.id, accessToken },
-              });
-              if (fnError) {
-                console.error("[AuthCallback] adopt-and-delete error:", fnError);
-              } else {
-                console.log("[AuthCallback] adopt completed via adopt-and-delete.");
-              }
-            } catch (e) {
-              console.error("[AuthCallback] adopt-and-delete threw:", e);
-            }
+            setMsg("Success! Finishing up...");
           }
-
-          try { localStorage.removeItem(LS_GUEST_ID); } catch {}
         } else {
-          console.log("[AuthCallback] no adoption needed (no guest id or same user).");
+          console.log("[AuthCallback] no adopt needed (no guest id or same user)");
         }
 
-        setMsg("Sign-in complete. You can close this tab.");
-        setTimeout(() => (window.location.href = "/"), 600);
+        // Clean up the localStorage flag either way
+        try {
+          localStorage.removeItem(LS_GUEST_ID);
+          console.log("[AuthCallback] cleared LS guest id");
+        } catch {}
+
+        // Optional: strip tokens from URL
+        try {
+          const clean = window.location.origin + "/auth/callback";
+          window.history.replaceState({}, "", clean);
+          console.log("[AuthCallback] cleaned URL");
+        } catch {}
+
+        // Redirect home
+        window.location.replace("/");
       } catch (e) {
-        console.error("[AuthCallback] unexpected error:", e);
-        setErr(e?.message || "Unexpected error.");
-        setMsg("Something went wrong. See console for details.");
+        console.error("[AuthCallback] fatal error:", e);
+        setMsg(`OAuth error: ${e?.message ?? String(e)}`);
       }
     })();
   }, []);
 
   return (
-    <div className="min-h-screen grid place-items-center text-white">
-      <div className="surface-card p-6 max-w-lg text-center">
-        {err ? (
-          <>
-            <h1 className="text-2xl font-bold mb-2">OAuth error</h1>
-            <p className="text-red-300">{err}</p>
-            <p className="text-white/70 mt-3 text-sm">Open DevTools → Console to see detailed logs.</p>
-          </>
-        ) : (
-          <>
-            <h1 className="text-2xl font-bold mb-2">Please wait…</h1>
-            <p className="text-white/80">{msg}</p>
-          </>
-        )}
+    <div className="min-h-screen grid place-items-center text-slate-100">
+      <div className="bg-black/40 rounded-xl px-6 py-4">
+        <div className="text-xl font-semibold">Please wait...</div>
+        <div className="opacity-80">{msg}</div>
       </div>
     </div>
   );
