@@ -129,25 +129,44 @@ export function AuthProvider({ children }) {
   }
 
   async function oauthOrLink(provider) {
-    const { data: { user: current } = {} } = await supabase.auth.getUser();
-    const redirectTo = buildRedirectURL(null);
+  const { data: { user: current } = {} } = await supabase.auth.getUser();
+  const oldGuestId = current?.is_anonymous ? current.id : null;
+  const redirectTo = buildRedirectURL(oldGuestId); // include guest id for adopt
 
-    if (current?.is_anonymous) {
-      const { error } = await supabase.auth.linkIdentity({
+  if (current?.is_anonymous) {
+    // Try link → if identity already exists, fall back to signInWithOAuth
+    const { error } = await supabase.auth.linkIdentity({
+      provider,
+      options: { redirectTo },
+    });
+
+    const alreadyLinked =
+      error?.code === "identity_already_exists" ||
+      (typeof error?.message === "string" &&
+        /already\s+exists/i.test(error.message)) ||
+      error?.status === 400;
+
+    if (alreadyLinked) {
+      if (oldGuestId) localStorage.setItem("guest_to_adopt", oldGuestId);
+      const { error: signInErr } = await supabase.auth.signInWithOAuth({
         provider,
         options: { redirectTo },
       });
-      if (error) throw error;
-      return { linked: true };
-    } else {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider,
-        options: { redirectTo },
-      });
-      if (error) throw error;
-      return { signedIn: true };
+      if (signInErr) throw signInErr;
+      return { signedIn: true, adopted: "pending" };
     }
+
+    if (error) throw error;
+    return { linked: true };
   }
+
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider,
+    options: { redirectTo },
+  });
+  if (error) throw error;
+  return { signedIn: true };
+}
 
   const signout = async () => {
     setReady(false);
