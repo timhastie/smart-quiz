@@ -70,7 +70,7 @@ export default function AuthProvider({ children }) {
   async function signupOrLink(email, password) {
     const u = (await supabase.auth.getUser()).data?.user;
     if (isAnonUser(u)) {
-      // upgrade the guest
+      // upgrade the guest via email/password linking
       const { data, error } = await supabase.auth.linkIdentity({
         provider: "email",
         email,
@@ -97,51 +97,25 @@ export default function AuthProvider({ children }) {
   }
 
   /**
-   * OAuth helper that tries to LINK if the current user is anonymous,
-   * and if Supabase returns "identity already linked to another user",
-   * it falls back to a plain sign-in.
+   * Start OAuth (Google by default). We do NOT call linkIdentity for OAuth
+   * because it can redirect immediately and we can't catch the "already linked"
+   * case reliably. We rely on /auth/callback to adopt/merge any guest data.
    */
   async function oauthOrLink(provider = "google", opts = {}) {
+    const curUser = (await supabase.auth.getUser()).data?.user;
     const redirectTo = buildRedirectURL("/auth/callback", {
-      guest: "1",
+      guest: isAnonUser(curUser) ? "1" : "",
       provider,
     });
 
-    const u = (await supabase.auth.getUser()).data?.user;
-    const isGuest = isAnonUser(u);
-
-    if (isGuest) {
-      // Attempt to link first
-      const { error } = await supabase.auth.linkIdentity({
-        provider,
-        options: { redirectTo },
-      });
-
-      if (!error) return;
-
-      // Known Supabase code when the identity already belongs to another user
-      const msg = (error?.message || "").toLowerCase();
-      if (
-        error?.status === 400 ||
-        msg.includes("already linked to another user") ||
-        msg.includes("already exists")
-      ) {
-        // Fall back to a normal sign-in
-        await supabase.auth.signInWithOAuth({
-          provider,
-          options: { redirectTo },
-        });
-        return;
-      }
-
-      // Any other error: rethrow
-      throw error;
-    }
-
-    // Not a guest → normal sign-in
     await supabase.auth.signInWithOAuth({
       provider,
-      options: { redirectTo },
+      options: {
+        redirectTo,
+        // helps users choose the right Google account:
+        queryParams: { prompt: "select_account" },
+        ...opts?.options,
+      },
     });
   }
 
@@ -163,9 +137,5 @@ export default function AuthProvider({ children }) {
     [user, ready]
   );
 
-  return (
-    <AuthCtx.Provider value={value}>
-      {children}
-    </AuthCtx.Provider>
-  );
+  return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
 }
