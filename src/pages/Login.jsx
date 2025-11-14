@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
+import SigningInOverlay from "../components/SigningInOverlay";
 
 export default function Login() {
   const { signin, googleSignIn } = useAuth();
@@ -37,6 +38,10 @@ export default function Login() {
       setErr(error?.message || "Google sign-in failed.");
       setLoadingGoogle(false);
     }
+  }
+
+  if (loadingGoogle) {
+    return <SigningInOverlay />;
   }
 
   return (

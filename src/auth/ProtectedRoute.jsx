@@ -1,18 +1,13 @@
 // src/auth/ProtectedRoute.jsx
-import { Navigate } from 'react-router-dom';
 import { useAuth } from './AuthProvider';
+import SigningInOverlay from '../components/SigningInOverlay';
 
 export default function ProtectedRoute({ children }) {
-  const { user, ready } = useAuth();
+  const { user, ready, oauthRedirecting } = useAuth();
 
-  if (!ready) {
-    return (
-      <div className="min-h-screen grid place-items-center text-white/80">
-        <div className="text-sm">Loading…</div>
-      </div>
-    );
+  if (!ready || !user || oauthRedirecting) {
+    return <SigningInOverlay />;
   }
 
-  if (!user) return <Navigate to="/login" replace />;
   return children;
 }

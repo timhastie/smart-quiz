@@ -1,6 +1,7 @@
 // src/pages/AuthCallback.jsx
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { supabase } from "../lib/supabase";
+import SigningInOverlay from "../components/SigningInOverlay";
 
 const LS_GUEST_ID = "guest_id_before_oauth";
 
@@ -9,8 +10,6 @@ function sleep(ms) {
 }
 
 export default function AuthCallback() {
-  const [msg, setMsg] = useState("Finishing sign-in...");
-
   useEffect(() => {
     (async () => {
       try {
@@ -31,7 +30,6 @@ export default function AuthCallback() {
 
         if (!session?.user?.id) {
           console.error("[AuthCallback] no session after OAuth — abort");
-          setMsg("OAuth error: no session");
           return;
         }
 
@@ -43,7 +41,6 @@ export default function AuthCallback() {
 
         // === RPC-only ADOPTION ===
         if (guestId && guestId !== newUserId) {
-          setMsg("Linking your guest data...");
           console.log("[AuthCallback] calling RPC adopt_guest with", {
             p_old_user: guestId,
           });
@@ -56,7 +53,6 @@ export default function AuthCallback() {
 
           if (error) {
             console.error("[AuthCallback] adopt_guest error:", error);
-            setMsg(`Adopt error: ${error.message ?? String(error)}`);
           } else {
             // Expected shape from our updated function:
             // { ok: true, old_id, new_id, moved: { quizzes, groups, quiz_scores } }
@@ -67,7 +63,6 @@ export default function AuthCallback() {
               moved.groups,
               moved.quiz_scores
             );
-            setMsg("Success! Bringing your quizzes over…");
           }
         } else {
           console.log("[AuthCallback] no adoption needed (no guestId or same user)");
@@ -90,17 +85,10 @@ export default function AuthCallback() {
         window.location.replace("/");
       } catch (e) {
         console.error("[AuthCallback] fatal:", e);
-        setMsg(`OAuth error: ${e?.message ?? String(e)}`);
+        console.error("[AuthCallback] fatal:", e);
       }
     })();
   }, []);
 
-  return (
-    <div className="min-h-screen grid place-items-center text-slate-100">
-      <div className="bg-black/40 rounded-xl px-6 py-4">
-        <div className="text-xl font-semibold">Please wait...</div>
-        <div className="opacity-80">{msg}</div>
-      </div>
-    </div>
-  );
+  return <SigningInOverlay />;
 }

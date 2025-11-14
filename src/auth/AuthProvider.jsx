@@ -1,6 +1,8 @@
 // src/auth/AuthProvider.jsx
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { clearOauthRedirect, isOauthRedirectActive, markOauthRedirect } from "./oauthRedirectFlag";
+import SigningInOverlay from "../components/SigningInOverlay";
 
 const AuthCtx = createContext(null);
 
@@ -13,6 +15,7 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [user, setUser] = useState(null);
   const [ready, setReady] = useState(false);
+  const [oauthRedirecting, setOauthRedirecting] = useState(() => isOauthRedirectActive());
 
   // ---------- helpers ----------
   async function waitForSession(timeoutMs = 2500) {
@@ -101,6 +104,10 @@ export function AuthProvider({ children }) {
       // self-heal / create anon unless we're on the OAuth callback route
       await ensureSession("boot");
       setReady(true);
+      if (!onAuthCallbackPath()) {
+        clearOauthRedirect();
+        setOauthRedirecting(false);
+      }
     })();
 
     return () => unsub?.unsubscribe();
@@ -108,6 +115,8 @@ export function AuthProvider({ children }) {
 
   // ---------- sign-in / sign-up / oauth ----------
   async function oauthOrLink(provider) {
+    markOauthRedirect();
+    setOauthRedirecting(true);
     const current = (await supabase.auth.getUser()).data.user;
     const currentId = current?.id ?? null;
     if (currentId) {
@@ -119,19 +128,25 @@ export function AuthProvider({ children }) {
       }
     }
 
-    // local sign-out avoids identity linking; the redirect flow will auth afresh
-    console.log("[oauthOrLink] signOut(local) before redirect");
-    await supabase.auth.signOut({ scope: "local" });
+    try {
+      // local sign-out avoids identity linking; the redirect flow will auth afresh
+      console.log("[oauthOrLink] signOut(local) before redirect");
+      await supabase.auth.signOut({ scope: "local" });
 
-    const redirectTo = `${window.location.origin}/auth/callback`;
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: {
-        redirectTo,
-        queryParams: { access_type: "online", prompt: "select_account" },
-      },
-    });
-    if (error) throw error;
+      const redirectTo = `${window.location.origin}/auth/callback`;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo,
+          queryParams: { access_type: "online", prompt: "select_account" },
+        },
+      });
+      if (error) throw error;
+    } catch (err) {
+      clearOauthRedirect();
+      setOauthRedirecting(false);
+      throw err;
+    }
   }
 
   async function signin(email, password) {
@@ -168,23 +183,24 @@ export function AuthProvider({ children }) {
       ready,
       session,
       user,
+      oauthRedirecting,
       ensureSession, // callers (e.g., Generate button) can await this
       oauthOrLink,
+      googleSignIn: () => oauthOrLink("google"),
       signin,
       signup,
       signout,
       LS_GUEST_ID,
     }),
-    [ready, session, user]
+    [ready, session, user, oauthRedirecting]
   );
 
   // Gate UI until we know the token is valid to avoid early 401s
   if (!ready) {
-    return (
-      <div className="min-h-screen grid place-items-center text-slate-100">
-        <div className="opacity-80">Loading…</div>
-      </div>
-    );
+    if (oauthRedirecting) {
+      return <SigningInOverlay />;
+    }
+    return <div className="min-h-screen bg-[#041c21]" aria-hidden="true" />;
   }
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
