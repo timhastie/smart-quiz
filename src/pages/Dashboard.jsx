@@ -236,15 +236,6 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
       setAuthBusy(false);
     }
   }
-
-  async function handleSignOut() {
-    await signout();
-    setAuthMessage(
-      "You’re signed out. Sign in or create an account to save your progress."
-    );
-    setAuthOpen(true);
-  }
-
   const [trial, setTrial] = useState({
     isAnon: false,
     remaining: Infinity,
@@ -302,6 +293,7 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
       }
 
       // Success: sign out, close Account modal, redirect
+      resetGroupFilterToAll();
       await signout();
       setAccountOpen(false);
       window.location.href = "/";
@@ -348,6 +340,24 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
   const [filterGroupId, setFilterGroupId] = useState(() =>
     getInitialGroupFromUrlOrStorage(location.search) || ""
   );
+  const resetGroupFilterToAll = useCallback(() => {
+    setFilterGroupId("");
+    persistLastGroup("");
+    try {
+      const params = new URLSearchParams(location.search);
+      if (params.has("group")) {
+        params.delete("group");
+        const nextSearch = params.toString();
+        nav(
+          {
+            pathname: location.pathname,
+            search: nextSearch ? `?${nextSearch}` : "",
+          },
+          { replace: true }
+        );
+      }
+    } catch {}
+  }, [location.pathname, location.search, nav]);
   const [hydrated, setHydrated] = useState(false);
   const normalizedFilterGroupId = filterGroupId || "";
 
@@ -413,6 +423,15 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
   const [deletingGroup, setDeletingGroup] = useState(false);
 
   const [query, setQuery] = useState("");
+
+  async function handleSignOut() {
+    resetGroupFilterToAll();
+    await signout();
+    setAuthMessage(
+      "You’re signed out. Sign in or create an account to save your progress."
+    );
+    setAuthOpen(true);
+  }
 
   async function load() {
     const { data, error } = await supabase
