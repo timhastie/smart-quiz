@@ -2584,7 +2584,7 @@ useEffect(() => {
                 </label>
                 <input
                   id="gen-title"
-                  className="field w-full placeholder:text-white/60"
+                  className="field w-full placeholder:text-gray-400"
                   placeholder="Bash Top 10"
                   value={gTitle}
                   onChange={(e) => setGTitle(e.target.value)}
@@ -2597,7 +2597,7 @@ useEffect(() => {
                 </label>
                 <textarea
                   id="gen-topic"
-                  className="field-textarea w-full min-h-[8rem] resize-y placeholder:text-white/60"
+                  className="field-textarea w-full min-h-[8rem] resize-y placeholder:text-gray-400"
                   placeholder="Create 10 questions that test the 10 most-used Bash commands."
                   value={gTopic}
                   onChange={(e) => setGTopic(e.target.value)}
