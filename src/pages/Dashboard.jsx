@@ -1384,7 +1384,7 @@ useEffect(() => {
                   isFirstQuizState ? "opacity-50 cursor-not-allowed" : ""
                 }`}
               >
-                + Generate Quiz with AI
+                + Generate quiz with AI
               </button>
 
 
@@ -1462,7 +1462,7 @@ useEffect(() => {
     isFirstQuizState ? "opacity-50 cursor-not-allowed" : ""
   }`}
 >
-  + Generate Quiz with AI
+  + Generate quiz with AI
 </button>
             <button
               onClick={createQuiz}

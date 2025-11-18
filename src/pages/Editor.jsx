@@ -162,6 +162,78 @@ export default function Editor() {
   function addRow() {
     setQuestions((q) => [...q, { prompt: "", answer: "" }]);
   }
+
+  function escapeHtml(str) {
+    return (str ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function handlePrintQuestions() {
+    const hasQuestions = questions.length > 0;
+    const sections = hasQuestions
+      ? questions
+          .map((row, idx) => {
+            const q = escapeHtml(row?.prompt?.trim() || "(No question text)");
+            const a = escapeHtml(row?.answer?.trim() || "(No answer yet)");
+            return `<section class="qa-block">
+  <p><strong>Question ${idx + 1}:</strong><br />${q}</p>
+  <p><span class="answer-label">Answer:</span><br />${a}</p>
+</section>`;
+          })
+          .join("\n<hr />\n")
+      : `<p>No questions available yet.</p>`;
+    const docTitle = (title || "Quiz Questions").trim() || "Quiz Questions";
+    const printWindow = window.open("", "_blank", "width=900,height=700");
+    if (!printWindow) {
+      alert("Please allow pop-ups to print this quiz.");
+      return;
+    }
+    printWindow.document.write(`<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>${escapeHtml(docTitle)}</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        padding: 32px;
+        line-height: 1.6;
+        color: #0f172a;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: 1.5rem;
+      }
+      hr {
+        border: none;
+        border-top: 1px solid #cbd5f5;
+        margin: 24px 0;
+      }
+      .qa-block p {
+        margin: 0 0 12px;
+      }
+      .qa-block strong {
+        font-weight: 600;
+      }
+      .answer-label {
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>${escapeHtml(docTitle)}</h1>
+    ${sections}
+  </body>
+</html>`);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  }
+
   function updateRow(i, key, val) {
     setQuestions((q) =>
       q.map((row, idx) => (idx === i ? { ...row, [key]: val } : row))
@@ -736,7 +808,7 @@ export default function Editor() {
               className={`${btnBase} ${btnGreen} mt-3 w-full sm:w-auto h-12`}
               title="Open Generate with AI to replace this quiz"
             >
-              Edit Prompt and Regenerate with AI +
+              Edit prompt and regenerate with AI +
             </button>
           </div>
 
@@ -867,12 +939,18 @@ export default function Editor() {
       </main>
 
       <footer className="sticky bottom-0 z-30 bg-slate-950/90 backdrop-blur-md border-t border-white/5 px-4 sm:px-6 py-4">
-        <div className="max-w-4xl mx-auto flex justify-center">
+        <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-center gap-3">
           <button
             onClick={addRow}
-            className={`w-full sm:w-auto ${btnBase} ${btnGray} h-12`}
+            className={`${btnBase} ${btnGray} h-12 px-6`}
           >
             + Add Question
+          </button>
+          <button
+            onClick={handlePrintQuestions}
+            className={`${btnBase} ${btnGray} h-12 px-6`}
+          >
+            Print questions
           </button>
         </div>
       </footer>
