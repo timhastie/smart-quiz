@@ -686,22 +686,22 @@ export default function Editor() {
   return (
     <div className="min-h-screen text-slate-100 pb-16">
       <header className="sticky top-0 z-30 border-b border-white/5 bg-slate-950/80 backdrop-blur-md">
-        <div className="max-w-4xl mx-auto px-6 py-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
+        <div className="max-w-6xl mx-auto flex flex-wrap items-end justify-between gap-4 px-6 py-4 sm:items-center">
+          <div className="flex flex-col items-start gap-2 pl-2 sm:flex-row sm:items-center sm:gap-3 sm:pl-0 flex-none">
             <img
               src="/smartquizlogo.png"
               alt="Smart-Quiz logo"
-              className="h-9 sm:h-10 w-auto -ml-2 object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,0.35)]"
+              className="h-9 sm:h-10 w-auto my-1 object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,0.35)]"
               draggable="false"
             />
-            <div>
+            <div className="text-left w-full sm:w-auto">
               <p className="text-xs uppercase tracking-[0.2em] text-white/60">
                 Editor
               </p>
               <h1 className="text-2xl font-semibold tracking-tight">Edit Quiz</h1>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2 text-sm flex-none">
             <Link to="/" className={`${btnBase} ${btnGray}`}>
               Back
             </Link>
@@ -719,40 +719,38 @@ export default function Editor() {
           </div>
         )}
 
-        {/* Title + Group row */}
-        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1.4fr)_minmax(260px,1fr)] gap-4 items-start">
-          <div>
-            <label className="block text-xs uppercase tracking-wide text-white/60 mb-1">
+        {/* Title & group options */}
+        <div className="surface-card px-5 py-7 w-full max-w-4xl mx-auto flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex-1 min-w-[220px]">
+            <label className="text-xs uppercase tracking-wide text-white/60 mb-1 block">
               Title
             </label>
             <input
-              className="field w-full text-base sm:text-lg"
+              className="field w-full text-base sm:text-lg h-12"
               placeholder="Quiz title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
             />
-            <div className="mt-2">
-              <button
-                onClick={openRegenerateModalPrefilled}
-                className={`${btnBase} ${btnGreen}`}
-                title="Open Generate with AI to replace this quiz"
-              >
-                Edit Prompt and Regenerate with AI +
-              </button>
-            </div>
+            <button
+              onClick={openRegenerateModalPrefilled}
+              className={`${btnBase} ${btnGreen} mt-3 w-full sm:w-auto h-12`}
+              title="Open Generate with AI to replace this quiz"
+            >
+              Edit Prompt and Regenerate with AI +
+            </button>
           </div>
 
-          <div>
-            <label className="block text-xs uppercase tracking-wide text-white/60 mb-1">
+          <div className="flex-1 min-w-[220px]">
+            <label className="text-xs uppercase tracking-wide text-white/60 mb-1 block">
               Group
             </label>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               <select
-                className="w-full"
-              value={groupId}
-              onChange={handleGroupChange}
-              disabled={savingGroup}
-            >
+                className="w-full h-12 custom-select"
+                value={groupId}
+                onChange={handleGroupChange}
+                disabled={savingGroup}
+              >
                 {groups.length === 0 ? (
                   <option value="">No groups yet</option>
                 ) : (
@@ -762,9 +760,9 @@ export default function Editor() {
                     </option>
                   ))
                 )}
-            </select>
+              </select>
               <button
-                className={`${btnBase} ${btnGray} whitespace-nowrap`}
+                className={`${btnBase} ${btnGray} h-12 whitespace-nowrap w-full sm:w-auto`}
                 onClick={() => setNewOpen(true)}
                 disabled={savingGroup}
               >
@@ -773,10 +771,10 @@ export default function Editor() {
             </div>
 
             {selectedCount > 0 && (
-              <div className="mt-3 flex items-center justify-between">
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <button
                   onClick={clearSelection}
-                  className={`${btnBase} ${btnGray}`}
+                  className={`${btnBase} ${btnGray} w-full sm:w-auto`}
                   title="Unselect all selected questions"
                 >
                   Unselect all
@@ -784,7 +782,7 @@ export default function Editor() {
 
                 <button
                   onClick={deleteSelected}
-                  className={`${btnBase} ${btnRed}`}
+                  className={`${btnBase} ${btnRed} w-full sm:w-auto`}
                   title="Delete selected questions"
                 >
                   Delete selected ({selectedCount})
@@ -798,9 +796,11 @@ export default function Editor() {
 <div className="relative">
   <div
     className="
-      max-h-[70vh]
+      w-full
+      pt-2
+      max-h-[72vh]
       overflow-y-auto
-      overscroll-contain
+      overscroll-auto
       touch-pan-y
       pr-1
       space-y-4
@@ -863,13 +863,19 @@ export default function Editor() {
   </div>
 </div>
 
-        <button
-          onClick={addRow}
-          className={`w-full sm:w-auto ${btnBase} ${btnGray}`}
-        >
-          + Add Question
-        </button>
+        <div className="h-16" aria-hidden />
       </main>
+
+      <footer className="sticky bottom-0 z-30 bg-slate-950/90 backdrop-blur-md border-t border-white/5 px-4 sm:px-6 py-4">
+        <div className="max-w-4xl mx-auto flex justify-center">
+          <button
+            onClick={addRow}
+            className={`w-full sm:w-auto ${btnBase} ${btnGray} h-12`}
+          >
+            + Add Question
+          </button>
+        </div>
+      </footer>
 
       {/* New Group modal */}
       {newOpen && (

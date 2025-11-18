@@ -1249,19 +1249,19 @@ export default function Play() {
       tabIndex={0}
     >
       <header className="sticky top-0 z-30 border-b border-white/5 bg-slate-950/80 backdrop-blur-md">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
+        <div className="max-w-6xl mx-auto flex flex-wrap items-end justify-between gap-4 px-6 py-4 sm:items-center">
+          <div className="flex flex-col items-start gap-2 pl-2 sm:flex-row sm:items-center sm:gap-3 sm:pl-0 flex-none">
             <img
               src="/smartquizlogo.png"
               alt="Smart-Quiz logo"
-              className="h-9 sm:h-10 w-auto -ml-2 object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,0.35)]"
+              className="h-9 sm:h-10 w-auto my-1 object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,0.35)]"
               draggable="false"
             />
-            <div className="min-w-0">
+            <div className="text-left w-full sm:w-auto min-w-0">
               <p className="text-xs uppercase tracking-[0.2em] text-white/60">
                 {experienceLabel}
               </p>
-              <h1 className="text-xl sm:text-2xl font-semibold tracking-tight truncate">
+              <h1 className="text-2xl font-semibold tracking-tight truncate">
                 {quiz.title || "Quiz"}
                 {isSyntheticMode
                   ? isReviewMode
@@ -1273,13 +1273,15 @@ export default function Play() {
               </h1>
             </div>
           </div>
-          <Link
-            to={backPath}
-            className={`${btnBase} ${btnGray} self-start sm:self-auto`}
-            title="Go back to dashboard"
-          >
-            Back
-          </Link>
+          <div className="flex flex-wrap items-center justify-end gap-2 text-sm flex-none">
+            <Link
+              to={backPath}
+              className={`${btnBase} ${btnGray}`}
+              title="Go back to dashboard"
+            >
+              Back
+            </Link>
+          </div>
         </div>
       </header>
 
