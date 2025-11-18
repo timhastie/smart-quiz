@@ -223,11 +223,9 @@ Deno.serve(async (req) => {
       );
       return json(llm, 200);
     } catch (err) {
-      console.error("LLM grading failed:", err);
       return json({ correct: false, reason: "LLM unavailable" }, 200);
     }
   } catch (e: any) {
-    console.error("grade-answer error:", e);
     return text(`Server error: ${e?.message ?? e}`, 500);
   }
 });

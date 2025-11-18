@@ -18,7 +18,6 @@ serve(async (req) => {
 
   const { data, error } = await admin.rpc("find_prunable_anon_users", { age_hours });
   if (error) {
-    console.error("RPC error:", error);
     return new Response(JSON.stringify({ ok: false, error }), { status: 500 });
   }
 
@@ -28,7 +27,7 @@ serve(async (req) => {
   let ok = 0, fail = 0;
   for (const id of toDelete) {
     const { error: delErr } = await admin.auth.admin.deleteUser(id);
-    if (delErr) { fail++; console.warn("deleteUser failed:", id, delErr.message); }
+    if (delErr) { fail++; }
     else { ok++; }
   }
 

@@ -95,13 +95,11 @@ Deno.serve(async (req) => {
     // Insert
     const { error } = await svc.from("file_chunks").insert(rows);
     if (error) {
-      console.error("file_chunks insert error:", error);
       return text(`Insert error: ${error.message}`, 500);
     }
 
     return json({ file_id, file_name, chunks: rows.length }, 200);
   } catch (e: any) {
-    console.error("index-source error:", e);
     return text(`error: ${e?.message ?? String(e)}`, 500);
   }
 });

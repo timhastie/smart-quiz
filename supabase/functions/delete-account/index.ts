@@ -16,9 +16,6 @@ serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
     if (!supabaseUrl || !anonKey || !serviceRoleKey) {
-      console.error(
-        "Missing one of SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY",
-      );
       return new Response("Server misconfigured", {
         status: 500,
         headers: corsHeaders,
@@ -50,7 +47,6 @@ serve(async (req) => {
 
     const accessToken = body?.accessToken;
     if (!accessToken || typeof accessToken !== "string") {
-      console.error("Missing accessToken in request body");
       return new Response("Missing access token", {
         status: 401,
         headers: corsHeaders,
@@ -72,7 +68,6 @@ serve(async (req) => {
     } = await userClient.auth.getUser();
 
     if (userErr || !user) {
-      console.error("getUser error", userErr);
       return new Response("Unauthorized", {
         status: 401,
         headers: corsHeaders,
@@ -80,7 +75,6 @@ serve(async (req) => {
     }
 
     const userId = user.id;
-    console.log("Deleting account for user", userId);
 
     // --- 4) Use service role to delete all their data ---
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
@@ -95,7 +89,6 @@ serve(async (req) => {
     for (const op of tableDeletes) {
       const { error } = await op;
       if (error && error.code !== "PGRST116") {
-        console.error("Table delete error", error);
         return new Response("Failed to delete data", {
           status: 500,
           headers: corsHeaders,
@@ -106,21 +99,17 @@ serve(async (req) => {
     // --- 5) Delete the auth user ---
     const { error: delErr } = await adminClient.auth.admin.deleteUser(userId);
     if (delErr) {
-      console.error("deleteUser error", delErr);
       return new Response("Failed to delete user", {
         status: 500,
         headers: corsHeaders,
       });
     }
 
-    console.log("Account deleted for user", userId);
-
     return new Response("OK", {
       status: 200,
       headers: corsHeaders,
     });
   } catch (e) {
-    console.error("Unhandled error in delete-account", e);
     return new Response("Server error", {
       status: 500,
       headers: corsHeaders,

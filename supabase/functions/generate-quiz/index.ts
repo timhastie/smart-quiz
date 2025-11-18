@@ -224,7 +224,7 @@ Avoid paraphrasing prior items; prefer NEW subtopics, different entities/times/a
   const userMsg =
     `Create ${n} question/answer pairs about: ${prompt}\n` +
     `Vary difficulty and subtopics. Answers must be concise exact strings.\n` +
-    `Example element: { "prompt": "Print dog", "answer": "console.log('dog')" }\n\n` +
+    `Example element: { "prompt": "Print dog", "answer": "print('dog')" }\n\n` +
     priorText +
     docText;
 
@@ -318,17 +318,19 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Validate/resolve target group
-    let targetGroupId: string | null = null;
-    if (group_id) {
-      const { data: g, error: gErr } = await supa
-        .from("groups")
-        .select("id")
-        .eq("id", group_id)
-        .eq("user_id", user.id)
-        .maybeSingle();
-      if (!gErr && g?.id) targetGroupId = g.id;
+    if (!group_id || typeof group_id !== "string") {
+      return text("group_id is required", 400);
     }
+    const { data: g, error: gErr } = await supa
+      .from("groups")
+      .select("id")
+      .eq("id", group_id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (gErr || !g?.id) {
+      return text("Invalid group_id", 400);
+    }
+    const targetGroupId = g.id as string;
 
     // Gather prior prompts for novelty (server-side)
     let priorPrompts: string[] = [];
@@ -457,7 +459,6 @@ Deno.serve(async (req) => {
         .eq("user_id", user.id);
 
       if (upErr) {
-        console.error("DB update failed:", upErr);
         return text(`Failed to update quiz: ${upErr.message}`, 500);
       }
       return json(
@@ -487,7 +488,6 @@ Deno.serve(async (req) => {
       if ((error as any).code === "42501") {
         return text("Free trial limit reached. Create an account to make more quizzes.", 403);
       }
-      console.error("DB insert failed:", error);
       return text(`Failed to insert quiz: ${error.message}`, 500);
     }
 
@@ -496,7 +496,6 @@ Deno.serve(async (req) => {
       200
     );
   } catch (e: any) {
-    console.error("Unhandled:", e);
     return text(`Server error: ${e?.message ?? e}`, 500);
   }
 });

@@ -1,6 +1,6 @@
 // src/pages/Dashboard.jsx
 import { Play, History, SquarePen, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { supabase } from "../lib/supabase";
@@ -10,16 +10,15 @@ import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 import { getInitialGroupFromUrlOrStorage, persistLastGroup } from "../lib/groupFilter";
 import { useLocation } from "react-router-dom";
-
 /* ------------------------------- CONSTANTS -------------------------------- */
 const ALL_GROUP_ID = "00000000-0000-0000-0000-000000000000"; // sentinel for “All”
-const NO_GROUP = "__none__";
-const NO_GROUP_ID = "00000000-0000-0000-0000-000000000001"; // sentinel for “No Group” in group_scores
+const NO_GROUP_SENTINEL = "__no_group__";
+const NO_GROUP_LABEL = "No group";
 
-// --- DEBUG: expose sentinels & logger in window for devtools ---
-if (typeof window !== "undefined") {
-  window.__SQ_SENTINELS__ = { ALL_GROUP_ID, NO_GROUP, NO_GROUP_ID };
+function sortGroupsByName(list) {
+  return [...list].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 }
+
 function dbg() {}
 
 /* ------------------------------- HELPERS (DB) ------------------------------ */
@@ -209,7 +208,6 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
     }
     setAuthMessage("Check your email to confirm your account, then return here.");
   } catch (err) {
-    console.error(err);
     alert(err?.message || "Failed to start signup.");
   } finally {
     setAuthBusy(false);
@@ -233,7 +231,6 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
       setAuthMessage("");
       setAuthOpen(false);
     } catch (err) {
-      console.error(err);
       alert("Something went wrong. Please try again.");
     } finally {
       setAuthBusy(false);
@@ -283,7 +280,6 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
       const accessToken = session?.access_token;
 
       if (sessionError || !accessToken) {
-        console.error("No valid session for delete-account", sessionError);
         setAccountError(
           "You need to be signed in to delete your account. Please refresh and try again."
         );
@@ -299,7 +295,6 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
       );
 
       if (fnError) {
-        console.error("delete-account function error", fnError);
         setAccountError(
           "Could not delete your account. Please try again, or email support@smart-quiz.app."
         );
@@ -311,7 +306,6 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
       setAccountOpen(false);
       window.location.href = "/";
     } catch (err) {
-      console.error("Account delete failed:", err);
       setAccountError(
         "Could not delete your account. Please try again, or email support@smart-quiz.app."
       );
@@ -337,7 +331,7 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
   const [gCount, setGCount] = useState(10);
   const [generating, setGenerating] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [gGroupId, setGGroupId] = useState("");
+  const [gGroupId, setGGroupId] = useState(NO_GROUP_SENTINEL);
   const [gFile, setGFile] = useState(null);
   const [gNoRepeat, setGNoRepeat] = useState(true);
 
@@ -350,12 +344,49 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
 
   const location = useLocation();
 
-const [groups, setGroups] = useState([]);
-const [filterGroupId, setFilterGroupId] = useState(() =>
-  getInitialGroupFromUrlOrStorage(location.search)
-);
-  const scoreSort = "asc";
-  const currentGroup = groups.find((g) => g.id === filterGroupId) || null;
+  const [groups, setGroups] = useState([]);
+  const [filterGroupId, setFilterGroupId] = useState(() =>
+    getInitialGroupFromUrlOrStorage(location.search) || ""
+  );
+  const [hydrated, setHydrated] = useState(false);
+  const normalizedFilterGroupId = filterGroupId || "";
+
+  const orderedGroups = useMemo(() => {
+    if (!groups?.length) return [];
+    return sortGroupsByName(groups);
+  }, [groups]);
+  const noGroupRow = useMemo(() => {
+    return (
+      orderedGroups.find(
+        (g) => (g.name || "").trim().toLowerCase() === NO_GROUP_LABEL.toLowerCase()
+      ) || null
+    );
+  }, [orderedGroups]);
+  const noGroupOptionValue = noGroupRow?.id ?? NO_GROUP_SENTINEL;
+  const selectableGroupOptions = useMemo(() => {
+    if (!orderedGroups.length) return [];
+    if (!noGroupRow?.id) return orderedGroups;
+    return orderedGroups.filter((g) => g.id !== noGroupRow.id);
+  }, [orderedGroups, noGroupRow?.id]);
+
+  useEffect(() => {
+    const desired = noGroupOptionValue;
+    if (!gGroupId || gGroupId === NO_GROUP_SENTINEL) {
+      if (gGroupId !== desired) {
+        setGGroupId(desired);
+      }
+      return;
+    }
+    const exists = orderedGroups.some((g) => g.id === gGroupId);
+    if (!exists && gGroupId !== desired) {
+      setGGroupId(desired);
+    }
+  }, [gGroupId, noGroupOptionValue, orderedGroups]);
+  const currentGroup = normalizedFilterGroupId
+    ? groups.find((g) => g.id === normalizedFilterGroupId) || null
+    : null;
+  const activeGroup = currentGroup;
+  const isAllFilter = !normalizedFilterGroupId;
 
   dbg("INIT filterGroupId =", JSON.stringify(filterGroupId));
 
@@ -384,36 +415,24 @@ const [filterGroupId, setFilterGroupId] = useState(() =>
   const [query, setQuery] = useState("");
 
   async function load() {
-  let q = supabase
-    .from("quizzes")
-    .select("id, title, questions, review_questions, updated_at, group_id")
-    .eq("user_id", user.id)
-    .order("updated_at", { ascending: false });
+    const { data, error } = await supabase
+      .from("quizzes")
+      .select("id, title, questions, review_questions, updated_at, group_id")
+      .eq("user_id", user.id)
+      .order("updated_at", { ascending: false });
+    if (error) {
+      setQuizzes([]);
+      setScoresByQuiz({});
+      setAllRevisitScore(null);
+      setGroupRevisitScores(new Map());
+      setAllAllScore(null);
+      setGroupAllScores(new Map());
+      setHydrated(true);
+      return;
+    }
 
-  // Normalize the current selection
-  const sel = (filterGroupId ?? "").trim();
-  const isAll = sel === "" || sel === ALL_GROUP_ID;   // treat sentinel as All
-  const isNoGroup = sel === NO_GROUP || sel === "null";
-
-  if (isNoGroup) {
-    q = q.is("group_id", null);
-  } else if (!isAll) {
-    q = q.eq("group_id", sel);
-  }
-
-  const { data, error } = await q;
-  if (error) {
-    setQuizzes([]);
-    setScoresByQuiz({});
-    setAllRevisitScore(null);
-    setGroupRevisitScores(new Map());
-    setAllAllScore(null);
-    setGroupAllScores(new Map());
-    return;
-  }
-
-  const list = data ?? [];
-  setQuizzes(list);
+    const list = data ?? [];
+    setQuizzes(list);
 
   const ids = list.map((x) => x.id);
   if (!ids.length) {
@@ -451,6 +470,7 @@ const [filterGroupId, setFilterGroupId] = useState(() =>
     setGroupRevisitScores(new Map());
     setAllAllScore(null);
     setGroupAllScores(new Map());
+    setHydrated(true);
     return;
   }
 
@@ -472,19 +492,19 @@ const [filterGroupId, setFilterGroupId] = useState(() =>
 
   for (const r of gs) {
     if (r.scope !== "group") continue;
-
-    const gid = r.group_id == null ? NO_GROUP_ID : r.group_id;
-
-    if (!mReview.has(gid) && typeof r.last_review_score === "number") {
-      mReview.set(gid, r.last_review_score);
+    const key = r.group_id;
+    if (!key) continue;
+    if (!mReview.has(key) && typeof r.last_review_score === "number") {
+      mReview.set(key, r.last_review_score);
     }
-    if (!mAll.has(gid) && typeof r.last_all_score === "number") {
-      mAll.set(gid, r.last_all_score);
+    if (!mAll.has(key) && typeof r.last_all_score === "number") {
+      mAll.set(key, r.last_all_score);
     }
   }
 
   setGroupRevisitScores(mReview);
   setGroupAllScores(mAll);
+  setHydrated(true);
 }
 
 useEffect(() => {
@@ -503,97 +523,49 @@ useEffect(() => {
 useEffect(() => {
   if (ready && user) load();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [ready, user?.id, filterGroupId]);
+}, [ready, user?.id]);
 
-// Persist the current group filter so Play → Dashboard restores it
-  useEffect(() => {
-    persistLastGroup(filterGroupId || "");
-  }, [filterGroupId]);
-
-// Normalize ALL_GROUP_ID to "" so "All" footer/actions always render
 useEffect(() => {
-  const v = getInitialGroupFromUrlOrStorage(location.search);
-  let normalized = v == null ? "" : v;
-  if (normalized === ALL_GROUP_ID) normalized = ""; // ← key fix
-  dbg("URL sync fired:", { search: location.search, v, normalized });
-  setFilterGroupId((prev) => {
-    const next = prev === normalized ? prev : normalized;
-    if (prev !== next) dbg("filterGroupId changed via URL sync:", { prev, next });
-    return next;
-  });
-}, [location.search]);
+  if (!ready) setHydrated(false);
+}, [ready]);
 
-// Fetch groups (for dropdown)
 useEffect(() => {
-  if (!user?.id) return;
-  let alive = true;
-  (async () => {
-    const { data, error } = await supabase
-      .from("groups")
-      .select("id, name")
-      .eq("user_id", user.id)
-      .order("name", { ascending: true });
-
-    if (!alive) return;
-    if (error) {
-      console.error("[Dash] groups read error", error);
-      setGroups([]);
-      return;
-    }
-    setGroups(data ?? []);
-  })();
-  return () => {
-    alive = false;
-  };
+  if (!user?.id) {
+    setFilterGroupId("");
+    setHydrated(false);
+  }
 }, [user?.id]);
 
-// 🔎 FETCH QUIZZES (diagnostic: ensure 'All' selection doesn't filter; log state)
-  useEffect(() => {
-  if (!user?.id) return;
+useEffect(() => {
+  persistLastGroup(filterGroupId || "");
+}, [filterGroupId]);
 
-  const _dbg = () => {};
+useEffect(() => {
+  const initial = getInitialGroupFromUrlOrStorage(location.search) || "";
+  setFilterGroupId(initial);
+}, [location.search]);
 
-  // Normalize the selection
-  const sel = (filterGroupId ?? "").trim();
-  const isAll = sel === "" || sel === ALL_GROUP_ID; // "" = All
-  const isNoGroup = sel === NO_GROUP || sel === "null"; // do NOT treat "" as No group
+const fetchGroups = useCallback(async () => {
+  if (!user?.id) {
+    setGroups([]);
+    return;
+  }
+  const { data, error } = await supabase
+    .from("groups")
+    .select("id, name")
+    .eq("user_id", user.id)
+    .order("name", { ascending: true });
+  if (error) {
+    setGroups([]);
+    return;
+  }
+  setGroups(sortGroupsByName(data ?? []));
+}, [user?.id]);
 
-  let alive = true;
+useEffect(() => {
+  fetchGroups();
+}, [fetchGroups]);
 
-  (async () => {
-    _dbg("FETCH start", { raw: filterGroupId, sel, isAll, isNoGroup, userId: user?.id });
-
-    let q = supabase
-      .from("quizzes")
-      .select("id, title, group_id, questions, review_questions, updated_at")
-      .eq("user_id", user.id)
-      .order("updated_at", { ascending: false });
-
-    // ✅ Do NOT add a group filter when “All” is selected
-    if (isNoGroup) {
-      q = q.is("group_id", null);
-    } else if (!isAll) {
-      q = q.eq("group_id", sel);
-    }
-
-    const { data, error } = await q;
-
-    if (!alive) return;
-
-    if (error) {
-      _dbg("FETCH error", error);
-      setQuizzes([]);
-      return;
-    }
-
-    _dbg("FETCH done", { count: (data || []).length, isAll, isNoGroup });
-    setQuizzes(data || []);
-  })();
-
-  return () => {
-    alive = false;
-  };
-}, [user?.id, filterGroupId]);
 // Anonymous trial counters
 useEffect(() => {
   if (!user?.id) return;
@@ -638,6 +610,56 @@ function enqueueEmptyGroups(ids) {
     return Array.from(set);
   });
 }
+
+  const ensureGroupSelection = useCallback(
+    async (selectionId) => {
+      if (!user?.id) return null;
+      if (selectionId && selectionId !== NO_GROUP_SENTINEL) {
+        return selectionId;
+      }
+      if (noGroupRow?.id) return noGroupRow.id;
+      const fallbackRow = async () => {
+        try {
+          const { data: existing } = await supabase
+            .from("groups")
+            .select("id, name")
+            .eq("user_id", user.id)
+            .eq("name", NO_GROUP_LABEL)
+            .maybeSingle();
+          if (existing?.id) {
+            setGroups((gs) => {
+              if (gs.some((g) => g.id === existing.id)) return gs;
+              return sortGroupsByName([...gs, existing]);
+            });
+            return existing.id;
+          }
+          return null;
+        } catch {
+          return null;
+        }
+      };
+      try {
+        const { data, error } = await supabase
+          .from("groups")
+          .insert({ user_id: user.id, name: NO_GROUP_LABEL })
+          .select("id, name")
+          .single();
+        if (error || !data?.id) {
+          const recovered = await fallbackRow();
+          if (recovered) return recovered;
+          throw error || new Error("Missing No group id");
+        }
+        setGroups((gs) => sortGroupsByName([...gs, data]));
+        return data.id;
+      } catch {
+        const recovered = await fallbackRow();
+        if (recovered) return recovered;
+        alert("Failed to prepare the “No group” bucket. Please try again.");
+        return null;
+      }
+    },
+    [noGroupRow?.id, supabase, user?.id]
+  );
 
   async function checkEmptyGroup(groupId) {
     if (!groupId) return null;
@@ -707,9 +729,18 @@ function enqueueEmptyGroups(ids) {
       const allowed = await ensureCanCreate();
       if (!allowed) return;
       setCreating(true);
+      const targetGroupId = await ensureGroupSelection(
+        normalizedFilterGroupId || noGroupOptionValue
+      );
+      if (!targetGroupId) return;
       const { data, error } = await supabase
         .from("quizzes")
-        .insert({ user_id: user.id, title: "Untitled Quiz", questions: [] })
+        .insert({
+          user_id: user.id,
+          title: "Untitled Quiz",
+          questions: [],
+          group_id: targetGroupId,
+        })
         .select("id")
         .single();
       if (error) {
@@ -801,144 +832,159 @@ function enqueueEmptyGroups(ids) {
   }
 
   async function generateQuiz() {
-  try {
-    if (generating) return;
+    try {
+      if (generating) return;
 
-    // ✅ make sure we *have* a session before reading jwt / calling functions
-    await ensureSession("before-generate");
+      // ✅ make sure we *have* a session before reading jwt / calling functions
+      await ensureSession("before-generate");
 
-    const allowed = await ensureCanCreate();
-    if (!allowed) return;
-    setGenerating(true);
+      const allowed = await ensureCanCreate();
+      if (!allowed) return;
+      setGenerating(true);
 
-    const { data: sessionRes } = await supabase.auth.getSession();
-    const jwt = sessionRes?.session?.access_token;
-    const count = Math.max(1, Math.min(Number(gCount) || 10, 30));
+      console.log("[Generate] Starting", {
+        gGroupId,
+        groupsCount: groups.length,
+      });
 
-    const targetGroupIdForNoRepeat =
-      (gGroupId && gGroupId !== "") ||
-      (filterGroupId && filterGroupId !== NO_GROUP)
-        ? gGroupId || (filterGroupId !== NO_GROUP ? filterGroupId : "")
-        : "";
+      const { data: sessionRes } = await supabase.auth.getSession();
+      const jwt = sessionRes?.session?.access_token;
+      const count = Math.max(1, Math.min(Number(gCount) || 10, 30));
 
-    let file_id = null;
-    if (gFile) {
-      let rawDoc = "";
-      try {
-        rawDoc = await extractTextFromFile(gFile);
-      } catch (e) {
-        alert(`Couldn't read file "${gFile.name}".\n\n${e}`);
+      const resolvedGroupId = await ensureGroupSelection(gGroupId);
+      if (!resolvedGroupId) {
         setGenerating(false);
         return;
       }
-      const LIMIT = 500_000;
-      if (rawDoc.length > LIMIT) rawDoc = rawDoc.slice(0, LIMIT);
 
-      const idxRes = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/index-source`,
+      console.log("[Generate] Resolved target group", {
+        chosenGroupId: resolvedGroupId,
+      });
+
+      const targetGroupIdForNoRepeat = resolvedGroupId;
+
+      let file_id = null;
+      if (gFile) {
+        let rawDoc = "";
+        try {
+          rawDoc = await extractTextFromFile(gFile);
+        } catch (e) {
+          alert(`Couldn't read file "${gFile.name}".\n\n${e}`);
+          setGenerating(false);
+          return;
+        }
+        const LIMIT = 500_000;
+        if (rawDoc.length > LIMIT) rawDoc = rawDoc.slice(0, LIMIT);
+
+        const idxRes = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/index-source`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+            },
+            body: JSON.stringify({ text: rawDoc, file_name: gFile.name }),
+          }
+        );
+        const idxText = await idxRes.text();
+        if (!idxRes.ok) {
+          alert(`Failed to index document (${idxRes.status}):\n${idxText}`);
+          setGenerating(false);
+          return;
+        }
+        let idxOut = {};
+        try {
+          idxOut = idxText ? JSON.parse(idxText) : {};
+        } catch {}
+        file_id = idxOut?.file_id ?? null;
+        if (!file_id) {
+          alert("Indexing returned no file_id.");
+          setGenerating(false);
+          return;
+        }
+      }
+
+      let avoid_prompts = [];
+      if (gNoRepeat && targetGroupIdForNoRepeat) {
+        const { data: prior, error: priorErr } = await supabase
+          .from("quizzes")
+          .select("questions")
+          .eq("user_id", user.id)
+          .eq("group_id", targetGroupIdForNoRepeat);
+        if (!priorErr && Array.isArray(prior)) {
+          const all = [];
+          for (const row of prior) {
+            const qs = Array.isArray(row?.questions) ? row.questions : [];
+            for (const q of qs) {
+              const p = (q?.prompt || "").toString().trim();
+              if (p) all.push(p);
+            }
+          }
+          const seen = new Set();
+          for (const p of all) {
+            const key = p.toLowerCase();
+            if (!seen.has(key)) {
+              seen.add(key);
+              avoid_prompts.push(p);
+            }
+            if (avoid_prompts.length >= 300) break;
+          }
+        }
+      }
+
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-quiz`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
           },
-          body: JSON.stringify({ text: rawDoc, file_name: gFile.name }),
-        }
+            body: JSON.stringify({
+              title: (gTitle || "").trim() || "Bash Top 10",
+              topic:
+                (gTopic || "").trim() ||
+                "Create 10 questions that test the 10 most-used Bash commands.",
+              count,
+              group_id: resolvedGroupId,
+              file_id,
+              no_repeat: !!gNoRepeat,
+              avoid_prompts,
+            }),
+          }
       );
-      const idxText = await idxRes.text();
-      if (!idxRes.ok) {
-        alert(`Failed to index document (${idxRes.status}):\n${idxText}`);
-        setGenerating(false);
-        return;
-      }
-      let idxOut = {};
+
+      let raw = "";
       try {
-        idxOut = idxText ? JSON.parse(idxText) : {};
+        raw = await res.text();
       } catch {}
-      file_id = idxOut?.file_id ?? null;
-      if (!file_id) {
-        alert("Indexing returned no file_id.");
+
+      if (!res.ok) {
+        if (res.status === 403)
+          openSignupModal(
+            "Free trial limit reached. Create an account to make more quizzes."
+          );
+        else
+          alert(
+            `Failed to generate quiz (${res.status}):\n${raw || "Unknown error"}`
+          );
         setGenerating(false);
         return;
       }
-    }
 
-    let avoid_prompts = [];
-    if (gNoRepeat && targetGroupIdForNoRepeat) {
-      const { data: prior, error: priorErr } = await supabase
-        .from("quizzes")
-        .select("questions")
-        .eq("user_id", user.id)
-        .eq("group_id", targetGroupIdForNoRepeat);
-      if (!priorErr && Array.isArray(prior)) {
-        const all = [];
-        for (const row of prior) {
-          const qs = Array.isArray(row?.questions) ? row.questions : [];
-          for (const q of qs) {
-            const p = (q?.prompt || "").toString().trim();
-            if (p) all.push(p);
-          }
-        }
-        const seen = new Set();
-        for (const p of all) {
-          const key = p.toLowerCase();
-          if (!seen.has(key)) {
-            seen.add(key);
-            avoid_prompts.push(p);
-          }
-          if (avoid_prompts.length >= 300) break;
-        }
-      }
-    }
+      console.log("[Generate] Quiz generation succeeded, reloading dashboard…");
 
-    const res = await fetch(
-      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-quiz`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
-        },
-        body: JSON.stringify({
-          title: (gTitle || "").trim() || "Bash Top 10",
-          topic:
-            (gTopic || "").trim() ||
-            "Create 10 questions that test the 10 most-used Bash commands.",
-          count,
-          group_id: gGroupId || null,
-          file_id,
-          no_repeat: !!gNoRepeat,
-          avoid_prompts,
-        }),
-      }
-    );
-
-    let raw = "";
-    try {
-      raw = await res.text();
-    } catch {}
-
-    if (!res.ok) {
-      if (res.status === 403)
-        openSignupModal(
-          "Free trial limit reached. Create an account to make more quizzes."
-        );
-      else
-        alert(`Failed to generate quiz (${res.status}):\n${raw || "Unknown error"}`);
+      setGenOpen(false);
+      if (gFile) setGFile(null);
       setGenerating(false);
-      return;
+      await load();
+    } catch (e) {
+      console.log("[Generate] Failed with error:", e);
+      alert("Failed to generate quiz. Please try again.");
+      setGenerating(false);
     }
-
-    setGenOpen(false);
-    if (gFile) setGFile(null);
-    setGenerating(false);
-    await load();
-  } catch (e) {
-    console.error(e);
-    alert("Failed to generate quiz. Please try again.");
-    setGenerating(false);
   }
-}
 
   async function createGroupForModal() {
     if (!gNewName.trim() || gCreatingGroup) return;
@@ -950,9 +996,7 @@ function enqueueEmptyGroups(ids) {
         .select("id, name")
         .single();
       if (!error && data) {
-        setGroups((gs) =>
-          [...gs, data].sort((a, b) => a.name.localeCompare(b.name))
-        );
+        setGroups((gs) => sortGroupsByName([...gs, data]));
         setGGroupId(data.id);
         setGNewOpen(false);
         setGNewName("");
@@ -1020,10 +1064,12 @@ function enqueueEmptyGroups(ids) {
           .select("id, name")
           .single();
         if (gErr) throw gErr;
-        setGroups((gs) =>
-          [...gs, g].sort((a, b) => a.name.localeCompare(b.name))
-        );
+        setGroups((gs) => sortGroupsByName([...gs, g]));
         targetGroupId = g.id;
+      } else if (!targetGroupId) {
+        alert("Select a destination group or enter a new name.");
+        setMoving(false);
+        return;
       }
 
       const { error } = await supabase
@@ -1076,7 +1122,6 @@ function enqueueEmptyGroups(ids) {
       await load();
       setGroups((gs) => gs.filter((g) => g.id !== currentGroup.id));
     } catch (e) {
-      console.error(e);
       alert("Failed to delete group. Please try again.");
       setDeletingGroup(false);
     }
@@ -1099,28 +1144,32 @@ function enqueueEmptyGroups(ids) {
         .single();
       if (error) throw error;
       setGroups((gs) =>
-        gs
-          .map((g) =>
-            g.id === currentGroup.id ? { ...g, name: data.name } : g
-          )
-          .sort((a, b) => a.name.localeCompare(b.name))
+        sortGroupsByName(
+          gs.map((g) => (g.id === currentGroup.id ? { ...g, name: data.name } : g))
+        )
       );
       setEditGroupOpen(false);
     } catch (e) {
-      console.error(e);
       alert("Failed to rename group. Please try again.");
     } finally {
       setSavingGroupName(false);
     }
   }
 
+  const filteredQuizzes = useMemo(() => {
+    if (!normalizedFilterGroupId) {
+      return quizzes;
+    }
+    return quizzes.filter((q) => q.group_id === normalizedFilterGroupId);
+  }, [quizzes, normalizedFilterGroupId]);
+
   const sortedQuizzes = useMemo(() => {
-    return [...quizzes].sort((a, b) => {
+    return [...filteredQuizzes].sort((a, b) => {
       const ad = new Date(a?.updated_at || 0).getTime();
       const bd = new Date(b?.updated_at || 0).getTime();
       return bd - ad;
     });
-  }, [quizzes]);
+  }, [filteredQuizzes]);
 
   const visibleQuizzes = useMemo(() => {
     const q = (query || "").toLowerCase();
@@ -1132,54 +1181,39 @@ function enqueueEmptyGroups(ids) {
 
   // Revisit counts (existing)
 const groupReviewCount = useMemo(() => {
-  if (!(filterGroupId && filterGroupId !== NO_GROUP)) return 0;
+  if (!normalizedFilterGroupId) return 0;
   return visibleQuizzes.reduce(
     (sum, q) => sum + (q?.review_questions?.length ?? 0),
     0
   );
-}, [visibleQuizzes, filterGroupId]);
-
-const noGroupReviewCount = useMemo(() => {
-  if (filterGroupId !== NO_GROUP) return 0;
-  return visibleQuizzes.reduce(
-    (sum, q) => sum + (q?.review_questions?.length ?? 0),
-    0
-  );
-}, [visibleQuizzes, filterGroupId]);
+}, [visibleQuizzes, normalizedFilterGroupId]);
 
 const allReviewCount = useMemo(() => {
-  if (filterGroupId !== "") return 0;
+  if (normalizedFilterGroupId) return 0;
   return visibleQuizzes.reduce(
     (sum, q) => sum + (q?.review_questions?.length ?? 0),
     0
   );
-}, [visibleQuizzes, filterGroupId]);
+}, [visibleQuizzes, normalizedFilterGroupId]);
 
 // NEW: All-Questions counts (any question, not just Revisit)
 const groupAllCount = useMemo(() => {
-  if (!(filterGroupId && filterGroupId !== NO_GROUP)) return 0;
+  if (!normalizedFilterGroupId) return 0;
   return visibleQuizzes.reduce((sum, q) => sum + (q?.questions?.length ?? 0), 0);
-}, [visibleQuizzes, filterGroupId]);
-
-const noGroupAllCount = useMemo(() => {
-  if (filterGroupId !== NO_GROUP) return 0;
-  return visibleQuizzes.reduce((sum, q) => sum + (q?.questions?.length ?? 0), 0);
-}, [visibleQuizzes, filterGroupId]);
+}, [visibleQuizzes, normalizedFilterGroupId]);
 
 const allAllCount = useMemo(() => {
-  if (filterGroupId !== "") return 0;
+  if (normalizedFilterGroupId) return 0;
   return visibleQuizzes.reduce((sum, q) => sum + (q?.questions?.length ?? 0), 0);
-}, [visibleQuizzes, filterGroupId]);
+}, [visibleQuizzes, normalizedFilterGroupId]);
 
 
 useEffect(() => {
   dbg("COUNTS", {
     filterGroupId,
     groupReviewCount,
-    noGroupReviewCount,
     allReviewCount,
     groupAllCount,
-    noGroupAllCount,
     allAllCount,
     allRevisitScore,
     allAllScore,
@@ -1189,10 +1223,8 @@ useEffect(() => {
 }, [
   filterGroupId,
   groupReviewCount,
-  noGroupReviewCount,
   allReviewCount,
   groupAllCount,
-  noGroupAllCount,
   allAllCount,
   allRevisitScore,
   allAllScore,
@@ -1203,7 +1235,7 @@ useEffect(() => {
 
   const hasAnyQuizzes = (quizzes?.length ?? 0) > 0;
   const isFirstQuizState = !hasAnyQuizzes;
-
+  const hasVisibleQuizzes = (visibleQuizzes?.length ?? 0) > 0;
 
   const railRef = useRef(null);
   const CARD_W = 520;
@@ -1317,22 +1349,25 @@ useEffect(() => {
 {hasAnyQuizzes && (
 <div className="sm:hidden surface-card p-4 space-y-4">
   <div className="flex flex-col gap-2">
-    <button
-      onClick={async () => {
-        if (isFirstQuizState) return;
-        if (filterGroupId && filterGroupId !== NO_GROUP) setGGroupId(filterGroupId);
-        else setGGroupId("");
-        const allowed = await ensureCanCreate();
-        if (!allowed) return;
-        setGenOpen(true);
-      }}
-      disabled={isFirstQuizState}
-      className={`${btnBase} ${btnGreen} justify-center text-sm ${
-        isFirstQuizState ? "opacity-50 cursor-not-allowed" : ""
-      }`}
-    >
-      + Generate Quiz with AI
-    </button>
+            <button
+  onClick={async () => {
+    if (isFirstQuizState) return;
+    const allowed = await ensureCanCreate();
+    if (!allowed) return;
+
+    // 🔧 Prefer the current filter, otherwise fall back to the default group
+    setGGroupId(noGroupOptionValue);
+
+    setGenOpen(true);
+  }}
+  disabled={isFirstQuizState}
+  className={`${btnBase} ${btnGreen} justify-center text-sm ${
+    isFirstQuizState ? "opacity-50 cursor-not-allowed" : ""
+  }`}
+>
+  + Generate Quiz with AI
+</button>
+
 
     <button
       onClick={createQuiz}
@@ -1349,13 +1384,12 @@ useEffect(() => {
         Filter by group
       </label>
       <select
-        className="w-full"
-        value={filterGroupId}
+        className="w-full h-12 custom-select"
+        value={normalizedFilterGroupId}
         onChange={(e) => setFilterGroupId(e.target.value)}
       >
         <option value="">All</option>
-        <option value={NO_GROUP}>No group</option>
-        {groups.map((g) => (
+        {orderedGroups.map((g) => (
           <option key={g.id} value={g.id}>
             {g.name}
           </option>
@@ -1368,7 +1402,7 @@ useEffect(() => {
         Search
       </label>
       <input
-        className="w-full"
+        className="w-full h-12"
         placeholder="Search quizzes…"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
@@ -1391,25 +1425,26 @@ useEffect(() => {
 
         {/* ---- DESKTOP/TABLET actions ---- */}
         {hasAnyQuizzes && (
-        <div className="hidden sm:flex items-center gap-4 surface-card px-5 py-7">
+        <div className="hidden sm:flex items-center gap-8 surface-card px-5 py-7 w-full max-w-5xl mx-auto">
           <div className="flex gap-3 flex-none items-center">
             <button
-              onClick={async () => {
-                if (isFirstQuizState) return;
-                if (filterGroupId && filterGroupId !== NO_GROUP)
-                  setGGroupId(filterGroupId);
-                else setGGroupId("");
-                const allowed = await ensureCanCreate();
-                if (!allowed) return;
-                setGenOpen(true);
-              }}
-              disabled={isFirstQuizState}
-              className={`${btnBase} ${btnGreen} ${actionH} ${
-                isFirstQuizState ? "opacity-50 cursor-not-allowed" : ""
-              }`}
-            >
-              + Generate Quiz with AI
-            </button>
+  onClick={async () => {
+    if (isFirstQuizState) return;
+    const allowed = await ensureCanCreate();
+    if (!allowed) return;
+
+    // 🔧 Sync generator target with current filter (fallback to default)
+    setGGroupId(noGroupOptionValue);
+
+    setGenOpen(true);
+  }}
+  disabled={isFirstQuizState}
+  className={`${btnBase} ${btnGreen} ${actionH} ${
+    isFirstQuizState ? "opacity-50 cursor-not-allowed" : ""
+  }`}
+>
+  + Generate Quiz with AI
+</button>
             <button
               onClick={createQuiz}
               className={`${btnBase} ${btnGray} ${actionH}`}
@@ -1419,69 +1454,121 @@ useEffect(() => {
             </button>
           </div>
 
-          <div className="flex flex-1 flex-wrap items-center justify-end gap-4">
-            <div className="flex-1 min-w-[220px] max-w-sm relative">
-              <label
-                htmlFor="desktop-search"
-                className="absolute left-0 -top-6 text-xs uppercase tracking-wide text-white/60"
-              >
-                Search
-              </label>
-              <input
-                id="desktop-search"
-                className="w-full"
-                placeholder="Search quizzes…"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-            </div>
+          <div className="flex flex-1 justify-center">
+            <div
+              className={`flex flex-1 flex-wrap items-start justify-between gap-4 w-full ${
+                hasSelected ? "max-w-[50rem] ml-8 mr-4" : "max-w-[46rem]"
+              }`}
+            >
+              {hasSelected ? (
+              <>
+                <div className="flex-1 min-w-[260px] max-w-lg">
+                  <label
+                    htmlFor="desktop-search"
+                    className="block text-xs uppercase tracking-wide text-white/60 mb-1"
+                  >
+                    Search
+                  </label>
+                  <input
+                    id="desktop-search"
+                    className="w-full h-12"
+                    placeholder="Search quizzes…"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                  <div className="mt-4 flex items-center gap-4">
+                    <div className="w-56">
+                      <label
+                        htmlFor="desktop-filter"
+                        className="block text-xs uppercase tracking-wide text-white/60 mb-1"
+                      >
+                        Filter by group
+                      </label>
+                      <select
+                        id="desktop-filter"
+                        className="w-full h-12 custom-select"
+                        value={normalizedFilterGroupId}
+                        onChange={(e) => setFilterGroupId(e.target.value)}
+                      >
+                        <option value="">All</option>
+                        {orderedGroups.map((g) => (
+                          <option key={g.id} value={g.id}>
+                            {g.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2 flex-none self-end">
+                      <button
+                        onClick={() => setMoveOpen(true)}
+                        className={`${btnBase} ${btnGray} ${actionH}`}
+                      >
+                        Move to group
+                      </button>
+                      <button
+                        onClick={() => setBulkConfirmOpen(true)}
+                        className={`${btnBase} ${btnRed} ${actionH}`}
+                      >
+                        Delete selected
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex-1 min-w-[220px] max-w-sm relative">
+                  <label
+                    htmlFor="desktop-search"
+                    className="absolute left-0 -top-6 text-xs uppercase tracking-wide text-white/60"
+                  >
+                    Search
+                  </label>
+                  <input
+                    id="desktop-search"
+                    className="w-full h-12"
+                    placeholder="Search quizzes…"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                </div>
 
-            <div className="w-56 flex-none relative">
-              <label
-                htmlFor="desktop-filter"
-                className="absolute left-0 -top-6 text-xs uppercase tracking-wide text-white/60"
-              >
-                Filter by group
-              </label>
-              <select
-                id="desktop-filter"
-                className="w-full"
-                value={filterGroupId}
-                onChange={(e) => setFilterGroupId(e.target.value)}
-              >
-                <option value="">All</option>
-                <option value={NO_GROUP}>No group</option>
-                {groups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
+                <div className="w-56 flex-none relative">
+                  <label
+                    htmlFor="desktop-filter"
+                    className="absolute left-0 -top-6 text-xs uppercase tracking-wide text-white/60"
+                  >
+                    Filter by group
+                  </label>
+                  <select
+                    id="desktop-filter"
+                    className="w-full h-12 custom-select"
+                    value={normalizedFilterGroupId}
+                    onChange={(e) => setFilterGroupId(e.target.value)}
+                  >
+                    <option value="">All</option>
+                    {orderedGroups.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
             </div>
           </div>
-
-          {hasSelected && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setMoveOpen(true)}
-                className={`${btnBase} ${btnGray}`}
-              >
-                Move to group
-              </button>
-              <button
-                onClick={() => setBulkConfirmOpen(true)}
-                className={`${btnBase} ${btnRed}`}
-              >
-                Delete selected
-              </button>
-            </div>
-          )}
         </div>
         )}
 
                 {/* ----------------------- QUIZ LIST / CAROUSEL ---------------------- */}
-        {!hasAnyQuizzes ? (
-          <>
+        {!hasVisibleQuizzes ? (
+          hasAnyQuizzes ? (
+            <div className="mt-4 surface-card max-w-3xl mx-auto p-6 text-center text-white/70">
+              No quizzes in this group yet.
+            </div>
+          ) : (
+            <>
           {/* Inline “Generate with AI” panel for brand-new users */}
           <section className="mt-4 max-w-3xl mx-auto surface-card p-5 sm:p-6 space-y-4">
             <h2 className="text-xl sm:text-2xl font-semibold mb-2">
@@ -1586,8 +1673,8 @@ useEffect(() => {
                     onChange={(e) => setGGroupId(e.target.value)}
                     disabled={generating}
                   >
-                    <option value="">No group</option>
-                    {groups.map((g) => (
+                    <option value={noGroupOptionValue}>{NO_GROUP_LABEL}</option>
+                    {selectableGroupOptions.map((g) => (
                       <option key={g.id} value={g.id}>
                         {g.name}
                       </option>
@@ -1648,6 +1735,7 @@ useEffect(() => {
             </button>
           </div>
           </>
+          )
         ) : (
           <>
             {/* --- MOBILE vertical list --- */}
@@ -1666,13 +1754,13 @@ useEffect(() => {
                       return (
                         <li
                           key={q.id}
-                          className="w-full max-w-[580px] surface-panel p-4 flex flex-col overflow-hidden h-[360px]"
+                          className="w-full max-w-[620px] surface-panel p-6 flex flex-col overflow-visible h-[380px]"
                         >
                           {/* Top: meta + preview */}
                           <div className="flex-1 grid grid-cols-1 gap-3 min-h-0 overflow-hidden">
                             {/* LEFT: title + meta */}
                             <div className="min-w-0">
-                              <div className="flex items-start gap-3">
+                              <div className="flex items-start gap-3 pl-1">
                                 <input
                                   type="checkbox"
                                   className="h-5 w-5 accent-emerald-500 mt-1 shrink-0"
@@ -1858,15 +1946,15 @@ useEffect(() => {
                     return (
                       <li
                         key={q.id}
-                        className="sm:snap-start shrink-0 w-[540px] max-w-[580px]
-                                   surface-card p-5
-                                   h-[460px] flex flex-col overflow-hidden"
+                        className="sm:snap-start shrink-0 w-[560px] max-w-[600px]
+                                   surface-card px-6 py-5
+                                   h-[470px] flex flex-col overflow-visible"
                       >
                         {/* Top content */}
                         <div className="flex-1 grid grid-cols-2 gap-4 min-h-0 overflow-hidden">
                           {/* LEFT: title + meta */}
                           <div className="min-w-0">
-                            <div className="flex items-start gap-3">
+                            <div className="flex items-start gap-3 pl-1">
                               <input
                                 type="checkbox"
                                 className="h-6 w-6 accent-emerald-500 mt-1 shrink-0"
@@ -2017,136 +2105,154 @@ useEffect(() => {
         )}
 
 
-        {dbg("FOOTER check", { filterGroupId, isEmpty: filterGroupId === "", isNoGroup: filterGroupId === NO_GROUP, hasCurrent: !!currentGroup })}
+        {dbg("FOOTER check", { filterGroupId, isEmpty: !normalizedFilterGroupId, hasCurrent: !!currentGroup })}
 
         {/* ---------------- Footer actions + “Last score” ------------------- */}
 {(() => {
   const hasAnyQuizzes = (quizzes?.length ?? 0) > 0;
   if (!hasAnyQuizzes) return null;
 
-  const isAll = filterGroupId === "" || filterGroupId === ALL_GROUP_ID;
-  const isNoGroup = filterGroupId === NO_GROUP;
-  const isConcreteGroup =
-    !!(filterGroupId && filterGroupId !== NO_GROUP && currentGroup);
+  const isAll = !normalizedFilterGroupId;
+  const activeGroup = currentGroup ?? null;
+  const heading = isAll
+    ? "All Quizzes"
+    : activeGroup
+    ? `${activeGroup.name} Quizzes`
+    : "Group";
 
-  return (isAll || isNoGroup || isConcreteGroup) ? (
+  const lastRevisitScore = isAll
+    ? typeof allRevisitScore === "number"
+      ? allRevisitScore
+      : null
+    : activeGroup
+    ? groupRevisitScores.get(activeGroup.id) ?? null
+    : null;
+
+  const lastAllScore = isAll
+    ? typeof allAllScore === "number"
+      ? allAllScore
+      : null
+    : activeGroup
+    ? groupAllScores.get(activeGroup.id) ?? null
+    : null;
+
+  const reviewCount = isAll ? allReviewCount : groupReviewCount;
+  const allCount = isAll ? allAllCount : groupAllCount;
+
+  const reviewLink = isAll
+    ? "/play/all?mode=review"
+    : activeGroup
+    ? `/play/group/${activeGroup.id}?mode=review`
+    : "#";
+  const allLink = isAll
+    ? "/play/all?mode=all"
+    : activeGroup
+    ? `/play/group/${activeGroup.id}?mode=all`
+    : "#";
+
+  return (
     <div className="mt-8 flex justify-center">
       <div className="w-full sm:w-auto">
         <div className="w-full sm:w-auto surface-card p-5 sm:p-6">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between md:flex-nowrap gap-4">
             {/* LEFT: context + last scores */}
-            <div className="text-base text-white/70 space-y-2">
+            <div className="text-base text-white/70 space-y-2 text-center md:text-left">
               <div>
                 <span className="font-semibold text-white text-xl sm:text-2xl tracking-tight">
-                  {isConcreteGroup
-                    ? `${currentGroup.name} Group`
-                    : isNoGroup
-                    ? "“No group”"
-                    : "All group"}
+                  {heading}
                 </span>
               </div>
 
               {/* Revisit last score */}
               <div className="text-sm sm:text-base">
                 <span className="text-white/60">Revisit last score:</span>{" "}
-                {isAll ? (
-                  typeof allRevisitScore === "number" ? (
-                    <span className={allRevisitScore >= 90 ? "text-green-400 font-semibold" : "text-white"}>
-                      {allRevisitScore}%
-                    </span>
-                  ) : "—"
-                ) : isConcreteGroup ? (
-                  typeof groupRevisitScores.get(currentGroup.id) === "number" ? (
-                    <span className={groupRevisitScores.get(currentGroup.id) >= 90 ? "text-green-400 font-semibold" : "text-white"}>
-                      {groupRevisitScores.get(currentGroup.id)}%
-                    </span>
-                  ) : "—"
-                ) : isNoGroup ? (
-                  typeof groupRevisitScores.get(NO_GROUP_ID) === "number" ? (
-                    <span className={groupRevisitScores.get(NO_GROUP_ID) >= 90 ? "text-green-400 font-semibold" : "text-white"}>
-                      {groupRevisitScores.get(NO_GROUP_ID)}%
-                    </span>
-                  ) : "—"
-                ) : "—"}
+                {typeof lastRevisitScore === "number" ? (
+                  <span
+                    className={
+                      lastRevisitScore >= 90
+                        ? "text-green-400 font-semibold"
+                        : "text-white"
+                    }
+                  >
+                    {lastRevisitScore}%
+                  </span>
+                ) : (
+                  "—"
+                )}
               </div>
 
               {/* All-Questions last score */}
               <div className="text-sm sm:text-base">
                 <span className="text-white/60">All-questions last score:</span>{" "}
-                {isAll ? (
-                  typeof allAllScore === "number" ? (
-                    <span className={allAllScore >= 90 ? "text-green-400 font-semibold" : "text-white"}>
-                      {allAllScore}%
-                    </span>
-                  ) : "—"
-                ) : isConcreteGroup ? (
-                  typeof groupAllScores.get(currentGroup.id) === "number" ? (
-                    <span className={groupAllScores.get(currentGroup.id) >= 90 ? "text-green-400 font-semibold" : "text-white"}>
-                      {groupAllScores.get(currentGroup.id)}%
-                    </span>
-                  ) : "—"
-                ) : isNoGroup ? (
-                  typeof groupAllScores.get(NO_GROUP_ID) === "number" ? (
-                    <span className={groupAllScores.get(NO_GROUP_ID) >= 90 ? "text-green-400 font-semibold" : "text-white"}>
-                      {groupAllScores.get(NO_GROUP_ID)}%
-                    </span>
-                  ) : "—"
-                ) : "—"}
+                {typeof lastAllScore === "number" ? (
+                  <span
+                    className={
+                      lastAllScore >= 90
+                        ? "text-green-400 font-semibold"
+                        : "text-white"
+                    }
+                  >
+                    {lastAllScore}%
+                  </span>
+                ) : (
+                  "—"
+                )}
               </div>
+
             </div>
 
-            {/* RIGHT: actions (icons only; larger) */}
-            <div className="flex flex-col sm:flex-row md:flex-row md:flex-nowrap items-center sm:items-stretch gap-3">
-              {isConcreteGroup ? (
+            {/* RIGHT: actions */}
+            <div className="flex flex-col gap-3 w-full items-center md:items-start md:w-auto md:flex-row md:flex-wrap">
+              <Link
+                to={reviewCount > 0 ? reviewLink : "#"}
+                onClick={(e) => {
+                  if (reviewCount === 0) e.preventDefault();
+                }}
+                className={`${btnBase} ${btnGray} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl ${
+                  reviewCount === 0 ? "opacity-50 cursor-not-allowed" : ""
+                }`}
+                title={
+                  reviewCount === 0
+                    ? "No Revisit questions yet"
+                    : isAll
+                    ? "Play Revisit Questions (All quizzes)"
+                    : `Play "${activeGroup?.name ?? ""}" Revisit Questions`
+                }
+                aria-label={
+                  isAll
+                    ? "Play Revisit Questions (All)"
+                    : `Play ${activeGroup?.name ?? "group"} Revisit Questions`
+                }
+              >
+                <History className="h-7 w-7 sm:h-8 sm:w-8 shrink-0" />
+              </Link>
+
+              <Link
+                to={allCount > 0 ? allLink : "#"}
+                onClick={(e) => {
+                  if (allCount === 0) e.preventDefault();
+                }}
+                className={`${btnBase} ${btnGreen} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl ${
+                  allCount === 0 ? "opacity-50 cursor-not-allowed" : ""
+                }`}
+                title={
+                  allCount === 0
+                    ? "No questions yet"
+                    : isAll
+                    ? "Play All Questions (All quizzes)"
+                    : `Play "${activeGroup?.name ?? ""}" All Questions`
+                }
+                aria-label={
+                  isAll
+                    ? "Play All Questions (All)"
+                    : `Play ${activeGroup?.name ?? "group"} All Questions`
+                }
+              >
+                <Play className="h-7 w-7 sm:h-8 sm:w-8 shrink-0" />
+              </Link>
+
+              {activeGroup && (
                 <>
-                  <Link
-                    to={
-                      groupReviewCount > 0
-                        ? `/play/group/${currentGroup.id}?mode=review`
-                        : "#"
-                    }
-                    onClick={(e) => {
-                      if (groupReviewCount === 0) e.preventDefault();
-                    }}
-                    className={`${btnBase} ${btnGray} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl ${
-                      groupReviewCount === 0
-                        ? "opacity-50 cursor-not-allowed"
-                        : ""
-                    }`}
-                    title={
-                      groupReviewCount === 0
-                        ? "No Revisit questions in this group yet"
-                        : `Play "${currentGroup.name}" Revisit Questions`
-                    }
-                    aria-label={`Play ${currentGroup.name} Revisit Questions`}
-                  >
-                    <History className="h-7 w-7 sm:h-8 sm:w-8 shrink-0" />
-                  </Link>
-
-                  <Link
-                    to={
-                      groupAllCount > 0
-                        ? `/play/group/${currentGroup.id}?mode=all`
-                        : "#"
-                    }
-                    onClick={(e) => {
-                      if (groupAllCount === 0) e.preventDefault();
-                    }}
-                    className={`${btnBase} ${btnGreen} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl ${
-                      groupAllCount === 0
-                        ? "opacity-50 cursor-not-allowed"
-                        : ""
-                    }`}
-                    title={
-                      groupAllCount === 0
-                        ? "No questions in this group yet"
-                        : `Play "${currentGroup.name}" All Questions`
-                    }
-                    aria-label={`Play ${currentGroup.name} All Questions`}
-                  >
-                    <Play className="h-7 w-7 sm:h-8 sm:w-8 shrink-0" />
-                  </Link>
-
                   <button
                     onClick={openEditGroup}
                     className={`${btnBase} ${btnGray} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl`}
@@ -2159,112 +2265,11 @@ useEffect(() => {
                   <button
                     onClick={() => setDeleteGroupOpen(true)}
                     className={`${btnBase} ${btnRed} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl`}
-                    title={`Delete "${currentGroup.name}" and all its quizzes`}
-                    aria-label={`Delete ${currentGroup.name} group`}
+                    title={`Delete "${activeGroup.name}" and all its quizzes`}
+                    aria-label={`Delete ${activeGroup.name} group`}
                   >
                     <Trash2 className="h-8 w-8" strokeWidth={2} />
                   </button>
-                </>
-              ) : isNoGroup ? (
-                <>
-                  <Link
-                    to={
-                      noGroupReviewCount > 0
-                        ? `/play/group/${NO_GROUP_ID}?mode=review`
-                        : "#"
-                    }
-                    onClick={(e) => {
-                      if (noGroupReviewCount === 0) e.preventDefault();
-                    }}
-                    className={`${btnBase} ${btnGray} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl ${
-                      noGroupReviewCount === 0
-                        ? "opacity-50 cursor-not-allowed"
-                        : ""
-                    }`}
-                    title={
-                      noGroupReviewCount === 0
-                        ? "No Revisit questions in No group yet"
-                        : 'Play "No group" Revisit Questions'
-                    }
-                    aria-label="Play No group Revisit Questions"
-                  >
-                    <History className="h-7 w-7 sm:h-8 sm:w-8 shrink-0" />
-                  </Link>
-
-                  <Link
-                    to={
-                      noGroupAllCount > 0
-                        ? `/play/group/${NO_GROUP_ID}?mode=all`
-                        : "#"
-                    }
-                    onClick={(e) => {
-                      if (noGroupAllCount === 0) e.preventDefault();
-                    }}
-                    className={`${btnBase} ${btnGreen} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl ${
-                      noGroupAllCount === 0
-                        ? "opacity-50 cursor-not-allowed"
-                        : ""
-                    }`}
-                    title={
-                      noGroupAllCount === 0
-                        ? "No questions in No group yet"
-                        : 'Play "No group" All Questions'
-                    }
-                    aria-label="Play No group All Questions"
-                  >
-                    <Play className="h-7 w-7 sm:h-8 sm:w-8 shrink-0" />
-                  </Link>
-                </>
-              ) : (
-                <>
-                  {/* Treat "" and ALL_GROUP_ID as All */}
-                  <Link
-                    to={
-                      allReviewCount > 0
-                        ? `/play/all?mode=review`
-                        : "#"
-                    }
-                    onClick={(e) => {
-                      if (allReviewCount === 0) e.preventDefault();
-                    }}
-                    className={`${btnBase} ${btnGray} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-6 rounded-2xl ${
-                      allReviewCount === 0
-                        ? "opacity-50 cursor-not-allowed"
-                        : ""
-                    }`}
-                    title={
-                      allReviewCount === 0
-                        ? "No Revisit questions yet"
-                        : "Play Revisit Questions (All quizzes)"
-                    }
-                    aria-label="Play Revisit Questions (All)"
-                  >
-                    <History className="h-7 w-7 sm:h-8 sm:w-8 shrink-0" />
-                  </Link>
-
-                  <Link
-                    to={
-                      allAllCount > 0
-                        ? `/play/all?mode=all`
-                        : "#"
-                    }
-                    onClick={(e) => {
-                      if (allAllCount === 0) e.preventDefault();
-                    }}
-                    className={`${btnBase} ${btnGreen} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-6 rounded-2xl ${
-                      allAllCount === 0
-                        ? "opacity-50 cursor-not-allowed"
-                        : ""
-                    }`}
-                    title={
-                      allAllCount === 0
-                        ? "No questions yet"
-                        : "Play All Questions (All quizzes)"
-                    }
-                    aria-label="Play All Questions (All)"
-                  >
-                    <Play className="h-7 w-7 sm:h-8 sm:w-8 shrink-0" />
-                  </Link>
                 </>
               )}
             </div>
@@ -2272,7 +2277,7 @@ useEffect(() => {
         </div>
       </div>
     </div>
-  ) : null;
+  );
 })()}
 
 
@@ -2312,7 +2317,7 @@ useEffect(() => {
                 Cancel
               </button>
               <button
-                className={`${btnBase} ${btnGray}`}
+                className={`${btnBase} ${btnRed}`}
                 onClick={handleDelete}
                 disabled={deleting}
               >
@@ -2628,8 +2633,8 @@ useEffect(() => {
                     value={gGroupId}
                     onChange={(e) => setGGroupId(e.target.value)}
                   >
-                    <option value="">No group</option>
-                    {groups.map((g) => (
+                    <option value={noGroupOptionValue}>{NO_GROUP_LABEL}</option>
+                    {selectableGroupOptions.map((g) => (
                       <option key={g.id} value={g.id}>
                         {g.name}
                       </option>
@@ -2740,7 +2745,9 @@ useEffect(() => {
               You have selected:
               <span className="block mt-1 font-semibold break-words">
                 {Array.from(selectedIds).length
-                  ? Array.from(selectedIds).join(", ")
+                  ? Array.from(selectedIds)
+                      .map((id) => quizzes.find((q) => q.id === id)?.title || "Untitled Quiz")
+                      .join(", ")
                   : "None"}
               </span>
             </p>
@@ -2784,15 +2791,15 @@ useEffect(() => {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm text-white/70 mb-1">
-                  Choose existing group (or leave blank for “No group”)
+                  Choose existing group
                 </label>
                 <select
                   className="w-full"
                   value={moveGroupId}
                   onChange={(e) => setMoveGroupId(e.target.value)}
                 >
-                  <option value="">No group</option>
-                  {groups.map((g) => (
+                  <option value="">Select…</option>
+                  {orderedGroups.map((g) => (
                     <option key={g.id} value={g.id}>
                       {g.name}
                     </option>

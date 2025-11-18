@@ -29,11 +29,9 @@ export function AuthProvider({ children }) {
   }
 
   async function resetToAnonymous(tag = "reset") {
-    console.warn(`[Auth] ${tag}: resetting to anonymous`);
     await supabase.auth.signOut();
     const { error: anonErr } = await supabase.auth.signInAnonymously();
     if (anonErr) {
-      console.error("[Auth] anon sign-in failed", anonErr);
       return null;
     }
     const s = await waitForSession();
@@ -46,8 +44,6 @@ export function AuthProvider({ children }) {
 
   // --- central: ensure we actually HAVE a valid session (creates anon if needed)
   async function ensureSession(reason = "unknown") {
-    console.log("[ensureSession] reason:", reason);
-
     // If we are on /auth/callback, don’t touch session bootstrap here.
     if (onAuthCallbackPath()) {
       const { data } = await supabase.auth.getSession();
@@ -59,7 +55,6 @@ export function AuthProvider({ children }) {
     // 1) Do we have any session?
     let { data: s } = await supabase.auth.getSession();
     if (!s?.session) {
-      console.log("[ensureSession] no session -> anon sign-in");
       return await resetToAnonymous("no-session");
     }
 
@@ -71,7 +66,6 @@ export function AuthProvider({ children }) {
       !probe.data?.user;
 
     if (bad) {
-      console.warn("[ensureSession] stale/invalid token → self-heal");
       return await resetToAnonymous("stale-token");
     }
 
@@ -85,18 +79,12 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let unsub;
     (async () => {
-      console.log("[AuthBoot] start");
-
       // prime local state with whatever exists
       const { data } = await supabase.auth.getSession();
       setSession(data.session ?? null);
       setUser(data.session?.user ?? null);
-      console.log("[AuthBoot] initial session:", data.session);
-      console.log("[AuthBoot] initial user:", data.session?.user);
-
       // subscribe to changes
       unsub = supabase.auth.onAuthStateChange((event, newSession) => {
-        console.log("[AuthStateChange]", { event, newSession });
         setSession(newSession ?? null);
         setUser(newSession?.user ?? null);
       }).data.subscription;
@@ -122,15 +110,13 @@ export function AuthProvider({ children }) {
     if (currentId) {
       try {
         localStorage.setItem(LS_GUEST_ID, currentId);
-        console.log("[oauthOrLink] stored guest id:", currentId);
-      } catch (e) {
-        console.warn("[oauthOrLink] LS set failed:", e);
+      } catch {
+        // ignore
       }
     }
 
     try {
       // local sign-out avoids identity linking; the redirect flow will auth afresh
-      console.log("[oauthOrLink] signOut(local) before redirect");
       await supabase.auth.signOut({ scope: "local" });
 
       const redirectTo = `${window.location.origin}/auth/callback`;

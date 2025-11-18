@@ -13,9 +13,6 @@ import { getInitialGroupFromUrlOrStorage } from "../lib/groupFilter";
 
 // --- Sentinel for the ALL bucket ---
 const ALL_GROUP_ID = "00000000-0000-0000-0000-000000000000";
-// Use this for the “No Group” bucket’s persisted score
-const NO_GROUP_ID = "00000000-0000-0000-0000-000000000001";
-const NO_GROUP = "__none__"; // Dashboard's token for "No Group"
 
 // Rounded INT write + verify row (REVISIT score)
 async function saveGroupRevisitScore(userId, { scope, groupId, percentExact }) {
@@ -29,7 +26,8 @@ async function saveGroupRevisitScore(userId, { scope, groupId, percentExact }) {
         ? ALL_GROUP_ID
         : groupId && groupId !== "null" && groupId !== ""
         ? groupId
-        : NO_GROUP_ID;
+        : null;
+    if (scope === "group" && !gid) return;
 
     const payload = {
       user_id: userId,
@@ -45,7 +43,6 @@ async function saveGroupRevisitScore(userId, { scope, groupId, percentExact }) {
       .upsert(payload, { onConflict: "user_id,scope,group_id" });
 
     if (upErr) {
-      console.error("[group_scores][REVIEW] upsert error:", upErr);
       return;
     }
 
@@ -57,9 +54,9 @@ async function saveGroupRevisitScore(userId, { scope, groupId, percentExact }) {
       .eq("group_id", gid)
       .single();
 
-    if (readErr) console.error("[group_scores][REVIEW] verify read error:", readErr);
+    if (readErr) return;
   } catch (e) {
-    console.error("[group_scores][REVIEW] thrown:", e);
+    // ignore
   }
 }
 
@@ -75,7 +72,8 @@ async function saveGroupAllScore(userId, { scope, groupId, percentExact }) {
         ? ALL_GROUP_ID
         : groupId && groupId !== "null" && groupId !== ""
         ? groupId
-        : NO_GROUP_ID;
+        : null;
+    if (scope === "group" && !gid) return;
 
     const payload = {
       user_id: userId,
@@ -91,7 +89,6 @@ async function saveGroupAllScore(userId, { scope, groupId, percentExact }) {
       .upsert(payload, { onConflict: "user_id,scope,group_id" });
 
     if (upErr) {
-      console.error("[group_scores][ALL-Q] upsert error:", upErr);
       return;
     }
 
@@ -103,15 +100,15 @@ async function saveGroupAllScore(userId, { scope, groupId, percentExact }) {
       .eq("group_id", gid)
       .single();
 
-    if (readErr) console.error("[group_scores][ALL-Q] verify read error:", readErr);
+    if (readErr) return;
   } catch (e) {
-    console.error("[group_scores][ALL-Q] thrown:", e);
+    // ignore
   }
 }
 
 // Placeholder for forthcoming SQL change to store “All Questions” scores per Group/All
 async function saveGroupAllQuestionsScore(/* userId, { scope, groupId, percentExact } */) {
-  console.warn("[group_scores] last_all_score not persisted yet – SQL migration pending.");
+  // intentionally left blank
 }
 
 /* ---------- Free local fuzzy helpers (cheap) ---------- */
@@ -297,7 +294,14 @@ export default function Play() {
   const { quizId, groupId } = useParams();
   const [sp] = useSearchParams();
   const location = useLocation();
-  const lastGroup = getInitialGroupFromUrlOrStorage(location.search);
+  const [normalizedGroupId, setNormalizedGroupId] = useState(() => groupId || "");
+  const normalizedGroupIdRef = useRef(normalizedGroupId);
+  useEffect(() => {
+    normalizedGroupIdRef.current = normalizedGroupId;
+  }, [normalizedGroupId]);
+  useEffect(() => {
+    setNormalizedGroupId(groupId || "");
+  }, [groupId]);
 
   const modeParam = (sp.get("mode") || "").toLowerCase(); // "review" | "all"
   const wantsReview = modeParam === "review";
@@ -310,15 +314,11 @@ export default function Play() {
 
   const backPath = (() => {
     if (isGroupMode) {
-      const gid = groupId;
-      const token =
-        !gid || gid === "null" || gid === "" || gid === NO_GROUP_ID
-          ? NO_GROUP
-          : gid;
-      return `/?group=${encodeURIComponent(token)}`;
+      const fallback = normalizedGroupId || groupId || "";
+      return fallback ? `/?group=${encodeURIComponent(fallback)}` : "/";
     }
     if (isAllMode) {
-      return `/?group=${encodeURIComponent(ALL_GROUP_ID)}`;
+      return "/";
     }
     const last = getInitialGroupFromUrlOrStorage("");
     return last ? `/?group=${encodeURIComponent(last)}` : "/";
@@ -391,7 +391,6 @@ export default function Play() {
           .order("updated_at", { ascending: false });
 
         if (error) {
-          console.error("[ALL] quizzes read error:", error);
           setQuiz({
             title: isReviewMode ? "All — Revisit" : "All — All Questions",
             questions: [],
@@ -449,15 +448,19 @@ export default function Play() {
 
       // --- GROUP synthetic ---
       if (isGroupMode) {
-        const isNoGroupParam = groupId === NO_GROUP_ID;
+        const resolvedGroupId = groupId || "";
+        setNormalizedGroupId(resolvedGroupId);
 
-        const { data: g, error: gErr } = await supabase
-          .from("groups")
-          .select("id,name")
-          .eq("user_id", user.id)
-          .eq("id", groupId)
-          .maybeSingle();
-        if (gErr) console.warn("[GROUP] groups read error:", gErr);
+        let groupMeta = null;
+        if (resolvedGroupId) {
+          const { data: g } = await supabase
+            .from("groups")
+            .select("id,name")
+            .eq("user_id", user.id)
+            .eq("id", resolvedGroupId)
+            .maybeSingle();
+          groupMeta = g ?? null;
+        }
 
         let q = supabase
           .from("quizzes")
@@ -465,12 +468,14 @@ export default function Play() {
           .eq("user_id", user.id)
           .order("updated_at", { ascending: false });
 
-        q = isNoGroupParam ? q.is("group_id", null) : q.eq("group_id", groupId);
+        if (resolvedGroupId) {
+          q = q.eq("group_id", resolvedGroupId);
+        }
         const { data: qs, error: qsErr } = await q;
-        if (qsErr) console.error("[GROUP] quizzes read error:", qsErr);
 
         const merged = [];
-        for (const row of qs || []) {
+        const rows = qsErr ? [] : qs || [];
+        for (const row of rows) {
           const arr = isReviewMode
             ? Array.isArray(row?.review_questions)
               ? row.review_questions
@@ -488,8 +493,7 @@ export default function Play() {
           }
         }
 
-        const groupLabel =
-          g?.name ?? (isNoGroupParam ? "No Group" : "Group");
+        const groupLabel = groupMeta?.name ?? "Group";
         const title = isReviewMode
           ? `${groupLabel} — Revisit`
           : `${groupLabel} — All Questions`;
@@ -528,7 +532,6 @@ export default function Play() {
         .single();
 
       if (error || !data) {
-        console.warn("[SINGLE] quiz read error or no data:", error);
         setQuiz({ title: "Quiz", questions: [], review_questions: [] });
       }
 
@@ -735,12 +738,14 @@ export default function Play() {
 
     if (isSyntheticMode && isReviewMode) {
       if (isGroupMode) {
-        const gid = groupId || NO_GROUP_ID;
-        await saveGroupRevisitScore(user?.id, {
-          scope: "group",
-          groupId: gid,
-          percentExact: pctExact,
-        });
+        const gid = normalizedGroupIdRef.current;
+        if (gid) {
+          await saveGroupRevisitScore(user?.id, {
+            scope: "group",
+            groupId: gid,
+            percentExact: pctExact,
+          });
+        }
       } else if (isAllMode) {
         await saveGroupRevisitScore(user?.id, {
           scope: "all",
@@ -752,12 +757,14 @@ export default function Play() {
 
     if (!isReviewMode && isSyntheticMode) {
       if (isGroupMode) {
-        const gid = groupId || NO_GROUP_ID;
-        await saveGroupAllScore(user?.id, {
-          scope: "group",
-          groupId: gid,
-          percentExact: pctExact,
-        });
+        const gid = normalizedGroupIdRef.current;
+        if (gid) {
+          await saveGroupAllScore(user?.id, {
+            scope: "group",
+            groupId: gid,
+            percentExact: pctExact,
+          });
+        }
       } else if (isAllMode) {
         await saveGroupAllScore(user?.id, {
           scope: "all",
@@ -780,12 +787,14 @@ export default function Play() {
 
     if (isSyntheticMode && isReviewMode) {
       if (isGroupMode) {
-        const gid = groupId || NO_GROUP_ID;
-        await saveGroupRevisitScore(user?.id, {
-          scope: "group",
-          groupId: gid,
-          percentExact: pctExact,
-        });
+        const gid = normalizedGroupIdRef.current;
+        if (gid) {
+          await saveGroupRevisitScore(user?.id, {
+            scope: "group",
+            groupId: gid,
+            percentExact: pctExact,
+          });
+        }
       } else if (isAllMode) {
         await saveGroupRevisitScore(user?.id, {
           scope: "all",
@@ -797,12 +806,14 @@ export default function Play() {
 
     if (!isReviewMode && isSyntheticMode) {
       if (isGroupMode) {
-        const gid = groupId || NO_GROUP_ID;
-        await saveGroupAllScore(user?.id, {
-          scope: "group",
-          groupId: gid,
-          percentExact: pctExact,
-        });
+        const gid = normalizedGroupIdRef.current;
+        if (gid) {
+          await saveGroupAllScore(user?.id, {
+            scope: "group",
+            groupId: gid,
+            percentExact: pctExact,
+          });
+        }
       } else if (isAllMode) {
         await saveGroupAllScore(user?.id, {
           scope: "all",

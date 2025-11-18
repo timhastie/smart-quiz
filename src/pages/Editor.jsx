@@ -114,10 +114,18 @@ export default function Editor() {
       .select("id, name")
       .eq("user_id", user.id)
       .order("name", { ascending: true });
-    if (!error) setGroups(data ?? []);
+    if (error) {
+      setGroups([]);
+      return null;
+    }
+    const next = data ?? [];
+    setGroups(next);
+    const preferred =
+      next.find((g) => g.name?.trim().toLowerCase() === "no group") || next[0];
+    return preferred?.id || null;
   }
 
-  async function loadQuiz() {
+  async function loadQuiz(fallbackGroupId = null) {
     const { data, error } = await supabase
       .from("quizzes")
       .select("*")
@@ -128,8 +136,8 @@ export default function Editor() {
     if (!error && data) {
       setTitle(data.title || "");
       setQuestions(Array.isArray(data.questions) ? data.questions : []);
-      const gid = data.group_id || "";
-      setGroupId(gid);
+      const gid = data.group_id || fallbackGroupId || null;
+      setGroupId(gid || "");
       prevGroupRef.current = gid || null;
 
       setSourcePrompt(data.source_prompt || "");
@@ -144,8 +152,8 @@ export default function Editor() {
   useEffect(() => {
     if (!ready || !user?.id) return;
     (async () => {
-      await loadGroups();
-      await loadQuiz();
+      const defaultGroup = await loadGroups();
+      await loadQuiz(defaultGroup);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, user?.id, quizId]);
@@ -165,12 +173,17 @@ export default function Editor() {
   }
 
   async function save() {
+    const resolvedGroupId = groupId || "";
+    if (!resolvedGroupId) {
+      alert("Please choose a group before saving.");
+      return;
+    }
     const { error } = await supabase
       .from("quizzes")
       .update({
         title,
         questions,
-        group_id: groupId || null,
+        group_id: resolvedGroupId,
         source_prompt: sourcePrompt || null,
         updated_at: new Date().toISOString(),
       })
@@ -228,15 +241,19 @@ export default function Editor() {
   }
 
   async function handleGroupChange(e) {
-    const next = e.target.value; // "" or group id
+    const next = e.target.value;
     const prev = prevGroupRef.current;
+    if (!next) {
+      setGroupId("");
+      return;
+    }
     setGroupId(next);
     try {
       setSavingGroup(true);
       const { error } = await supabase
         .from("quizzes")
         .update({
-          group_id: next || null,
+          group_id: next,
           updated_at: new Date().toISOString(),
         })
         .eq("id", quizId)
@@ -244,10 +261,10 @@ export default function Editor() {
       if (!error) {
         setMsg("Saved!");
         setTimeout(() => setMsg(""), 1200);
-        if (prev && prev !== (next || null)) {
+        if (prev && prev !== next) {
           setTimeout(() => maybePromptDeleteEmptyGroup(prev), 0);
         }
-        prevGroupRef.current = next || null;
+        prevGroupRef.current = next;
       } else {
         alert("Failed to save group. Please try again.");
       }
@@ -266,7 +283,6 @@ export default function Editor() {
         .select("id, name")
         .single();
       if (error || !data) {
-        console.error("createGroup error:", error);
         return;
       }
       setGroups((gs) => [...gs, data].sort((a, b) => a.name.localeCompare(b.name)));
@@ -494,9 +510,15 @@ export default function Editor() {
         count = requested; // replace with exactly this many
       }
 
+      const resolvedGroupId = gGroupId || groupId || "";
+      if (!resolvedGroupId) {
+        alert("Please choose a group before generating.");
+        setGenerating(false);
+        return;
+      }
+
       // ===== Build avoid_prompts like Dashboard =====
-      const targetGroupIdForNoRepeat =
-        (gGroupId && gGroupId !== "") ? gGroupId : (groupId || "");
+      const targetGroupIdForNoRepeat = resolvedGroupId;
 
       let avoid_prompts = [];
       if (gNoRepeat && targetGroupIdForNoRepeat) {
@@ -533,7 +555,7 @@ export default function Editor() {
         title: (gTitle || "").trim() || "Untitled Quiz",
         topic: (gTopic || "").trim() || "Create a short quiz.",
         count,
-        group_id: gGroupId || null,
+        group_id: resolvedGroupId,
         file_id,
         no_repeat: !!gNoRepeat,
         avoid_prompts,
@@ -630,7 +652,6 @@ export default function Editor() {
       setTimeout(() => setMsg(""), 1500);
       setGenOpen(false);
     } catch (e) {
-      console.error(e);
       alert("Failed to generate questions. Please try again.");
     } finally {
       setGenerating(false);
@@ -728,17 +749,20 @@ export default function Editor() {
             <div className="flex gap-2">
               <select
                 className="w-full"
-                value={groupId}
-                onChange={handleGroupChange}
-                disabled={savingGroup}
-              >
-                <option value="">No group</option>
-                {groups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
+              value={groupId}
+              onChange={handleGroupChange}
+              disabled={savingGroup}
+            >
+                {groups.length === 0 ? (
+                  <option value="">No groups yet</option>
+                ) : (
+                  groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))
+                )}
+            </select>
               <button
                 className={`${btnBase} ${btnGray} whitespace-nowrap`}
                 onClick={() => setNewOpen(true)}
@@ -1051,12 +1075,15 @@ export default function Editor() {
                   value={gGroupId}
                   onChange={(e) => setGGroupId(e.target.value)}
                 >
-                  <option value="">No group</option>
-                  {groups.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.name}
-                    </option>
-                  ))}
+                  {groups.length === 0 ? (
+                    <option value="">No groups yet</option>
+                  ) : (
+                    groups.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name}
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
 

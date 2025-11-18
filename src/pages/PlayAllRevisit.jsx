@@ -57,7 +57,6 @@ export default function PlayAllRevisit() {
       if (!alive) return;
 
       if (error) {
-        console.error(error);
         setItems([]);
         setLoading(false);
         return;

@@ -30,14 +30,12 @@ serve(async (req) => {
 
   // Always answer preflight nicely
   if (req.method === "OPTIONS") {
-    console.log("[adopt] OPTIONS from", origin);
     return new Response(null, { status: 204, headers: baseHeaders });
   }
 
   try {
     const { old_id } = await req.json().catch(() => ({}));
     if (!old_id) {
-      console.log("[adopt] missing old_id");
       return new Response(JSON.stringify({ error: "old_id required" }), {
         status: 400,
         headers: { ...baseHeaders, "Content-Type": "application/json" },
@@ -51,7 +49,6 @@ serve(async (req) => {
 
     const me = await userClient.auth.getUser();
     if (!me.data.user) {
-      console.log("[adopt] unauthorized");
       return new Response(JSON.stringify({ error: "unauthorized" }), {
         status: 401,
         headers: { ...baseHeaders, "Content-Type": "application/json" },
@@ -59,12 +56,10 @@ serve(async (req) => {
     }
 
     const newUserId = me.data.user.id;
-    console.log("[adopt] start", { newUserId, old_id });
 
     // Run your SECURITY DEFINER RPC to move rows
     const rpc = await userClient.rpc("adopt_guest", { p_old_user: old_id });
     if (rpc.error) {
-      console.error("[adopt] adopt_guest error", rpc.error);
       return new Response(JSON.stringify({ error: rpc.error.message }), {
         status: 400,
         headers: { ...baseHeaders, "Content-Type": "application/json" },
@@ -78,9 +73,7 @@ serve(async (req) => {
     let deleted = false;
     let deleteWarn: string | undefined;
 
-    if (getOld.error) {
-      console.warn("[adopt] getUserById error", getOld.error.message);
-    } else {
+    if (!getOld.error) {
       const u = getOld.data.user;
       const isAnon =
         u?.app_metadata?.provider === "anonymous" ||
@@ -91,13 +84,9 @@ serve(async (req) => {
         const del = await admin.auth.admin.deleteUser(old_id);
         if (del.error) {
           deleteWarn = del.error.message;
-          console.warn("[adopt] deleteUser warn", deleteWarn);
         } else {
           deleted = true;
-          console.log("[adopt] deleted old anon", old_id);
         }
-      } else {
-        console.log("[adopt] old user not anon, skipping delete");
       }
     }
 
@@ -115,7 +104,6 @@ serve(async (req) => {
       headers: { ...baseHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    console.error("[adopt] fatal", e);
     return new Response(JSON.stringify({ error: String(e?.message ?? e) }), {
       status: 500,
       headers: { ...corsHeaders(req.headers.get("Origin")), "Content-Type": "application/json" },
