@@ -1,9 +1,11 @@
 // src/pages/Dashboard.jsx
-import { Play, History, SquarePen, Trash2 } from "lucide-react";
+import { Play, History, SquarePen, Trash2, Mail } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { supabase } from "../lib/supabase";
+import { copyShareLinkToClipboard } from "../lib/shareLinks";
+import { storeGuestId } from "../auth/guestStorage";
 
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist/build/pdf.mjs";
 import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -193,26 +195,34 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
   const [authMessage, setAuthMessage] = useState("");
 
   async function handleCreateAccount() {
-  try {
-    setAuthBusy(true);
-    const email = (authEmail || "").trim();
-    const password = authPass || "";
-    if (!email || !password) {
-      alert("Please enter email and password.");
-      return;
+    try {
+      setAuthBusy(true);
+      const email = (authEmail || "").trim();
+      const password = authPass || "";
+      if (!email || !password) {
+        alert("Please enter email and password.");
+        return;
+      }
+
+      // 🔑 Remember which anonymous user to merge later
+      if (user && isAnon) {
+        try {
+          storeGuestId(user.id);
+        } catch {}
+      }
+
+      const { error } = await signup(email, password);
+      if (error) {
+        alert(error.message || "Failed to start signup.");
+        return;
+      }
+      setAuthMessage("Check your email to confirm your account, then return here.");
+    } catch (err) {
+      alert(err?.message || "Failed to start signup.");
+    } finally {
+      setAuthBusy(false);
     }
-    const { error } = await signup(email, password);
-    if (error) {
-      alert(error.message || "Failed to start signup.");
-      return;
-    }
-    setAuthMessage("Check your email to confirm your account, then return here.");
-  } catch (err) {
-    alert(err?.message || "Failed to start signup.");
-  } finally {
-    setAuthBusy(false);
   }
-}
 
   async function signInExisting() {
     try {
@@ -223,19 +233,33 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
         alert("Please enter email and password.");
         return;
       }
+
+      // 🔑 Remember which anonymous user to merge into the existing account
+      if (user && isAnon) {
+        try {
+          storeGuestId(user.id);
+        } catch {}
+      }
+
       const res = await signin(email, password);
+
+      // If your AuthProvider.signin returns { error }, handle it here:
       if (res?.error) {
         alert(res.error.message || "Failed to sign in.");
         return;
       }
+
       setAuthMessage("");
       setAuthOpen(false);
     } catch (err) {
-      alert("Something went wrong. Please try again.");
+      // <-- Show the actual Supabase error message instead of generic text
+      console.error("Sign-in error:", err);
+      alert(err?.message || "Something went wrong during sign in.");
     } finally {
       setAuthBusy(false);
     }
   }
+
   const [trial, setTrial] = useState({
     isAnon: false,
     remaining: Infinity,
@@ -316,6 +340,16 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
   const [accountConfirmOpen, setAccountConfirmOpen] = useState(false);
   const [accountDeleting, setAccountDeleting] = useState(false);
   const [accountError, setAccountError] = useState("");
+  const [shareCopiedPulse, setShareCopiedPulse] = useState(false);
+  const sharePulseTimer = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (sharePulseTimer.current) {
+        clearTimeout(sharePulseTimer.current);
+      }
+    };
+  }, []);
 
   const [genOpen, setGenOpen] = useState(false);
   const [gTitle, setGTitle] = useState("");
@@ -804,6 +838,21 @@ function enqueueEmptyGroups(ids) {
       alert("Failed to delete. Please try again.");
     }
   }
+
+  async function handleShareQuiz(quizId, title) {
+    try {
+      const url = await copyShareLinkToClipboard(supabase, quizId);
+      if (sharePulseTimer.current) clearTimeout(sharePulseTimer.current);
+      setShareCopiedPulse(true);
+      sharePulseTimer.current = setTimeout(() => {
+        setShareCopiedPulse(false);
+      }, 750);
+    } catch (err) {
+      console.error("Failed to create/copy share link", err);
+      alert("Could not create a share link. Please try again.");
+    }
+  }
+
 
   async function extractTextFromFile(file) {
     if (
@@ -1787,54 +1836,82 @@ useEffect(() => {
                                   onChange={() => toggleSelected(q.id)}
                                   aria-label={`Select ${q.title || "Untitled Quiz"}`}
                                 />
-                                <div className="min-w-0">
-                                  <div
-                                    className="text-xl font-semibold leading-tight break-words"
-                                    title={q.title || "Untitled Quiz"}
-                                  >
-                                    {q.title || "Untitled Quiz"}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div
+                                      className="text-xl font-semibold leading-tight break-words"
+                                      title={q.title || "Untitled Quiz"}
+                                    >
+                                      {q.title || "Untitled Quiz"}
+                                    </div>
+
+                                    <div className="mt-2 text-xs text-white/70 space-y-0.5">
+                                      <div>{q.questions?.length ?? 0} questions</div>
+                                      <div>
+                                        Last score:{" "}
+                                        {score?.last != null ? (
+                                          <span
+                                            className={
+                                              score.last >= 90
+                                                ? "text-green-400 font-semibold"
+                                                : ""
+                                            }
+                                          >
+                                            {score.last}%
+                                          </span>
+                                        ) : (
+                                          "—"
+                                        )}
+                                      </div>
+                                      <div>
+                                        Revisit score:{" "}
+                                        {score?.review != null ? (
+                                          <span
+                                            className={
+                                              score.review >= 90
+                                                ? "text-green-400 font-semibold"
+                                                : ""
+                                            }
+                                          >
+                                            {score.review}%
+                                          </span>
+                                        ) : (
+                                          "—"
+                                        )}
+                                      </div>
+                                    </div>
                                   </div>
 
-                                  <div className="mt-2 text-xs text-white/70 space-y-0.5">
-                                    <div>{q.questions?.length ?? 0} questions</div>
-                                    <div>
-                                      Last score:{" "}
-                                      {score?.last != null ? (
-                                        <span
-                                          className={
-                                            score.last >= 90
-                                              ? "text-green-400 font-semibold"
-                                              : ""
-                                          }
-                                        >
-                                          {score.last}%
-                                        </span>
-                                      ) : (
-                                        "—"
-                                      )}
-                                    </div>
-                                    <div>
-                                      Revisit score:{" "}
-                                      {score?.review != null ? (
-                                        <span
-                                          className={
-                                            score.review >= 90
-                                              ? "text-green-400 font-semibold"
-                                              : ""
-                                          }
-                                        >
-                                          {score.review}%
-                                        </span>
-                                      ) : (
-                                        "—"
-                                      )}
-                                    </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <Link
+                                      to={`/scores/${q.id}`}
+                                      className={`${btnBase} ${btnGray} h-12 w-12 sm:h-[3.3rem] sm:w-[3.3rem] p-0 flex items-center justify-center shrink-0`}
+                                      aria-label="View quiz scores"
+                                      title="Scores"
+                                    >
+                                      <img
+                                        src="/icons/scoreboard.svg"
+                                        alt=""
+                                        className="h-7 w-7 sm:h-8 sm:w-8"
+                                        aria-hidden="true"
+                                      />
+                                    </Link>
+                                    <button
+                                      onClick={() => handleShareQuiz(q.id, q.title || "Untitled Quiz")}
+                                      className={`${btnBase} ${btnGray} h-11 w-11 sm:h-12 sm:w-12 p-0 flex items-center justify-center shrink-0`}
+                                      aria-label="Copy share link"
+                                      title="Copy share link"
+                                    >
+                                      <Mail className="h-5 w-5 sm:h-6 sm:w-6" />
+                                    </button>
                                   </div>
                                 </div>
                               </div>
                             </div>
+                          </div>
 
-                            {/* RIGHT: Questions preview */}
+                          {/* RIGHT: Questions preview */}
                             <div className="relative bg-white/5 border border-white/5 rounded-2xl p-3 overflow-hidden">
                               <ol className="text-[13px] leading-5 list-decimal pl-5 pr-3 pb-7 space-y-1.5 max-h-[160px] overflow-hidden">
                                 {(Array.isArray(q.questions) ? q.questions : []).map(
@@ -1857,67 +1934,59 @@ useEffect(() => {
                           </div>
 
                           {/* Bottom actions */}
-                          <div className="mt-3 grid grid-cols-4 gap-2">
-                            <Link
-                              to={`/play/${q.id}`}
-                              className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
-                              aria-label="Play quiz"
-                              title="Play"
-                            >
-                              <Play className="h-5 w-5" />
-                            </Link>
+<div className="mt-3 grid grid-cols-4 gap-2">
+  <Link
+    to={`/play/${q.id}`}
+    className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
+    aria-label="Play quiz"
+    title="Play"
+  >
+    <Play className="h-5 w-5" />
+  </Link>
 
-                            <Link
-                              to={
-                                reviewDisabled ? "#" : `/play/${q.id}?mode=review`
-                              }
-                              onClick={(e) => {
-                                if (reviewDisabled) e.preventDefault();
-                              }}
-                              className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center ${
-                                reviewDisabled
-                                  ? "opacity-50 cursor-not-allowed"
-                                  : ""
-                              }`}
-                              aria-label={
-                                reviewDisabled
-                                  ? "No Revisit questions yet"
-                                  : "Practice Revisit"
-                              }
-                              title={
-                                reviewDisabled
-                                  ? "No Revisit questions yet"
-                                  : "Practice Revisit"
-                              }
-                            >
-                              <History className="h-5 w-5" />
-                            </Link>
+  <Link
+    to={reviewDisabled ? "#" : `/play/${q.id}?mode=review`}
+    onClick={(e) => {
+      if (reviewDisabled) e.preventDefault();
+    }}
+    className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center ${
+      reviewDisabled ? "opacity-50 cursor-not-allowed" : ""
+    }`}
+    aria-label={
+      reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"
+    }
+    title={
+      reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"
+    }
+  >
+    <History className="h-5 w-5" />
+  </Link>
 
-                            <Link
-                              to={`/edit/${q.id}`}
-                              className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
-                              aria-label="Edit quiz"
-                              title="Edit"
-                            >
-                              <SquarePen className="h-5 w-5" />
-                            </Link>
+  <Link
+    to={`/edit/${q.id}`}
+    className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
+    aria-label="Edit quiz"
+    title="Edit"
+  >
+    <SquarePen className="h-5 w-5" />
+  </Link>
 
-                            <button
-                              onClick={() => {
-                                setTarget({
-                                  id: q.id,
-                                  title: q.title || "Untitled Quiz",
-                                  group_id: q.group_id ?? null,
-                                });
-                                setConfirmOpen(true);
-                              }}
-                              className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
-                              aria-label="Delete quiz"
-                              title="Delete"
-                            >
-                              <Trash2 className="h-5 w-5" />
-                            </button>
-                          </div>
+  <button
+    onClick={() => {
+      setTarget({
+        id: q.id,
+        title: q.title || "Untitled Quiz",
+        group_id: q.group_id ?? null,
+      });
+      setConfirmOpen(true);
+    }}
+    className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
+    aria-label="Delete quiz"
+    title="Delete"
+  >
+    <Trash2 className="h-5 w-5" />
+  </button>
+</div>
                         </li>
                       );
                     })}
@@ -1972,12 +2041,12 @@ useEffect(() => {
                         {/* Top content */}
                         <div className="flex-1 grid grid-cols-2 gap-4 min-h-0 overflow-hidden">
                           {/* LEFT: title + meta */}
-                          <div className="min-w-0">
-                            <div className="flex items-start gap-3 pl-1">
-                              <input
-                                type="checkbox"
-                                className="h-6 w-6 accent-emerald-500 mt-1 shrink-0"
-                                checked={selectedIds.has(q.id)}
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-start gap-3 pl-1">
+                                  <input
+                                    type="checkbox"
+                                    className="h-6 w-6 accent-emerald-500 mt-1 shrink-0"
+                                    checked={selectedIds.has(q.id)}
                                 onChange={() => toggleSelected(q.id)}
                                 aria-label={`Select ${q.title || "Untitled Quiz"}`}
                               />
@@ -2024,6 +2093,29 @@ useEffect(() => {
                                     )}
                                   </div>
                                 </div>
+                                <div className="mt-5 flex items-center gap-3">
+                                  <Link
+                                    to={`/scores/${q.id}`}
+                                    className={`${btnBase} ${btnGray} h-14 w-14 sm:h-[3.8rem] sm:w-[3.8rem] p-0 flex items-center justify-center`}
+                                    aria-label="View quiz scores"
+                                    title="Scores"
+                                  >
+                                    <img
+                                      src="/icons/scoreboard.svg"
+                                      alt=""
+                                      className="h-7 w-7 sm:h-8 sm:w-8"
+                                      aria-hidden="true"
+                                    />
+                                  </Link>
+                                  <button
+                                    onClick={() => handleShareQuiz(q.id, q.title || "Untitled Quiz")}
+                                    className={`${btnBase} ${btnGray} h-12 w-12 sm:h-14 sm:w-14 p-0 flex items-center justify-center`}
+                                    aria-label="Copy share link"
+                                    title="Copy share link"
+                                  >
+                                    <Mail className="h-5 w-5 sm:h-6 sm:w-6" />
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -2052,68 +2144,61 @@ useEffect(() => {
                           </div>
                         </div>
 
-                        {/* Bottom actions */}
-                        <div className="mt-4 grid grid-cols-4 gap-2">
-                          <Link
-                            to={`/play/${q.id}`}
-                            className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
-                            aria-label="Play quiz"
-                            title="Play"
-                          >
-                            <Play className="h-6 w-6" />
-                          </Link>
+                                               {/* Bottom actions */}
+<div className="mt-4 grid grid-cols-4 gap-2">
+  <Link
+    to={`/play/${q.id}`}
+    className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
+    aria-label="Play quiz"
+    title="Play"
+  >
+    <Play className="h-6 w-6" />
+  </Link>
 
-                          <Link
-                            to={
-                              reviewDisabled ? "#" : `/play/${q.id}?mode=review`
-                            }
-                            onClick={(e) => {
-                              if (reviewDisabled) e.preventDefault();
-                            }}
-                            className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center ${
-                              reviewDisabled
-                                ? "opacity-50 cursor-not-allowed"
-                                : ""
-                            }`}
-                            aria-label={
-                              reviewDisabled
-                                ? "No Revisit questions yet"
-                                : "Practice Revisit"
-                            }
-                            title={
-                              reviewDisabled
-                                ? "No Revisit questions yet"
-                                : "Practice Revisit"
-                            }
-                          >
-                            <History className="h-6 w-6" />
-                          </Link>
+  <Link
+    to={reviewDisabled ? "#" : `/play/${q.id}?mode=review`}
+    onClick={(e) => {
+      if (reviewDisabled) e.preventDefault();
+    }}
+    className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center ${
+      reviewDisabled ? "opacity-50 cursor-not-allowed" : ""
+    }`}
+    aria-label={
+      reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"
+    }
+    title={
+      reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"
+    }
+  >
+    <History className="h-6 w-6" />
+  </Link>
 
-                          <Link
-                            to={`/edit/${q.id}`}
-                            className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
-                            aria-label="Edit quiz"
-                            title="Edit"
-                          >
-                            <SquarePen className="h-6 w-6" />
-                          </Link>
+  <Link
+    to={`/edit/${q.id}`}
+    className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
+    aria-label="Edit quiz"
+    title="Edit"
+  >
+    <SquarePen className="h-6 w-6" />
+  </Link>
 
-                          <button
-                            onClick={() => {
-                              setTarget({
-                                id: q.id,
-                                title: q.title || "Untitled Quiz",
-                                group_id: q.group_id ?? null,
-                              });
-                              setConfirmOpen(true);
-                            }}
-                            className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
-                            aria-label="Delete quiz"
-                            title="Delete"
-                          >
-                            <Trash2 className="h-6 w-6" />
-                          </button>
-                        </div>
+  <button
+    onClick={() => {
+      setTarget({
+        id: q.id,
+        title: q.title || "Untitled Quiz",
+        group_id: q.group_id ?? null,
+      });
+      setConfirmOpen(true);
+    }}
+    className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
+    aria-label="Delete quiz"
+    title="Delete"
+  >
+    <Trash2 className="h-6 w-6" />
+  </button>
+</div>
+
                       </li>
                     );
                   })}
@@ -2440,6 +2525,16 @@ useEffect(() => {
                 {accountDeleting ? "Deleting…" : "Yes, delete my account"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {shareCopiedPulse && (
+        <div className="fixed inset-0 z-[115] pointer-events-none flex items-center justify-center">
+          <div className="w-32 h-32 sm:w-36 sm:h-36 rounded-full bg-emerald-400 flex items-center justify-center shadow-2xl animate-pulse">
+            <span className="text-slate-900 font-semibold text-lg sm:text-xl">
+              Link copied!
+            </span>
           </div>
         </div>
       )}

@@ -1,115 +1,177 @@
 // src/pages/Login.jsx
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+
+import React, { useState } from "react";
 import { useAuth } from "../auth/AuthProvider";
-import SigningInOverlay from "../components/SigningInOverlay";
 
 export default function Login() {
-  const { signin, googleSignIn } = useAuth();
-  const nav = useNavigate();
+  const { signin, signup, googleSignIn } = useAuth();
 
+  const [mode, setMode] = useState("signin"); // "signin" | "signup"
   const [email, setEmail] = useState("");
-  const [pass, setPass] = useState("");
-  const [err, setErr] = useState("");
-  const [loadingPwd, setLoadingPwd] = useState(false);
-  const [loadingGoogle, setLoadingGoogle] = useState(false);
+  const [password, setPassword] = useState("");
 
-  async function handlePassword(e) {
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const isSignIn = mode === "signin";
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    setErr("");
-    setLoadingPwd(true);
+    setError("");
+    setMessage("");
+    setLoading(true);
+
     try {
-      await signin(email, pass);
-      nav("/", { replace: true });
-    } catch (error) {
-      setErr(error?.message || "Sign-in failed.");
+      if (isSignIn) {
+        // EMAIL/PASSWORD SIGN-IN
+        // This will:
+        //  - remember the current guest id (LS_GUEST_ID)
+        //  - call supabase.auth.signInWithPassword
+        //  - redirect through /auth/callback so adopt_guest runs
+        await signin(email, password);
+        // signin() will redirect the browser to /auth/callback,
+        // which then sends the user to "/" after adoption.
+      } else {
+        // EMAIL/PASSWORD SIGN-UP
+        // This will:
+        //  - remember current guest id in LS_GUEST_ID
+        //  - send email confirmation link pointing at /auth/callback
+        const { error: signUpError } = await signup(email, password);
+        if (signUpError) {
+          throw signUpError;
+        }
+        setMessage("Check your email for a confirmation link.");
+      }
+    } catch (err) {
+      console.error("Auth error:", err);
+      setError(err.message || "Something went wrong. Please try again.");
     } finally {
-      setLoadingPwd(false);
+      setLoading(false);
     }
-  }
+  };
 
-  async function handleGoogle() {
-    setErr("");
-    setLoadingGoogle(true);
+  const handleGoogleSignIn = async () => {
+    setError("");
+    setMessage("");
+    setLoading(true);
     try {
-      await googleSignIn(); // pure OAuth sign-in (no linkIdentity)
-      // redirects to /auth/callback via Supabase; no local nav() needed
-    } catch (error) {
-      setErr(error?.message || "Google sign-in failed.");
-      setLoadingGoogle(false);
+      // This uses AuthProvider.oauthOrLink("google"):
+      //  - stores current guest id in LS_GUEST_ID
+      //  - signs out locally to avoid identity linking
+      //  - redirects to /auth/callback where adopt_guest runs
+      await googleSignIn();
+      // No need to do anything else; browser will redirect.
+    } catch (err) {
+      console.error("Google sign-in error:", err);
+      setError(err.message || "Google sign-in failed.");
+      setLoading(false);
     }
-  }
-
-  if (loadingGoogle) {
-    return <SigningInOverlay />;
-  }
+  };
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 py-10 text-slate-100">
-      <div className="w-full max-w-md">
-        <div className="surface-card p-6 sm:p-8 space-y-6">
-          <div className="space-y-2">
-            <img
-              src="/smartquizlogo.png"
-              alt="Smart-Quiz logo"
-              className="h-9 w-auto object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,0.35)] -ml-1"
-              draggable="false"
-            />
-            <h1 className="text-2xl font-semibold">Welcome back</h1>
-            <p className="text-white/70 text-sm">
-              Sign in to keep your quizzes in sync across devices.
-            </p>
-          </div>
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
+      <div className="w-full max-w-md bg-white shadow-md rounded-lg p-6">
+        <h1 className="text-2xl font-semibold text-slate-900 mb-4 text-center">
+          {isSignIn ? "Sign in to SmartQuiz" : "Create your SmartQuiz account"}
+        </h1>
 
+        <div className="flex justify-center mb-4 space-x-2">
           <button
-            onClick={handleGoogle}
-            disabled={loadingGoogle}
-            className="w-full rounded-2xl px-4 py-3 bg-white text-slate-900 font-semibold hover:bg-white/90 transition disabled:opacity-60"
+            type="button"
+            onClick={() => {
+              setMode("signin");
+              setError("");
+              setMessage("");
+            }}
+            className={`px-3 py-1 rounded text-sm ${
+              isSignIn
+                ? "bg-slate-900 text-white"
+                : "bg-slate-100 text-slate-700"
+            }`}
           >
-            {loadingGoogle ? "Opening Google…" : "Continue with Google"}
+            Sign In
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode("signup");
+              setError("");
+              setMessage("");
+            }}
+            className={`px-3 py-1 rounded text-sm ${
+              !isSignIn
+                ? "bg-slate-900 text-white"
+                : "bg-slate-100 text-slate-700"
+            }`}
+          >
+            Sign Up
+          </button>
+        </div>
 
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-white/10" />
-            </div>
-            <div className="relative flex justify-center text-sm">
-              <span className="px-3 bg-transparent text-white/60">or</span>
-            </div>
-          </div>
-
-          <form onSubmit={handlePassword} className="space-y-4">
-            {err && <p className="text-sm text-red-400">{err}</p>}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <label className="block">
+            <span className="block text-sm font-medium text-slate-700">
+              Email
+            </span>
             <input
-              className="field w-full"
-              placeholder="Email"
               type="email"
               autoComplete="email"
+              required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
             />
-            <input
-              className="field w-full"
-              placeholder="Password"
-              type="password"
-              autoComplete="current-password"
-              value={pass}
-              onChange={(e) => setPass(e.target.value)}
-            />
-            <button
-              disabled={loadingPwd}
-              className="w-full px-4 py-3 rounded-2xl bg-emerald-500/90 hover:bg-emerald-400 text-slate-950 font-semibold transition disabled:opacity-60"
-            >
-              {loadingPwd ? "Signing in…" : "Sign in"}
-            </button>
-          </form>
+          </label>
 
-          <p className="text-sm text-white/70 text-center">
-            No account?{" "}
-            <Link to="/signup" className="text-emerald-300 hover:text-emerald-200 font-semibold">
-              Sign up
-            </Link>
-          </p>
+          <label className="block">
+            <span className="block text-sm font-medium text-slate-700">
+              Password
+            </span>
+            <input
+              type="password"
+              autoComplete={isSignIn ? "current-password" : "new-password"}
+              required
+              minLength={6}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+            />
+          </label>
+
+          {error && (
+            <p className="text-sm text-red-600 whitespace-pre-line">{error}</p>
+          )}
+          {message && (
+            <p className="text-sm text-emerald-600 whitespace-pre-line">
+              {message}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full mt-2 inline-flex items-center justify-center rounded-md border border-transparent bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 disabled:opacity-60"
+          >
+            {loading
+              ? isSignIn
+                ? "Signing in..."
+                : "Signing up..."
+              : isSignIn
+              ? "Sign In"
+              : "Sign Up"}
+          </button>
+        </form>
+
+        <div className="mt-6">
+          <button
+            type="button"
+            onClick={handleGoogleSignIn}
+            disabled={loading}
+            className="w-full inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-60"
+          >
+            Continue with Google
+          </button>
         </div>
       </div>
     </div>

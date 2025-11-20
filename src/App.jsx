@@ -7,10 +7,13 @@ import Play from "./pages/Play";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import AuthCallback from "./pages/AuthCallback.jsx";
+import SharedPlay from "./pages/SharedPlay";
+import SharedQuizScores from "./pages/sharedQuizScores";
 
 export default function App() {
   return (
     <Routes>
+      {/* Main dashboard (requires auth) */}
       <Route
         path="/"
         element={
@@ -40,7 +43,7 @@ export default function App() {
         }
       />
 
-      {/* Individual quiz */}
+      {/* Individual quiz play (owner) */}
       <Route
         path="/play/:quizId"
         element={
@@ -50,7 +53,30 @@ export default function App() {
         }
       />
 
-      <Route path="/edit/:quizId" element={<ProtectedRoute><Editor /></ProtectedRoute>} />
+      {/* Owner scoreboard for a given quiz (requires auth) */}
+      <Route
+        path="/scores/:quizId"
+        element={
+          <ProtectedRoute>
+            <SharedQuizScores />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Public shared-quiz route (no auth required) */}
+      <Route path="/share/:slug" element={<SharedPlay />} />
+
+      {/* Quiz editor (requires auth) */}
+      <Route
+        path="/edit/:quizId"
+        element={
+          <ProtectedRoute>
+            <Editor />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Auth routes */}
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
