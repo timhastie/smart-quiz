@@ -297,12 +297,12 @@ export function AuthProvider({ children }) {
   }
 
   // EMAIL + PASSWORD SIGN-IN:
-  // Capture the current guest id, sign in, then redirect through /auth/callback
-  // so adopt_guest runs in one central place (AuthCallback.jsx).
+  // New behavior: do NOT redirect through /auth/callback.
+  // We adopt the guest inline via RPC, then refresh the session.
   async function signin(email, password) {
     console.log("[AuthProvider] signin called", { email });
 
-    // 1) Remember current guest id
+    // 1) Remember current guest id (the anon we want to adopt)
     let guestId = null;
     try {
       const {
@@ -342,24 +342,70 @@ export function AuthProvider({ children }) {
         email,
         error,
       });
-      throw error;
+      return { error };
     }
+    const newUserId = data.user?.id ?? null;
     console.log("[AuthProvider] signin signInWithPassword success", {
       email,
-      userId: data.user?.id ?? null,
+      userId: newUserId,
     });
 
-    // 3) After successful sign-in, bounce through /auth/callback so the same
-    //    adopt_guest logic runs as for Google + email-confirm links.
-    if (typeof window !== "undefined") {
-      const target = `${window.location.origin}/auth/callback?from=password`;
-      console.log("[AuthProvider] signin redirecting to /auth/callback", {
-        target,
-        email,
-        guestIdStored: guestId,
+    // 3) If we had a guestId and it’s different from new user id, adopt guest now.
+    if (guestId && guestId !== newUserId) {
+      try {
+        console.log("[AuthProvider] signin calling adopt_guest RPC", {
+          guestId,
+          newUserId,
+        });
+        const { error: adoptErr, data: adoptData } = await supabase.rpc(
+          "adopt_guest",
+          { p_old_user: guestId }
+        );
+        if (adoptErr) {
+          console.error("[AuthProvider] signin adopt_guest RPC error", {
+            guestId,
+            newUserId,
+            message: adoptErr.message,
+            details: adoptErr.details,
+            hint: adoptErr.hint,
+            code: adoptErr.code,
+          });
+        } else {
+          console.log("[AuthProvider] signin adopt_guest RPC success", {
+            guestId,
+            newUserId,
+            data: adoptData,
+          });
+        }
+      } catch (e) {
+        console.error("[AuthProvider] signin adopt_guest RPC threw", {
+          guestId,
+          newUserId,
+          error: e,
+        });
+      }
+    } else {
+      console.log("[AuthProvider] signin no adoption needed", {
+        guestId,
+        newUserId,
       });
-      window.location.href = target;
     }
+
+    // 4) Clean up LS flag
+    try {
+      localStorage.removeItem(LS_GUEST_ID);
+      console.log("[AuthProvider] signin removed LS_GUEST_ID", {
+        key: LS_GUEST_ID,
+      });
+    } catch (e) {
+      console.warn(
+        "[AuthProvider] signin failed to remove LS_GUEST_ID from localStorage",
+        e
+      );
+    }
+
+    // 5) Refresh local session state
+    await ensureSession("after-password-signin");
 
     return { user: data.user };
   }
