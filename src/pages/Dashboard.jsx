@@ -1892,14 +1892,14 @@ useEffect(() => {
                                   <div className="flex items-center gap-2 shrink-0">
                                     <Link
                                       to={`/scores/${q.id}`}
-                                      className={`${btnBase} ${btnGray} h-12 w-12 sm:h-[3.3rem] sm:w-[3.3rem] p-0 flex items-center justify-center shrink-0`}
+                                      className={`${btnBase} ${btnGray} h-11 w-11 sm:h-12 sm:w-12 p-0 flex items-center justify-center shrink-0`}
                                       aria-label="View quiz scores"
                                       title="Scores"
                                     >
                                       <img
                                         src="/icons/scoreboard.svg"
                                         alt=""
-                                        className="h-7 w-7 sm:h-8 sm:w-8"
+                                        className="h-5 w-5 sm:h-6 sm:w-6"
                                         aria-hidden="true"
                                       />
                                     </Link>
@@ -2102,14 +2102,14 @@ useEffect(() => {
                                 <div className="mt-5 flex items-center gap-3">
                                   <Link
                                     to={`/scores/${q.id}`}
-                                    className={`${btnBase} ${btnGray} h-14 w-14 sm:h-[3.8rem] sm:w-[3.8rem] p-0 flex items-center justify-center`}
+                                    className={`${btnBase} ${btnGray} h-12 w-12 sm:h-14 sm:w-14 p-0 flex items-center justify-center`}
                                     aria-label="View quiz scores"
                                     title="Scores"
                                   >
                                     <img
                                       src="/icons/scoreboard.svg"
                                       alt=""
-                                      className="h-7 w-7 sm:h-8 sm:w-8"
+                                      className="h-5 w-5 sm:h-6 sm:w-6"
                                       aria-hidden="true"
                                     />
                                   </Link>
