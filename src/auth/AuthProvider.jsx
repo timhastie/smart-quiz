@@ -11,6 +11,8 @@ import SigningInOverlay from "../components/SigningInOverlay";
 const AuthCtx = createContext(null);
 
 const LS_GUEST_ID = "guest_id_before_oauth";
+const LS_OAUTH_RETURN_PATH = "oauth_return_path";
+
 const onAuthCallbackPath = () =>
   typeof window !== "undefined" &&
   window.location.pathname.startsWith("/auth/callback");
@@ -252,6 +254,23 @@ export function AuthProvider({ children }) {
       } catch (e) {
         console.warn(
           "[AuthProvider] oauthOrLink failed to write LS_GUEST_ID to localStorage",
+          e
+        );
+      }
+    }
+
+    // Remember where to send the user back after OAuth (e.g. /share/:slug)
+    if (typeof window !== "undefined") {
+      try {
+        const path = window.location.pathname + window.location.search;
+        localStorage.setItem(LS_OAUTH_RETURN_PATH, path);
+        console.log("[AuthProvider] oauthOrLink stored LS_OAUTH_RETURN_PATH", {
+          key: LS_OAUTH_RETURN_PATH,
+          value: path,
+        });
+      } catch (e) {
+        console.warn(
+          "[AuthProvider] oauthOrLink failed to write LS_OAUTH_RETURN_PATH",
           e
         );
       }

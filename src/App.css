@@ -9,6 +9,16 @@ body {
   margin: 0;
 }
 
+.btn-sentence,
+button {
+  text-transform: lowercase;
+}
+
+.btn-sentence::first-letter,
+button::first-letter {
+  text-transform: uppercase;
+}
+
 .custom-select {
   -webkit-appearance: none;
   -moz-appearance: none;

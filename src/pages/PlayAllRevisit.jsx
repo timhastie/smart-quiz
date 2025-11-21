@@ -38,7 +38,7 @@ export default function PlayAllRevisit() {
 
   const pressAnim = "transition-all duration-150 active:scale-[0.97]";
   const btnBase =
-    "px-4 py-2 rounded-2xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed";
+    "btn-sentence px-4 py-2 rounded-2xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed";
   const btnGray = `bg-white/10 hover:bg-white/20 text-white ${pressAnim}`;
   const btnGreen = `bg-emerald-500/90 hover:bg-emerald-400 text-slate-950 ${pressAnim}`;
 

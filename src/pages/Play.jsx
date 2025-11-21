@@ -1224,7 +1224,7 @@ export default function Play() {
   const pressAnim =
     "transition-all duration-150 active:scale-[0.97]";
   const btnBase =
-    "px-4 py-2 rounded-2xl font-semibold text-sm sm:text-base disabled:opacity-50 disabled:cursor-not-allowed";
+    "btn-sentence px-4 py-2 rounded-2xl font-semibold text-sm sm:text-base disabled:opacity-50 disabled:cursor-not-allowed";
   const btnGray = `bg-white/10 hover:bg-white/20 text-white ${pressAnim}`;
   const btnIndigo = `bg-sky-500/90 hover:bg-sky-400 text-slate-950 ${pressAnim}`;
 
@@ -1332,7 +1332,7 @@ export default function Play() {
                           }`}
                           title="Go to the original quiz for this question"
                         >
-                          Play Main Quiz
+                          Play main quiz
                         </Link>
                       ) : isReviewMode ? (
                         <Link
@@ -1340,7 +1340,7 @@ export default function Play() {
                           className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray}`}
                           title="Go to the main quiz (not the revisit set)"
                         >
-                          Play Main Quiz
+                          Play main quiz
                         </Link>
                       ) : (
                         <Link
@@ -1348,7 +1348,7 @@ export default function Play() {
                           className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray}`}
                           title="Practice only the questions in your review group"
                         >
-                          Play Revisit Quiz
+                          Play revisit quiz
                         </Link>
                       )}
 
@@ -1366,7 +1366,7 @@ export default function Play() {
                                 )
                               }
                             >
-                              Remove from Review Group
+                              Remove from review group
                             </button>
                           ) : (
                             <button
@@ -1390,7 +1390,7 @@ export default function Play() {
                                 )
                               }
                             >
-                              Add To Review Group
+                              Add to review group
                             </button>
                           )}
                         </>
@@ -1403,7 +1403,7 @@ export default function Play() {
                           onClick={removeCurrentFromReview}
                           disabled={!current}
                         >
-                          Remove from Review Group
+                          Remove from review group
                         </button>
                       )}
 
@@ -1418,7 +1418,7 @@ export default function Play() {
                         }
                       >
                         {isPeeking
-                          ? "Display My Answer"
+                          ? "Display my answer"
                           : "Display answer"}
                       </button>
                     </div>
@@ -1439,21 +1439,21 @@ export default function Play() {
                             : ""
                         }`}
                       >
-                        Play Main Quiz
+                        Play main quiz
                       </Link>
                     ) : isReviewMode ? (
                       <Link
                         to={`/play/${quizId}`}
                         className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
                       >
-                        Play Main Quiz
+                        Play main quiz
                       </Link>
                     ) : (
                       <Link
                         to={`/play/${quizId}?mode=review`}
                         className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
                       >
-                        Play Revisit Quiz
+                        Play revisit quiz
                       </Link>
                     )}
 
@@ -1470,7 +1470,7 @@ export default function Play() {
                             )
                           }
                         >
-                          Remove from Review Group
+                          Remove from review group
                         </button>
                       ) : (
                         <button
@@ -1484,7 +1484,7 @@ export default function Play() {
                             )
                           }
                         >
-                          Add To Review Group
+                          Add to review group
                         </button>
                       )
                     ) : isReviewMode ? (
@@ -1494,7 +1494,7 @@ export default function Play() {
                         onClick={removeCurrentFromReview}
                         disabled={!current}
                       >
-                        Remove from Review Group
+                        Remove from review group
                       </button>
                     ) : (
                       <div className="min-h-14" />
@@ -1590,7 +1590,7 @@ export default function Play() {
                       className={`w-full ${btnBase} ${btnGray} h-12 sm:h-14 flex items-center justify-center`}
                       onClick={goPrev}
                     >
-                      Previous Question
+                      Previous question
                     </button>
 
                     {showGoToUnanswered && (
@@ -1599,7 +1599,7 @@ export default function Play() {
                         className={`w-full ${btnBase} ${btnGray} h-12 sm:h-14 flex items-center justify-center`}
                         onClick={jumpToUnanswered}
                       >
-                        Go to Unanswered Question
+                        Go to unanswered question
                       </button>
                     )}
 
@@ -1609,19 +1609,19 @@ export default function Play() {
                       onClick={goNext}
                       disabled={isLast}
                     >
-                      Next Question
+                      Next question
                     </button>
                   </div>
 
-                  {/* Submit Quiz */}
+                  {/* Submit quiz */}
                   <div className="mt-8 sm:mt-12 flex justify-center">
                     <button
                       type="button"
                       onClick={submitQuizNow}
-                      className={`px-5 py-2 rounded ${btnIndigo} text-sm sm:text-base`}
+                      className={`${btnBase} ${btnIndigo}`}
                       title="Submit the quiz now and see your score"
                     >
-                      Submit Quiz
+                      Submit quiz
                     </button>
                   </div>
 
@@ -1682,7 +1682,7 @@ export default function Play() {
                       className={`${btnBase} ${btnIndigo}`}
                       title="Return to dashboard"
                     >
-                      Return to Dashboard
+                      Return to dashboard
                     </Link>
                   ) : (
                     <Link
@@ -1690,7 +1690,7 @@ export default function Play() {
                       className={`${btnBase} ${btnIndigo}`}
                       title="Return to the main quiz"
                     >
-                      Return to Main Quiz
+                      Return to main quiz
                     </Link>
                   )}
                 </div>
@@ -1739,7 +1739,7 @@ export default function Play() {
                 className={`${btnBase} ${btnIndigo} w-full sm:w-auto`}
                 onClick={() => navigate(backPath)}
               >
-                Return to Dashboard
+                Return to dashboard
               </button>
             </div>
           </div>

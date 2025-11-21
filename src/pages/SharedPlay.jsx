@@ -1,5 +1,5 @@
 // src/pages/SharedPlay.jsx
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
@@ -78,6 +78,9 @@ const CONCEPT_GROUPS = [
   },
 ];
 
+const SHARED_GOOGLE_PULSE_KEY = "smartquiz_shared_google_pulse";
+const SHARED_CLONE_SUCCESS_KEY = "smartquiz_shared_clone_success";
+
 function conceptTags(str) {
   const tags = new Set();
   const tokens = new Set(str.split(" ").filter(Boolean));
@@ -144,7 +147,9 @@ function computeIsAnon(u) {
 export default function SharedPlay() {
   const { slug } = useParams();
   const areaRef = useRef(null);
-  const { user, ready, signup } = useAuth();
+  const signedInPulseTimer = useRef(null);
+  const cloneSuccessTimer = useRef(null);
+  const { user, ready, signup, signin, googleSignIn } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -173,6 +178,7 @@ export default function SharedPlay() {
   const [adding, setAdding] = useState(false);
   const [cloneError, setCloneError] = useState("");
   const [cloneSuccess, setCloneSuccess] = useState(false);
+  const [cloneToastPending, setCloneToastPending] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
   const [authPass, setAuthPass] = useState("");
@@ -180,14 +186,36 @@ export default function SharedPlay() {
   const [authMessage, setAuthMessage] = useState(
     "Sign up or sign in to save this quiz to your account."
   );
+  const [signedInPulse, setSignedInPulse] = useState(false);
+  const [pendingGooglePulse, setPendingGooglePulse] = useState(false);
 
   const pressAnim = "transition-all duration-150 active:scale-[0.97]";
   const btnBase =
-    "px-4 py-2 rounded-2xl font-semibold text-sm sm:text-base disabled:opacity-50 disabled:cursor-not-allowed";
+    "btn-sentence px-4 py-2 rounded-2xl font-semibold text-sm sm:text-base disabled:opacity-50 disabled:cursor-not-allowed";
   const btnGray = `bg-white/10 hover:bg-white/20 text-white ${pressAnim}`;
   const btnIndigo = `bg-sky-500/90 hover:bg-sky-400 text-slate-950 ${pressAnim}`;
 
   const isAnon = computeIsAnon(user);
+
+  const triggerSignedInPulse = useCallback(() => {
+    setSignedInPulse(true);
+    if (signedInPulseTimer.current) {
+      clearTimeout(signedInPulseTimer.current);
+    }
+    signedInPulseTimer.current = setTimeout(() => {
+      setSignedInPulse(false);
+    }, 750);
+  }, []);
+
+  const showCloneToast = useCallback(() => {
+    setCloneSuccess(true);
+    setCloneToastPending(false);
+    try {
+      sessionStorage.removeItem(SHARED_CLONE_SUCCESS_KEY);
+    } catch {
+      // ignore
+    }
+  }, []);
 
   useEffect(() => {
     if (authModalOpen && user && !isAnon) {
@@ -196,8 +224,101 @@ export default function SharedPlay() {
       setAuthMessage(
         "Sign up or sign in to save this quiz to your account."
       );
+      triggerSignedInPulse();
     }
-  }, [authModalOpen, isAnon, user]);
+  }, [authModalOpen, isAnon, triggerSignedInPulse, user]);
+
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(SHARED_GOOGLE_PULSE_KEY) === "1") {
+        setPendingGooglePulse(true);
+      }
+    } catch {
+      // ignore sessionStorage access issues
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!slug) return;
+    try {
+      const raw = sessionStorage.getItem(SHARED_CLONE_SUCCESS_KEY);
+      if (!raw) return;
+
+      let storedSlug = raw;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.slug === "string") {
+          storedSlug = parsed.slug;
+        }
+      } catch {
+        // fallback for legacy string
+      }
+
+      if (storedSlug === slug) {
+        setCloneToastPending(true);
+      } else {
+        sessionStorage.removeItem(SHARED_CLONE_SUCCESS_KEY);
+      }
+    } catch {
+      // ignore
+    }
+  }, [slug]);
+
+  useEffect(() => {
+    if (pendingGooglePulse && user && !isAnon) {
+      triggerSignedInPulse();
+      setPendingGooglePulse(false);
+      try {
+        sessionStorage.removeItem(SHARED_GOOGLE_PULSE_KEY);
+      } catch {
+        // ignore
+      }
+    }
+  }, [pendingGooglePulse, isAnon, triggerSignedInPulse, user]);
+
+  useEffect(() => {
+    if (!cloneToastPending) return;
+    if (authModalOpen) return;
+    if (pendingGooglePulse) return;
+    if (signedInPulse) return;
+    if (isAnon) return;
+
+    showCloneToast();
+  }, [
+    authModalOpen,
+    cloneToastPending,
+    isAnon,
+    pendingGooglePulse,
+    showCloneToast,
+    signedInPulse,
+  ]);
+
+  useEffect(() => {
+    if (!cloneSuccess) return;
+    if (cloneSuccessTimer.current) {
+      clearTimeout(cloneSuccessTimer.current);
+    }
+    cloneSuccessTimer.current = setTimeout(() => {
+      setCloneSuccess(false);
+    }, 4000);
+    return () => {
+      if (cloneSuccessTimer.current) {
+        clearTimeout(cloneSuccessTimer.current);
+        cloneSuccessTimer.current = null;
+      }
+    };
+  }, [cloneSuccess]);
+
+  useEffect(() => {
+    return () => {
+      if (signedInPulseTimer.current) {
+        clearTimeout(signedInPulseTimer.current);
+      }
+      if (cloneSuccessTimer.current) {
+        clearTimeout(cloneSuccessTimer.current);
+      }
+    };
+  }, []);
 
   // Create / load stable participant id + remembered name (must be a real UUID)
   useEffect(() => {
@@ -382,13 +503,19 @@ export default function SharedPlay() {
       isCorrect = true;
     } else {
       try {
+        const { data: sessionRes } = await supabase.auth.getSession();
+        const jwt = sessionRes?.session?.access_token || null;
+        const headers = {
+          "Content-Type": "application/json",
+          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+          ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+        };
+
         const res = await fetch(
           `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/grade-answer`,
           {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
+            headers,
             body: JSON.stringify({
               question,
               expected,
@@ -401,8 +528,8 @@ export default function SharedPlay() {
           const out = await res.json();
           isCorrect = !!out.correct;
         }
-      } catch {
-        // fall back to incorrect
+      } catch (err) {
+        console.error("SharedPlay AI grading failed:", err);
       }
     }
 
@@ -573,7 +700,25 @@ export default function SharedPlay() {
         }
       }
 
-      setCloneSuccess(true);
+      setCloneToastPending(true);
+      if (computeIsAnon(currentUser)) {
+        if (slug) {
+          try {
+            sessionStorage.setItem(
+              SHARED_CLONE_SUCCESS_KEY,
+              JSON.stringify({ slug })
+            );
+          } catch {
+            // ignore
+          }
+        }
+      } else {
+        try {
+          sessionStorage.removeItem(SHARED_CLONE_SUCCESS_KEY);
+        } catch {
+          // ignore
+        }
+      }
     } catch (err) {
       console.error("Unexpected error cloning quiz:", err);
       setCloneError("Something went wrong while adding this quiz.");
@@ -635,34 +780,45 @@ export default function SharedPlay() {
         setAuthBusy(false);
         return;
       }
-      let guestId = null;
-      if (user && isAnon) {
-        guestId = user.id;
-        try {
-          storeGuestId(user.id);
-        } catch {}
-      }
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      if (error) {
-        setAuthMessage(error.message || "Failed to sign in.");
+
+      // Use central AuthProvider.signin (handles guest adoption + session refresh)
+      const res = await signin(email, password);
+      if (res?.error) {
+        setAuthMessage(res.error.message || "Failed to sign in.");
         return;
       }
-      if (guestId && data?.user?.id && data.user.id !== guestId) {
-        try {
-          await supabase.rpc("adopt_guest", { p_old_user: guestId });
-        } catch (adoptErr) {
-          console.error("adopt_guest RPC error after shared sign-in:", adoptErr);
-        }
-      }
+
       setAuthModalOpen(false);
       setAuthMessage("Sign up or sign in to save this quiz to your account.");
-      setCloneSuccess(true);
     } catch (err) {
       setAuthMessage(err?.message || "Something went wrong during sign in.");
     } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function handleGoogleShared() {
+    if (authBusy) return;
+    try {
+      setAuthBusy(true);
+      try {
+        sessionStorage.setItem(SHARED_GOOGLE_PULSE_KEY, "1");
+        setPendingGooglePulse(true);
+      } catch {
+        // ignore storage errors
+      }
+      await googleSignIn();
+      // control passes to OAuth flow; when they return and are non-anon,
+      // the useEffect above will auto-close this modal.
+    } catch (err) {
+      console.error("Google OAuth error from SharedPlay:", err);
+      setAuthMessage("Google sign-in failed. Please try again.");
+      try {
+        sessionStorage.removeItem(SHARED_GOOGLE_PULSE_KEY);
+      } catch {
+        // ignore
+      }
+      setPendingGooglePulse(false);
       setAuthBusy(false);
     }
   }
@@ -779,7 +935,7 @@ export default function SharedPlay() {
                     className={`w-full ${btnBase} ${btnGray} h-12 sm:h-14 flex items-center justify-center`}
                     onClick={goPrev}
                   >
-                    Previous Question
+                    Previous question
                   </button>
 
                   <button
@@ -788,19 +944,19 @@ export default function SharedPlay() {
                     onClick={goNext}
                     disabled={isLast}
                   >
-                    Next Question
+                    Next question
                   </button>
                 </div>
 
-                {/* Submit Quiz */}
+                {/* Submit quiz */}
                 <div className="mt-8 sm:mt-12 flex justify-center">
                   <button
                     type="button"
                     onClick={submitQuizNow}
-                    className={`px-5 py-2 rounded ${btnIndigo} text-sm sm:text-base`}
+                    className={`${btnBase} ${btnIndigo}`}
                     title="Submit the quiz now and see your score"
                   >
-                    Submit Quiz
+                    Submit quiz
                   </button>
                 </div>
 
@@ -823,8 +979,8 @@ export default function SharedPlay() {
                   <div className="mt-6 text-center space-y-4">
                     <p className="text-base sm:text-lg">
                       You scored{" "}
-                        <span className="font-semibold">{scorePct}%</span> on
-                        this shared quiz.
+                      <span className="font-semibold">{scorePct}%</span> on
+                      this shared quiz.
                       {hasConfetti ? " 🎉" : ""}
                     </p>
 
@@ -932,6 +1088,16 @@ export default function SharedPlay() {
         </div>
       </main>
 
+      {signedInPulse && (
+        <div className="fixed inset-0 z-[115] pointer-events-none flex items-center justify-center">
+          <div className="w-32 h-32 sm:w-36 sm:h-36 rounded-full bg-emerald-400 flex items-center justify-center shadow-2xl animate-pulse">
+            <span className="text-slate-900 font-semibold text-lg sm:text-xl">
+              Signed in!
+            </span>
+          </div>
+        </div>
+      )}
+
       {authModalOpen && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-[95]"
@@ -961,7 +1127,10 @@ export default function SharedPlay() {
               </div>
             )}
 
-            <label className="block text-sm text-white/70 mb-1" htmlFor="share-auth-email">
+            <label
+              className="block text-sm text-white/70 mb-1"
+              htmlFor="share-auth-email"
+            >
               Email
             </label>
             <input
@@ -974,7 +1143,10 @@ export default function SharedPlay() {
               autoFocus
             />
 
-            <label className="block text-sm text-white/70 mb-1" htmlFor="share-auth-pass">
+            <label
+              className="block text-sm text-white/70 mb-1"
+              htmlFor="share-auth-pass"
+            >
               Password
             </label>
             <input
@@ -1007,6 +1179,42 @@ export default function SharedPlay() {
                 disabled={authBusy}
               >
                 Sign in
+              </button>
+            </div>
+
+            {/* Google sign-in button, same style as Dashboard modal */}
+            <div className="mt-3 flex justify-center">
+              <button
+                type="button"
+                onClick={handleGoogleShared}
+                className="h-12 w-12 rounded-full bg:white bg-white border border-gray-300 shadow flex items-center justify-center hover:shadow-md active:scale-95 transition"
+                aria-label="Continue with Google"
+                title="Continue with Google"
+                disabled={authBusy}
+              >
+                <svg
+                  width="24"
+                  height="24"
+                  viewBox="0 0 48 48"
+                  aria-hidden="true"
+                >
+                  <path
+                    fill="#FFC107"
+                    d="M43.6 20.5H42V20H24v8h11.3C33.6 32.4 29.2 35 24 35c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C33.8 5.1 29.2 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21c10.5 0 20-7.6 20-21 0-1.3-.1-2.7-.4-3.5z"
+                  />
+                  <path
+                    fill="#FF3D00"
+                    d="M6.3 14.7l6.6 4.8C14.5 16 19 13 24 13c3 0 5.8 1.1 7.9 3l5.7-5.7C33.8 5.1 29.2 3 24 3 16 3 8.9 7.6 6.3 14.7z"
+                  />
+                  <path
+                    fill="#4CAF50"
+                    d="M24 45c5.1 0 9.8-1.9 13.3-5.1l-6.1-5c-2 1.5-4.6 2.4-7.2 2.4-5.2 0-9.6-3.5-11.2-8.3L6.2 33.9C8.8 41 16 45 24 45z"
+                  />
+                  <path
+                    fill="#1976D2"
+                    d="M43.6 20.5H42V20H24v8h11.3c-1.1 3.1-3.6 5.6-6.6 6.9l6.1 5C37.8 37.9 41 31.9 41 24c0-1.3-.1-2.7-.4-3.5z"
+                  />
+                </svg>
               </button>
             </div>
           </div>

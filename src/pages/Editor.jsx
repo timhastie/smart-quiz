@@ -63,7 +63,8 @@ export default function Editor() {
 
   // ----- UI button helpers (match Dashboard look) -----
   const pressAnim = "transition-all duration-150 active:scale-[0.97]";
-  const btnBase = "px-4 py-2 rounded-2xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed";
+  const btnBase =
+    "btn-sentence px-4 py-2 rounded-2xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed";
   const btnGray = `bg-white/10 hover:bg-white/20 text-white ${pressAnim}`;
   const btnGreen = `bg-emerald-500/90 hover:bg-emerald-400 text-slate-950 ${pressAnim}`;
   const btnRed = `bg-rose-500/80 hover:bg-rose-500 text-white ${pressAnim}`;
@@ -914,7 +915,7 @@ export default function Editor() {
             <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-2">
               <button
                 onClick={save}
-                className={`w-full sm:w-auto ${btnBase} ${btnGray}`}
+                className={`w-full sm:w-auto ${btnBase} ${btnGreen}`}
               >
                 Save
               </button>
@@ -944,7 +945,7 @@ export default function Editor() {
             onClick={addRow}
             className={`${btnBase} ${btnGray} h-12 px-6`}
           >
-            + Add Question
+            + Add question
           </button>
           <button
             onClick={handlePrintQuestions}

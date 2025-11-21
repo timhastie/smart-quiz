@@ -143,7 +143,7 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
 
   const pressAnim = "transition-all duration-150 active:scale-[0.97]";
   const btnBase =
-    "px-4 py-2 rounded-2xl font-semibold tracking-tight disabled:opacity-50 disabled:cursor-not-allowed";
+    "btn-sentence px-4 py-2 rounded-2xl font-semibold tracking-tight disabled:opacity-50 disabled:cursor-not-allowed";
   const btnGray = `bg-white/10 hover:bg-white/20 text-white ${pressAnim}`;
   const btnGreen = `bg-emerald-500/90 hover:bg-emerald-400 text-slate-950 ${pressAnim}`;
   const btnRed = `bg-rose-600/80 hover:bg-rose-500 text-white ${pressAnim}`;
@@ -1726,28 +1726,31 @@ useEffect(() => {
                 )}
               </div>
 
-              <div className="sm:col-span-2">
-                <label
-                  className="block text-sm text-white/70 mb-1"
-                  htmlFor="inline-gen-group"
-                >
-                  Add to Group
-                </label>
+                <div className="sm:col-span-2">
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-                  <select
-                    id="inline-gen-group"
-                    className="field w-full sm:flex-1 h-12"
-                    value={gGroupId}
-                    onChange={(e) => setGGroupId(e.target.value)}
-                    disabled={generating}
-                  >
-                    <option value={noGroupOptionValue}>{NO_GROUP_LABEL}</option>
-                    {selectableGroupOptions.map((g) => (
-                      <option key={g.id} value={g.id}>
-                        {g.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="w-full sm:flex-1">
+                    <label
+                      className="block text-sm text-white/70 mb-1"
+                      htmlFor="inline-gen-group"
+                    >
+                      Add to group
+                    </label>
+                    <select
+                      id="inline-gen-group"
+                      className="field w-full h-12"
+                      value={gGroupId}
+                      onChange={(e) => setGGroupId(e.target.value)}
+                      disabled={generating}
+                    >
+                      <option value={noGroupOptionValue}>{NO_GROUP_LABEL}</option>
+                      {selectableGroupOptions.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
                   <button
                     type="button"
                     className={`${btnBase} ${btnGray} h-12 px-6`}
@@ -1759,6 +1762,7 @@ useEffect(() => {
                   >
                     New group +
                   </button>
+
                   <div className="w-full sm:w-28">
                     <label
                       className="block text-sm text-white/70 mb-1"
@@ -1779,6 +1783,7 @@ useEffect(() => {
                       disabled={generating}
                     />
                   </div>
+
                   <button
                     className={`${btnBase} ${btnGreen} h-12 px-6 sm:ml-auto`}
                     onClick={generateQuiz}
@@ -1789,6 +1794,7 @@ useEffect(() => {
                 </div>
               </div>
             </div>
+            
           </section>
           <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3 max-w-3xl mx-auto px-5 sm:px-0">
             <p className="text-white/70 text-sm">
@@ -2672,7 +2678,7 @@ useEffect(() => {
           >
             <h2 className="text-xl font-bold mb-4">Generate a quiz</h2>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+           <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-5 sm:gap-y-6 gap-x-4">
               <div className="sm:col-span-2">
                 <label className="block text-sm text-white/70 mb-1" htmlFor="gen-title">
                   Name
@@ -2736,27 +2742,33 @@ useEffect(() => {
                 )}
               </div>
 
-              <div className="sm:col-span-1">
-                <label className="block text-sm text-white/70 mb-1" htmlFor="gen-group">
-                  Add to Group
-                </label>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <select
-                    id="gen-group"
-                    className="w-full"
-                    value={gGroupId}
-                    onChange={(e) => setGGroupId(e.target.value)}
-                  >
-                    <option value={noGroupOptionValue}>{NO_GROUP_LABEL}</option>
-                    {selectableGroupOptions.map((g) => (
-                      <option key={g.id} value={g.id}>
-                        {g.name}
-                      </option>
-                    ))}
-                  </select>
+                                         <div className="sm:col-span-2">
+                <div className="flex flex-col sm:flex-row sm:items-end gap-2">
+                  <div className="w-full sm:flex-1">
+                    <label
+                      className="block text-sm text-white/70 mb-1"
+                      htmlFor="gen-group"
+                    >
+                      Add to group
+                    </label>
+                    <select
+                      id="gen-group"
+                      className="w-full min-w-[180px] h-12 custom-select"
+                      value={gGroupId}
+                      onChange={(e) => setGGroupId(e.target.value)}
+                    >
+                      <option value={noGroupOptionValue}>{NO_GROUP_LABEL}</option>
+                      {selectableGroupOptions.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
                   <button
                     type="button"
-                    className={`${btnBase} ${btnGray}`}
+                    className={`${btnBase} ${btnGray} h-12 px-6 whitespace-nowrap`}
                     onClick={() => {
                       setGNewName("");
                       setGNewOpen(true);
@@ -2764,24 +2776,29 @@ useEffect(() => {
                   >
                     New group +
                   </button>
+
+                  <div className="w-full sm:w-24">
+                    <label
+                      className="block text-sm text-white/70 mb-1"
+                      htmlFor="gen-count"
+                    >
+                      # of questions
+                    </label>
+                    <input
+                      id="gen-count"
+                      className="field w-full h-12 text-center"
+                      type="number"
+                      min={1}
+                      max={30}
+                      value={gCount}
+                      onChange={(e) => setGCount(Number(e.target.value))}
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div className="sm:col-span-1">
-                <label className="block text-sm text-white/70 mb-1" htmlFor="gen-count">
-                  # of questions
-                </label>
-                <input
-                  id="gen-count"
-                  className="field w-full sm:w-20 text-left pl-4"
-                  type="number"
-                  min={1}
-                  max={30}
-                  value={gCount}
-                  onChange={(e) => setGCount(Number(e.target.value))}
-                />
-              </div>
             </div>
+
 
             <div className="flex flex-col sm:flex-row justify-end gap-2 mt-6">
               <button

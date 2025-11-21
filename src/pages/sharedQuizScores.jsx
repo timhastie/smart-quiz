@@ -11,14 +11,19 @@ export default function SharedQuizScores() {
 
   const pressAnim = "transition-all duration-150 active:scale-[0.97]";
   const btnBase =
-    "px-4 py-2 rounded-2xl font-semibold tracking-tight disabled:opacity-50 disabled:cursor-not-allowed";
+    "btn-sentence px-4 py-2 rounded-2xl font-semibold tracking-tight disabled:opacity-50 disabled:cursor-not-allowed";
   const btnGray = `bg-white/10 hover:bg-white/20 text-white ${pressAnim}`;
+  const btnGreen = `bg-emerald-500/90 hover:bg-emerald-400 text-slate-950 ${pressAnim}`;
+  const btnRed = `bg-rose-600/80 hover:bg-rose-500 text-white ${pressAnim}`;
 
   const [loading, setLoading] = useState(true);
   const [quiz, setQuiz] = useState(null);
   const [attempts, setAttempts] = useState([]);
   const [error, setError] = useState("");
   const [selectedAttempts, setSelectedAttempts] = useState({});
+  const [deletingName, setDeletingName] = useState(null);
+  const [purging, setPurging] = useState(false);
+  const [confirmAction, setConfirmAction] = useState(null);
 
   useEffect(() => {
     if (!ready) return;
@@ -89,6 +94,16 @@ export default function SharedQuizScores() {
       .replace(/'/g, "&#39;");
   }
 
+  const requestDeleteParticipant = (group) => {
+    if (!group) return;
+    setConfirmAction({ type: "participant", group });
+  };
+
+  const requestDeleteAll = () => {
+    if (!hasAttempts) return;
+    setConfirmAction({ type: "all" });
+  };
+
   const groupedParticipants = useMemo(() => {
     const byName = new Map();
     for (const row of attempts) {
@@ -148,6 +163,54 @@ export default function SharedQuizScores() {
       return changed ? next : prev;
     });
   }, [groupedParticipants]);
+
+  async function deleteParticipant(group) {
+    if (!user?.id || !quizId) return;
+    if (!group?.rows?.length) return;
+    try {
+      setDeletingName(group.name);
+      const ids = group.rows.map((row) => row.id);
+      const { error: delErr } = await supabase
+        .from("quiz_share_attempts")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("quiz_id", quizId)
+        .in("id", ids);
+
+      if (delErr) {
+        console.error("Failed to delete attempts:", delErr);
+        alert("Could not delete these attempts. Please try again.");
+        return;
+      }
+
+      setAttempts((prev) => prev.filter((row) => !ids.includes(row.id)));
+    } finally {
+      setDeletingName(null);
+    }
+  }
+
+  async function deleteAllParticipants() {
+    if (!user?.id || !quizId) return;
+    if (!hasAttempts) return;
+    try {
+      setPurging(true);
+      const { error: delErr } = await supabase
+        .from("quiz_share_attempts")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("quiz_id", quizId);
+
+      if (delErr) {
+        console.error("Failed to delete all attempts:", delErr);
+        alert("Could not delete all entries. Please try again.");
+        return;
+      }
+
+      setAttempts([]);
+    } finally {
+      setPurging(false);
+    }
+  }
 
   function handlePrintScores() {
     if (!hasAttempts) return;
@@ -304,6 +367,7 @@ export default function SharedQuizScores() {
                     <th className="py-2 pr-4">Attempt #</th>
                     <th className="py-2 pr-4">Score</th>
                     <th className="py-2 pr-4">Date</th>
+                    <th className="py-2 text-right"> </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -378,11 +442,35 @@ export default function SharedQuizScores() {
                             ? new Date(activeRow.created_at).toLocaleString()
                             : "—"}
                         </td>
+                        <td className="py-2 text-right">
+                          <button
+                            type="button"
+                            className="text-white/50 hover:text-red-400 transition-colors disabled:opacity-40"
+                            aria-label={`Delete all attempts for ${group.name}`}
+                            onClick={() => requestDeleteParticipant(group)}
+                            disabled={deletingName === group.name}
+                          >
+                            ×
+                          </button>
+                        </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={requestDeleteAll}
+                className="text-sm text-white/60 hover:text-red-400 transition-colors flex items-center gap-2 disabled:opacity-40"
+                disabled={purging}
+                title="Delete all scoreboard entries"
+              >
+                <span className="text-lg leading-none">×</span>
+                <span>Delete entire scoreboard</span>
+              </button>
             </div>
           </section>
         )}
@@ -403,6 +491,48 @@ export default function SharedQuizScores() {
           </div>
         </footer>
       ) : null}
+
+      {confirmAction && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center px-4">
+          <div className="surface-card w-full max-w-md p-6 space-y-4">
+            <h3 className="text-xl font-semibold">
+              {confirmAction.type === "participant"
+                ? "Delete participant attempts?"
+                : "Delete entire scoreboard?"}
+            </h3>
+            <p className="text-white/70 text-sm">
+              {confirmAction.type === "participant"
+                ? `This will remove every attempt recorded for "${confirmAction.group?.name}". This action cannot be undone.`
+                : "This will remove every scoreboard entry for this quiz. This action cannot be undone."}
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2 justify-end">
+              <button
+                type="button"
+                className={`${btnBase} ${btnGray}`}
+                onClick={() => setConfirmAction(null)}
+                disabled={purging || deletingName}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={`${btnBase} ${btnRed}`}
+                onClick={async () => {
+                  if (confirmAction.type === "participant") {
+                    await deleteParticipant(confirmAction.group);
+                  } else {
+                    await deleteAllParticipants();
+                  }
+                  setConfirmAction(null);
+                }}
+                disabled={purging || deletingName}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
