@@ -1539,7 +1539,7 @@ export default function Dashboard() {
         {/* ---- MOBILE actions ---- */}
         {hasAnyQuizzes && (
           <div className="sm:hidden surface-card p-4 space-y-4">
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-row gap-2">
               <button
                 onClick={async () => {
                   if (isFirstQuizState) return;
@@ -1552,7 +1552,7 @@ export default function Dashboard() {
                   setGenOpen(true);
                 }}
                 disabled={isFirstQuizState}
-                className={`${btnBase} ${btnGreen} justify-center text-sm h-12 ${isFirstQuizState ? "opacity-50 cursor-not-allowed" : ""
+                className={`${btnBase} ${btnGreen} flex-1 justify-center text-xs sm:text-sm h-12 px-2 ${isFirstQuizState ? "opacity-50 cursor-not-allowed" : ""
                   }`}
               >
                 + Generate quiz with AI
@@ -1561,15 +1561,15 @@ export default function Dashboard() {
 
               <button
                 onClick={createQuiz}
-                className={`${btnBase} ${btnGray} justify-center text-sm h-12`}
+                className={`${btnBase} ${btnGray} flex-1 justify-center text-xs sm:text-sm h-12 px-2`}
                 disabled={creating}
               >
                 {creating ? "Creating…" : "New empty quiz"}
               </button>
             </div>
 
-            <div className="space-y-3">
-              <div className="space-y-1">
+            <div className="flex flex-row gap-2">
+              <div className="space-y-1 flex-1">
                 <label className="text-xs uppercase tracking-wide text-white/60">
                   Filter by group
                 </label>
@@ -1587,7 +1587,7 @@ export default function Dashboard() {
                 </select>
               </div>
 
-              <div className="space-y-1">
+              <div className="space-y-1 flex-1">
                 <label className="text-xs uppercase tracking-wide text-white/60">
                   Search
                 </label>

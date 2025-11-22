@@ -177,15 +177,15 @@ export default function Editor() {
     const hasQuestions = questions.length > 0;
     const sections = hasQuestions
       ? questions
-          .map((row, idx) => {
-            const q = escapeHtml(row?.prompt?.trim() || "(No question text)");
-            const a = escapeHtml(row?.answer?.trim() || "(No answer yet)");
-            return `<section class="qa-block">
+        .map((row, idx) => {
+          const q = escapeHtml(row?.prompt?.trim() || "(No question text)");
+          const a = escapeHtml(row?.answer?.trim() || "(No answer yet)");
+          return `<section class="qa-block">
   <p><strong>Question ${idx + 1}:</strong><br />${q}</p>
   <p><span class="answer-label">Answer:</span><br />${a}</p>
 </section>`;
-          })
-          .join("\n<hr />\n")
+        })
+        .join("\n<hr />\n")
       : `<p>No questions available yet.</p>`;
     const docTitle = (title || "Quiz Questions").trim() || "Quiz Questions";
     const printWindow = window.open("", "_blank", "width=900,height=700");
@@ -426,18 +426,18 @@ export default function Editor() {
 
   // Cleanly toggle the mutually exclusive mode checkboxes
   function chooseAdd() {
-  setGMode("add");
-  // Default back to 5 when returning to "Add"
-  // but respect the remaining headroom to the 30 cap.
-  const maxAddLocal = Math.max(0, MAX_TOTAL - currentCount);
-  if (maxAddLocal <= 0) {
-    // Can't add any more; keep a harmless value (submission will alert)
-    setGCountStr("1");
-    return;
+    setGMode("add");
+    // Default back to 5 when returning to "Add"
+    // but respect the remaining headroom to the 30 cap.
+    const maxAddLocal = Math.max(0, MAX_TOTAL - currentCount);
+    if (maxAddLocal <= 0) {
+      // Can't add any more; keep a harmless value (submission will alert)
+      setGCountStr("1");
+      return;
+    }
+    const defaultAdd = Math.min(5, maxAddLocal); // prefer 5, clamp if near the cap
+    setGCountStr(String(defaultAdd));
   }
-  const defaultAdd = Math.min(5, maxAddLocal); // prefer 5, clamp if near the cap
-  setGCountStr(String(defaultAdd));
-}
   function chooseReplace() {
     setGMode("replace");
     const curr = currentCount || 10;
@@ -544,7 +544,7 @@ export default function Editor() {
           return;
         }
         let idxOut = {};
-        try { idxOut = idxText ? JSON.parse(idxText) : {}; } catch {}
+        try { idxOut = idxText ? JSON.parse(idxText) : {}; } catch { }
         file_id = idxOut?.file_id ?? null;
         if (!file_id) {
           alert("Indexing returned no file_id.");
@@ -688,7 +688,7 @@ export default function Editor() {
       }
 
       let createOut = {};
-      try { createOut = createText ? JSON.parse(createText) : {}; } catch {}
+      try { createOut = createText ? JSON.parse(createText) : {}; } catch { }
       const newQuizId = createOut?.id;
       if (!newQuizId) {
         alert("Generation succeeded but no quiz id returned.");
@@ -745,14 +745,14 @@ export default function Editor() {
     if (checked) {
       setGFile(null);
       if (fileInputRef.current) {
-        try { fileInputRef.current.value = ""; } catch {}
+        try { fileInputRef.current.value = ""; } catch { }
       }
     }
   }
   function clearChosenFile() {
     setGFile(null);
     if (fileInputRef.current) {
-      try { fileInputRef.current.value = ""; } catch {}
+      try { fileInputRef.current.value = ""; } catch { }
     }
   }
 
@@ -798,28 +798,30 @@ export default function Editor() {
             <label className="text-xs uppercase tracking-wide text-white/60 mb-1 block">
               Title
             </label>
-            <input
-              className="field w-full text-base sm:text-lg h-12"
-              placeholder="Quiz title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-            <button
-              onClick={openRegenerateModalPrefilled}
-              className={`${btnBase} ${btnGreen} mt-3 w-full sm:w-auto h-12`}
-              title="Open Generate with AI to replace this quiz"
-            >
-              Edit prompt and regenerate with AI +
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                className="field w-full text-base sm:text-lg h-12 min-w-0"
+                placeholder="Quiz title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+              <button
+                onClick={openRegenerateModalPrefilled}
+                className={`${btnBase} ${btnGreen} w-full h-12 px-1 text-xs sm:text-sm leading-tight flex items-center justify-center`}
+                title="Open Generate with AI to replace this quiz"
+              >
+                Edit prompt and regenerate with AI +
+              </button>
+            </div>
           </div>
 
           <div className="flex-1 min-w-[220px]">
             <label className="text-xs uppercase tracking-wide text-white/60 mb-1 block">
               Group
             </label>
-            <div className="flex flex-col sm:flex-row gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <select
-                className="w-full h-12 custom-select"
+                className="w-full h-12 custom-select min-w-0"
                 value={groupId}
                 onChange={handleGroupChange}
                 disabled={savingGroup}
@@ -835,7 +837,7 @@ export default function Editor() {
                 )}
               </select>
               <button
-                className={`${btnBase} ${btnGray} h-12 whitespace-nowrap w-full sm:w-auto`}
+                className={`${btnBase} ${btnGray} h-12 whitespace-nowrap w-full px-2 text-xs sm:text-sm flex items-center justify-center`}
                 onClick={() => setNewOpen(true)}
                 disabled={savingGroup}
               >
@@ -865,10 +867,10 @@ export default function Editor() {
           </div>
         </div>
 
-       {/* Questions — vertically scrollable container (desktop & mobile) */}
-<div className="relative">
-  <div
-    className="
+        {/* Questions — vertically scrollable container (desktop & mobile) */}
+        <div className="relative">
+          <div
+            className="
       w-full
       pt-2
       max-h-[72vh]
@@ -880,61 +882,61 @@ export default function Editor() {
       pb-[calc(env(safe-area-inset-bottom)+7rem)]
       scroll-pb-[calc(env(safe-area-inset-bottom)+7rem)]
     "
-  >
-    {questions.map((row, i) => (
-      <div key={i} className="surface-panel p-4">
-        <div className="flex items-start gap-3">
-          <input
-            type="checkbox"
-            aria-label={`Select Question ${i + 1}`}
-            className="mt-1 h-5 w-5 accent-emerald-500"
-            checked={selected.has(i)}
-            onChange={() => toggleSelect(i)}
-          />
-          <div className="flex-1">
-            <label className="block text-xs uppercase tracking-wide text-white/60 mb-1">
-              Question {i + 1}
-            </label>
-            <textarea
-              className="field-textarea w-full mb-3 text-base sm:text-lg"
-              placeholder={`Question ${i + 1} prompt`}
-              value={row.prompt}
-              onChange={(e) => updateRow(i, "prompt", e.target.value)}
-              rows={3}
-            />
-            <label className="block text-xs uppercase tracking-wide text-white/60 mb-1">
-              Exact answer
-            </label>
-            <textarea
-              className="field-textarea w-full text-base sm:text-lg"
-              placeholder="Exact correct answer"
-              value={row.answer}
-              onChange={(e) => updateRow(i, "answer", e.target.value)}
-              rows={2}
-            />
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-2">
-              <button
-                onClick={save}
-                className={`w-full sm:w-auto ${btnBase} ${btnGreen}`}
-              >
-                Save
-              </button>
-              <button
-                onClick={() => removeRow(i)}
-                className={`w-full sm:w-auto ${btnBase} ${btnRed}`}
-              >
-                Delete
-              </button>
-            </div>
+          >
+            {questions.map((row, i) => (
+              <div key={i} className="surface-panel p-4">
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    aria-label={`Select Question ${i + 1}`}
+                    className="mt-1 h-5 w-5 accent-emerald-500"
+                    checked={selected.has(i)}
+                    onChange={() => toggleSelect(i)}
+                  />
+                  <div className="flex-1">
+                    <label className="block text-xs uppercase tracking-wide text-white/60 mb-1">
+                      Question {i + 1}
+                    </label>
+                    <textarea
+                      className="field-textarea w-full mb-3 text-base sm:text-lg"
+                      placeholder={`Question ${i + 1} prompt`}
+                      value={row.prompt}
+                      onChange={(e) => updateRow(i, "prompt", e.target.value)}
+                      rows={3}
+                    />
+                    <label className="block text-xs uppercase tracking-wide text-white/60 mb-1">
+                      Exact answer
+                    </label>
+                    <textarea
+                      className="field-textarea w-full text-base sm:text-lg"
+                      placeholder="Exact correct answer"
+                      value={row.answer}
+                      onChange={(e) => updateRow(i, "answer", e.target.value)}
+                      rows={2}
+                    />
+                    <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-2">
+                      <button
+                        onClick={save}
+                        className={`w-full sm:w-auto ${btnBase} ${btnGreen}`}
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={() => removeRow(i)}
+                        className={`w-full sm:w-auto ${btnBase} ${btnRed}`}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            {/* Spacer so the last row clears the iOS Safari toolbar */}
+            <div aria-hidden className="h-[calc(env(safe-area-inset-bottom)+120px)]" />
           </div>
         </div>
-      </div>
-    ))}
-
-    {/* Spacer so the last row clears the iOS Safari toolbar */}
-    <div aria-hidden className="h-[calc(env(safe-area-inset-bottom)+120px)]" />
-  </div>
-</div>
 
         <div className="h-16" aria-hidden />
       </main>
@@ -1038,7 +1040,7 @@ export default function Editor() {
         </div>
       )}
 
-       {/* Generate with AI (Regenerate) modal */}
+      {/* Generate with AI (Regenerate) modal */}
       {genOpen && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-[62]"

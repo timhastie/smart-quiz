@@ -64,18 +64,45 @@ export async function copyShareLinkToClipboard(supabase, quizId) {
   const slug = await createOrGetShareLink(supabase, quizId);
   const url = `${window.location.origin}/share/${slug}`;
 
+  // Strategy 1: Modern Async Clipboard API
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(url);
-    } else {
-      // Fallback: show a prompt so user can copy manually
-      window.prompt('Copy this link', url);
+      return url;
     }
   } catch (err) {
-    console.error('Failed to copy share link to clipboard', err);
-    // Fallback prompt if clipboard API fails
-    window.prompt('Copy this link', url);
+    console.warn('Async clipboard failed, trying fallback...', err);
   }
 
-  return url;
+  // Strategy 2: Legacy execCommand (often works better on mobile/async)
+  try {
+    const textArea = document.createElement("textarea");
+    textArea.value = url;
+
+    // Ensure it's not visible but part of DOM
+    textArea.style.position = "fixed";
+    textArea.style.left = "-9999px";
+    textArea.style.top = "0";
+    document.body.appendChild(textArea);
+
+    textArea.focus();
+    textArea.select();
+
+    const successful = document.execCommand('copy');
+    document.body.removeChild(textArea);
+
+    if (successful) return url;
+    else throw new Error("execCommand returned false");
+  } catch (err) {
+    console.error('All copy methods failed', err);
+    // Only show prompt as absolute last resort if user really needs the link
+    // But user specifically asked to avoid it, so we might just fail silently 
+    // or let the UI show "Link copied" (which is a lie, but better than the annoying prompt?)
+    // Let's keep the prompt but maybe the execCommand will fix it 99% of the time.
+    // The user said "I dont want a window to open", so let's remove the prompt.
+    // If it fails, it fails. The UI will likely still show "Link copied" because handleShareQuiz catches errors?
+    // No, handleShareQuiz catches errors and alerts "Could not create a share link".
+    // So we should throw here if we failed.
+    throw new Error("Clipboard copy failed");
+  }
 }
