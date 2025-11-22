@@ -1,5 +1,5 @@
 // src/pages/Dashboard.jsx
-import { Play, History, SquarePen, Trash2, Mail } from "lucide-react";
+import { Play, History, SquarePen, Trash2, Mail, PanelRight, Download, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
@@ -12,6 +12,7 @@ import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 import { getInitialGroupFromUrlOrStorage, persistLastGroup } from "../lib/groupFilter";
 import { useLocation } from "react-router-dom";
+import SigningInOverlay from "../components/SigningInOverlay";
 /* ------------------------------- CONSTANTS -------------------------------- */
 const ALL_GROUP_ID = "00000000-0000-0000-0000-000000000000"; // sentinel for “All”
 const NO_GROUP_SENTINEL = "__no_group__";
@@ -21,7 +22,7 @@ function sortGroupsByName(list) {
   return [...list].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 }
 
-function dbg() {}
+function dbg() { }
 
 /* ------------------------------- HELPERS (DB) ------------------------------ */
 async function fetchAllRevisitScore(sb) {
@@ -93,12 +94,12 @@ export default function Dashboard() {
   const nav = useNavigate();
   const { user, ready, signout, signin, signup, oauthOrLink, ensureSession } = useAuth();
 
-const [allRevisitScore, setAllRevisitScore] = useState(null);
-const [groupRevisitScores, setGroupRevisitScores] = useState(new Map());
+  const [allRevisitScore, setAllRevisitScore] = useState(null);
+  const [groupRevisitScores, setGroupRevisitScores] = useState(new Map());
 
-// NEW: All-Questions (non-Revisit) score tracking
-const [allAllScore, setAllAllScore] = useState(null);
-const [groupAllScores, setGroupAllScores] = useState(new Map());
+  // NEW: All-Questions (non-Revisit) score tracking
+  const [allAllScore, setAllAllScore] = useState(null);
+  const [groupAllScores, setGroupAllScores] = useState(new Map());
 
   async function refreshAllRevisitScore() {
     const v = await fetchAllRevisitScore(supabase);
@@ -141,7 +142,7 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
     };
   }, [user?.id]);
 
-  const pressAnim = "transition-all duration-150 active:scale-[0.97]";
+  const pressAnim = "transition-transform duration-150 active:scale-[0.97] transition-colors";
   const btnBase =
     "btn-sentence px-4 py-2 rounded-2xl font-semibold tracking-tight disabled:opacity-50 disabled:cursor-not-allowed";
   const btnGray = `bg-white/10 hover:bg-white/20 text-white ${pressAnim}`;
@@ -208,7 +209,7 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
       if (user && isAnon) {
         try {
           storeGuestId(user.id);
-        } catch {}
+        } catch { }
       }
 
       const { error } = await signup(email, password);
@@ -238,7 +239,7 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
       if (user && isAnon) {
         try {
           storeGuestId(user.id);
-        } catch {}
+        } catch { }
       }
 
       const res = await signin(email, password);
@@ -279,7 +280,7 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
     setAccountOpen(true);
   }
 
-    async function performAccountDeletion() {
+  async function performAccountDeletion() {
     if (!user?.id || accountDeleting) return;
 
     // Immediately hide the confirmation popup so it never hangs around
@@ -335,7 +336,7 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
   const [target, setTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-   // Account modal + delete-account flow
+  // Account modal + delete-account flow
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountConfirmOpen, setAccountConfirmOpen] = useState(false);
   const [accountDeleting, setAccountDeleting] = useState(false);
@@ -360,12 +361,14 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
   const [gGroupId, setGGroupId] = useState(NO_GROUP_SENTINEL);
   const [gFile, setGFile] = useState(null);
   const [gNoRepeat, setGNoRepeat] = useState(true);
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [downloadingTranscript, setDownloadingTranscript] = useState(false);
 
   const [gNewOpen, setGNewOpen] = useState(false);
   const [gNewName, setGNewName] = useState("");
   const [gCreatingGroup, setGCreatingGroup] = useState(false);
 
-   // Animated "Generating..." dots for overlay
+  // Animated "Generating..." dots for overlay
   const [genDots, setGenDots] = useState(".");
 
   const location = useLocation();
@@ -390,7 +393,7 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
           { replace: true }
         );
       }
-    } catch {}
+    } catch { }
   }, [location.pathname, location.search, nav]);
   const [hydrated, setHydrated] = useState(false);
   const normalizedFilterGroupId = filterGroupId || "";
@@ -456,6 +459,11 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
   const [deleteGroupOpen, setDeleteGroupOpen] = useState(false);
   const [deletingGroup, setDeletingGroup] = useState(false);
 
+  const [expandedMenuId, setExpandedMenuId] = useState(null);
+  function toggleMenu(id) {
+    setExpandedMenuId(prev => prev === id ? null : id);
+  }
+
   const [query, setQuery] = useState("");
 
   async function handleSignOut() {
@@ -487,80 +495,80 @@ const [groupAllScores, setGroupAllScores] = useState(new Map());
     const list = data ?? [];
     setQuizzes(list);
 
-  const ids = list.map((x) => x.id);
-  if (!ids.length) {
-    setScoresByQuiz({});
-  } else {
-    const { data: scores, error: sErr } = await supabase
-      .from("quiz_scores")
-      .select("quiz_id, last_score, last_review_score")
-      .in("quiz_id", ids)
-      .eq("user_id", user.id);
-
-    if (sErr || !scores) {
+    const ids = list.map((x) => x.id);
+    if (!ids.length) {
       setScoresByQuiz({});
     } else {
-      const map = {};
-      for (const row of scores) {
-        map[row.quiz_id] = {
-          last: row.last_score ?? null,
-          review: row.last_review_score ?? null,
-        };
+      const { data: scores, error: sErr } = await supabase
+        .from("quiz_scores")
+        .select("quiz_id, last_score, last_review_score")
+        .in("quiz_id", ids)
+        .eq("user_id", user.id);
+
+      if (sErr || !scores) {
+        setScoresByQuiz({});
+      } else {
+        const map = {};
+        for (const row of scores) {
+          map[row.quiz_id] = {
+            last: row.last_score ?? null,
+            review: row.last_review_score ?? null,
+          };
+        }
+        setScoresByQuiz(map);
       }
-      setScoresByQuiz(map);
     }
-  }
 
-  // Read all score rows for this user (ordered newest first)
-  const { data: gs, error: gErr } = await supabase
-    .from("group_scores")
-    .select("scope, group_id, last_review_score, last_all_score, updated_at")
-    .eq("user_id", user.id)
-    .order("updated_at", { ascending: false });
+    // Read all score rows for this user (ordered newest first)
+    const { data: gs, error: gErr } = await supabase
+      .from("group_scores")
+      .select("scope, group_id, last_review_score, last_all_score, updated_at")
+      .eq("user_id", user.id)
+      .order("updated_at", { ascending: false });
 
-  if (gErr || !gs) {
-    setAllRevisitScore(null);
-    setGroupRevisitScores(new Map());
-    setAllAllScore(null);
-    setGroupAllScores(new Map());
+    if (gErr || !gs) {
+      setAllRevisitScore(null);
+      setGroupRevisitScores(new Map());
+      setAllAllScore(null);
+      setGroupAllScores(new Map());
+      setHydrated(true);
+      return;
+    }
+
+    // ---- ALL bucket (allow sentinel or legacy NULL) --------------------------
+    const allRow =
+      gs.find((r) => r.scope === "all" && r.group_id === ALL_GROUP_ID) ??
+      gs.find((r) => r.scope === "all" && r.group_id == null);
+
+    setAllRevisitScore(
+      typeof allRow?.last_review_score === "number" ? allRow.last_review_score : null
+    );
+    setAllAllScore(
+      typeof allRow?.last_all_score === "number" ? allRow.last_all_score : null
+    );
+
+    // ---- GROUP buckets -------------------------------------------------------
+    const mReview = new Map();
+    const mAll = new Map();
+
+    for (const r of gs) {
+      if (r.scope !== "group") continue;
+      const key = r.group_id;
+      if (!key) continue;
+      if (!mReview.has(key) && typeof r.last_review_score === "number") {
+        mReview.set(key, r.last_review_score);
+      }
+      if (!mAll.has(key) && typeof r.last_all_score === "number") {
+        mAll.set(key, r.last_all_score);
+      }
+    }
+
+    setGroupRevisitScores(mReview);
+    setGroupAllScores(mAll);
     setHydrated(true);
-    return;
   }
 
-  // ---- ALL bucket (allow sentinel or legacy NULL) --------------------------
-  const allRow =
-    gs.find((r) => r.scope === "all" && r.group_id === ALL_GROUP_ID) ??
-    gs.find((r) => r.scope === "all" && r.group_id == null);
-
-  setAllRevisitScore(
-    typeof allRow?.last_review_score === "number" ? allRow.last_review_score : null
-  );
-  setAllAllScore(
-    typeof allRow?.last_all_score === "number" ? allRow.last_all_score : null
-  );
-
-  // ---- GROUP buckets -------------------------------------------------------
-  const mReview = new Map();
-  const mAll = new Map();
-
-  for (const r of gs) {
-    if (r.scope !== "group") continue;
-    const key = r.group_id;
-    if (!key) continue;
-    if (!mReview.has(key) && typeof r.last_review_score === "number") {
-      mReview.set(key, r.last_review_score);
-    }
-    if (!mAll.has(key) && typeof r.last_all_score === "number") {
-      mAll.set(key, r.last_all_score);
-    }
-  }
-
-  setGroupRevisitScores(mReview);
-  setGroupAllScores(mAll);
-  setHydrated(true);
-}
-
-useEffect(() => {
+  useEffect(() => {
     if (!generating) {
       setGenDots(".");
       return;
@@ -572,97 +580,97 @@ useEffect(() => {
   }, [generating]);
 
 
-// Load dashboard aggregates (groups, scores, etc.)
-useEffect(() => {
-  if (ready && user) load();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [ready, user?.id]);
+  // Load dashboard aggregates (groups, scores, etc.)
+  useEffect(() => {
+    if (ready && user) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, user?.id]);
 
-useEffect(() => {
-  if (!ready) setHydrated(false);
-}, [ready]);
+  useEffect(() => {
+    if (!ready) setHydrated(false);
+  }, [ready]);
 
-useEffect(() => {
-  if (!user?.id) {
-    setFilterGroupId("");
-    setHydrated(false);
-  }
-}, [user?.id]);
+  useEffect(() => {
+    if (!user?.id) {
+      setFilterGroupId("");
+      setHydrated(false);
+    }
+  }, [user?.id]);
 
-useEffect(() => {
-  persistLastGroup(filterGroupId || "");
-}, [filterGroupId]);
+  useEffect(() => {
+    persistLastGroup(filterGroupId || "");
+  }, [filterGroupId]);
 
-useEffect(() => {
-  const initial = getInitialGroupFromUrlOrStorage(location.search) || "";
-  setFilterGroupId(initial);
-}, [location.search]);
+  useEffect(() => {
+    const initial = getInitialGroupFromUrlOrStorage(location.search) || "";
+    setFilterGroupId(initial);
+  }, [location.search]);
 
-const fetchGroups = useCallback(async () => {
-  if (!user?.id) {
-    setGroups([]);
-    return;
-  }
-  const { data, error } = await supabase
-    .from("groups")
-    .select("id, name")
-    .eq("user_id", user.id)
-    .order("name", { ascending: true });
-  if (error) {
-    setGroups([]);
-    return;
-  }
-  setGroups(sortGroupsByName(data ?? []));
-}, [user?.id]);
-
-useEffect(() => {
-  fetchGroups();
-}, [fetchGroups]);
-
-// Anonymous trial counters
-useEffect(() => {
-  if (!user?.id) return;
-  (async () => {
-    const anon =
-      !!user &&
-      Array.isArray(user.identities) &&
-      user.identities.some((i) => i?.provider === "anonymous");
-    if (!anon) {
-      setTrial({ isAnon: false, remaining: Infinity, loading: false });
+  const fetchGroups = useCallback(async () => {
+    if (!user?.id) {
+      setGroups([]);
       return;
     }
-    const { count } = await supabase
-      .from("quizzes")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id);
-    setTrial({
-      isAnon: true,
-      remaining: Math.max(0, 2 - (count ?? 0)),
-      loading: false,
+    const { data, error } = await supabase
+      .from("groups")
+      .select("id, name")
+      .eq("user_id", user.id)
+      .order("name", { ascending: true });
+    if (error) {
+      setGroups([]);
+      return;
+    }
+    setGroups(sortGroupsByName(data ?? []));
+  }, [user?.id]);
+
+  useEffect(() => {
+    fetchGroups();
+  }, [fetchGroups]);
+
+  // Anonymous trial counters
+  useEffect(() => {
+    if (!user?.id) return;
+    (async () => {
+      const anon =
+        !!user &&
+        Array.isArray(user.identities) &&
+        user.identities.some((i) => i?.provider === "anonymous");
+      if (!anon) {
+        setTrial({ isAnon: false, remaining: Infinity, loading: false });
+        return;
+      }
+      const { count } = await supabase
+        .from("quizzes")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id);
+      setTrial({
+        isAnon: true,
+        remaining: Math.max(0, 2 - (count ?? 0)),
+        loading: false,
+      });
+    })();
+  }, [user?.id, quizzes.length]);
+
+  function toggleSelected(quizId) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(quizId)) next.delete(quizId);
+      else next.add(quizId);
+      return next;
     });
-  })();
-}, [user?.id, quizzes.length]);
+  }
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
 
-function toggleSelected(quizId) {
-  setSelectedIds((prev) => {
-    const next = new Set(prev);
-    if (next.has(quizId)) next.delete(quizId);
-    else next.add(quizId);
-    return next;
-  });
-}
-function clearSelection() {
-  setSelectedIds(new Set());
-}
-
-function enqueueEmptyGroups(ids) {
-  if (!ids?.length) return;
-  setCleanupQueue((prev) => {
-    const set = new Set(prev);
-    ids.forEach((id) => id && set.add(id));
-    return Array.from(set);
-  });
-}
+  function enqueueEmptyGroups(ids) {
+    if (!ids?.length) return;
+    setCleanupQueue((prev) => {
+      const set = new Set(prev);
+      ids.forEach((id) => id && set.add(id));
+      return Array.from(set);
+    });
+  }
 
   const ensureGroupSelection = useCallback(
     async (selectionId) => {
@@ -899,6 +907,71 @@ function enqueueEmptyGroups(ids) {
     return true;
   }
 
+  async function handleDownloadTranscript() {
+    if (!youtubeUrl || downloadingTranscript) return;
+
+    // Validate URL
+    const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/;
+    if (!ytRegex.test(youtubeUrl)) {
+      alert("Please enter a valid YouTube URL.");
+      return;
+    }
+
+    setDownloadingTranscript(true);
+    try {
+      const { data: sessionRes } = await supabase.auth.getSession();
+      const jwt = sessionRes?.session?.access_token;
+
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/index-source`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+          },
+          body: JSON.stringify({ youtube_url: youtubeUrl, fetch_only: true }),
+        }
+      );
+
+      if (!res.ok) {
+        const errText = await res.text();
+        let msg = errText;
+        if (errText.includes("Transcript is disabled")) {
+          msg = "This video does not have captions/transcripts available.";
+        } else if (errText.includes("No transcript found")) {
+          msg = "No transcript could be found for this video.";
+        }
+        alert(`Failed to download transcript:\n${msg}`);
+        return;
+      }
+
+      const data = await res.json();
+      const transcript = data.transcript;
+
+      if (!transcript) {
+        alert("No transcript content returned.");
+        return;
+      }
+
+      // Create blob and download
+      const blob = new Blob([transcript], { type: "text/plain" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "transcript.txt";
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+    } catch (e) {
+      alert(`Error downloading transcript: ${e.message}`);
+    } finally {
+      setDownloadingTranscript(false);
+    }
+  }
+
   async function generateQuiz() {
     try {
       if (generating) return;
@@ -932,7 +1005,52 @@ function enqueueEmptyGroups(ids) {
       const targetGroupIdForNoRepeat = resolvedGroupId;
 
       let file_id = null;
-      if (gFile) {
+      let sourceType = "document";
+
+      if (youtubeUrl) {
+        // Validate URL
+        const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/;
+        if (!ytRegex.test(youtubeUrl)) {
+          alert("Please enter a valid YouTube URL.");
+          setGenerating(false);
+          return;
+        }
+
+        sourceType = "youtube";
+        const idxRes = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/index-source`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+            },
+            body: JSON.stringify({ youtube_url: youtubeUrl }),
+          }
+        );
+        const idxText = await idxRes.text();
+        if (!idxRes.ok) {
+          let msg = idxText;
+          if (idxText.includes("Transcript is disabled")) {
+            msg = "This video does not have captions/transcripts available. Please try a different video.";
+          } else if (idxText.includes("No transcript found")) {
+            msg = "No transcript could be found for this video. Please try a different video.";
+          }
+          alert(`Failed to index YouTube video:\n${msg}`);
+          setGenerating(false);
+          return;
+        }
+        let idxOut = {};
+        try {
+          idxOut = idxText ? JSON.parse(idxText) : {};
+        } catch { }
+        file_id = idxOut?.file_id ?? null;
+        if (!file_id) {
+          alert("Indexing returned no file_id.");
+          setGenerating(false);
+          return;
+        }
+      } else if (gFile) {
         let rawDoc = "";
         try {
           rawDoc = await extractTextFromFile(gFile);
@@ -964,7 +1082,7 @@ function enqueueEmptyGroups(ids) {
         let idxOut = {};
         try {
           idxOut = idxText ? JSON.parse(idxText) : {};
-        } catch {}
+        } catch { }
         file_id = idxOut?.file_id ?? null;
         if (!file_id) {
           alert("Indexing returned no file_id.");
@@ -1009,24 +1127,25 @@ function enqueueEmptyGroups(ids) {
             "Content-Type": "application/json",
             ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
           },
-            body: JSON.stringify({
-              title: (gTitle || "").trim() || "Bash Top 10",
-              topic:
-                (gTopic || "").trim() ||
-                "Create 10 questions that test the 10 most-used Bash commands.",
-              count,
-              group_id: resolvedGroupId,
-              file_id,
-              no_repeat: !!gNoRepeat,
-              avoid_prompts,
-            }),
-          }
+          body: JSON.stringify({
+            title: (gTitle || "").trim() || "Bash Top 10",
+            topic:
+              (gTopic || "").trim() ||
+              "Create 10 questions that test the 10 most-used Bash commands.",
+            count,
+            group_id: resolvedGroupId,
+            file_id,
+            no_repeat: !!gNoRepeat,
+            avoid_prompts,
+            source_type: sourceType,
+          }),
+        }
       );
 
       let raw = "";
       try {
         raw = await res.text();
-      } catch {}
+      } catch { }
 
       if (!res.ok) {
         if (res.status === 403)
@@ -1248,36 +1367,47 @@ function enqueueEmptyGroups(ids) {
   }, [sortedQuizzes, query]);
 
   // Revisit counts (existing)
-const groupReviewCount = useMemo(() => {
-  if (!normalizedFilterGroupId) return 0;
-  return visibleQuizzes.reduce(
-    (sum, q) => sum + (q?.review_questions?.length ?? 0),
-    0
-  );
-}, [visibleQuizzes, normalizedFilterGroupId]);
+  const groupReviewCount = useMemo(() => {
+    if (!normalizedFilterGroupId) return 0;
+    return visibleQuizzes.reduce(
+      (sum, q) => sum + (q?.review_questions?.length ?? 0),
+      0
+    );
+  }, [visibleQuizzes, normalizedFilterGroupId]);
 
-const allReviewCount = useMemo(() => {
-  if (normalizedFilterGroupId) return 0;
-  return visibleQuizzes.reduce(
-    (sum, q) => sum + (q?.review_questions?.length ?? 0),
-    0
-  );
-}, [visibleQuizzes, normalizedFilterGroupId]);
+  const allReviewCount = useMemo(() => {
+    if (normalizedFilterGroupId) return 0;
+    return visibleQuizzes.reduce(
+      (sum, q) => sum + (q?.review_questions?.length ?? 0),
+      0
+    );
+  }, [visibleQuizzes, normalizedFilterGroupId]);
 
-// NEW: All-Questions counts (any question, not just Revisit)
-const groupAllCount = useMemo(() => {
-  if (!normalizedFilterGroupId) return 0;
-  return visibleQuizzes.reduce((sum, q) => sum + (q?.questions?.length ?? 0), 0);
-}, [visibleQuizzes, normalizedFilterGroupId]);
+  // NEW: All-Questions counts (any question, not just Revisit)
+  const groupAllCount = useMemo(() => {
+    if (!normalizedFilterGroupId) return 0;
+    return visibleQuizzes.reduce((sum, q) => sum + (q?.questions?.length ?? 0), 0);
+  }, [visibleQuizzes, normalizedFilterGroupId]);
 
-const allAllCount = useMemo(() => {
-  if (normalizedFilterGroupId) return 0;
-  return visibleQuizzes.reduce((sum, q) => sum + (q?.questions?.length ?? 0), 0);
-}, [visibleQuizzes, normalizedFilterGroupId]);
+  const allAllCount = useMemo(() => {
+    if (normalizedFilterGroupId) return 0;
+    return visibleQuizzes.reduce((sum, q) => sum + (q?.questions?.length ?? 0), 0);
+  }, [visibleQuizzes, normalizedFilterGroupId]);
 
 
-useEffect(() => {
-  dbg("COUNTS", {
+  useEffect(() => {
+    dbg("COUNTS", {
+      filterGroupId,
+      groupReviewCount,
+      allReviewCount,
+      groupAllCount,
+      allAllCount,
+      allRevisitScore,
+      allAllScore,
+      groupRevisitForCurrent: currentGroup ? groupRevisitScores.get(currentGroup.id) : null,
+      groupAllForCurrent: currentGroup ? groupAllScores.get(currentGroup.id) : null,
+    });
+  }, [
     filterGroupId,
     groupReviewCount,
     allReviewCount,
@@ -1285,21 +1415,10 @@ useEffect(() => {
     allAllCount,
     allRevisitScore,
     allAllScore,
-    groupRevisitForCurrent: currentGroup ? groupRevisitScores.get(currentGroup.id) : null,
-    groupAllForCurrent: currentGroup ? groupAllScores.get(currentGroup.id) : null,
-  });
-}, [
-  filterGroupId,
-  groupReviewCount,
-  allReviewCount,
-  groupAllCount,
-  allAllCount,
-  allRevisitScore,
-  allAllScore,
-  currentGroup,
-  groupRevisitScores,
-  groupAllScores,
-]);
+    currentGroup,
+    groupRevisitScores,
+    groupAllScores,
+  ]);
 
   const hasAnyQuizzes = (quizzes?.length ?? 0) > 0;
   const isFirstQuizState = !hasAnyQuizzes;
@@ -1346,9 +1465,13 @@ useEffect(() => {
   }
 
   /* ---------------------------------- UI ---------------------------------- */
+  if (!hydrated) {
+    return <SigningInOverlay />;
+  }
+
   return (
     <div className="min-h-screen text-slate-100 overflow-x-hidden pb-16">
-      <header className="sticky top-0 z-40 border-b border-white/5 bg-slate-950/80 backdrop-blur-md">
+      <header className="sticky top-0 z-40 border-b border-white/5 bg-slate-950/95">
         <div className="max-w-6xl mx-auto flex flex-wrap items-end justify-between gap-4 px-6 py-4 sm:items-center">
           <div className="flex flex-col items-start gap-2 pl-2 sm:flex-row sm:items-center sm:gap-3 sm:pl-0 flex-none">
             <img
@@ -1414,141 +1537,194 @@ useEffect(() => {
 
       <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-0 py-8 space-y-6">
         {/* ---- MOBILE actions ---- */}
-{hasAnyQuizzes && (
-<div className="sm:hidden surface-card p-4 space-y-4">
-  <div className="flex flex-col gap-2">
-            <button
-  onClick={async () => {
-    if (isFirstQuizState) return;
-    const allowed = await ensureCanCreate();
-    if (!allowed) return;
+        {hasAnyQuizzes && (
+          <div className="sm:hidden surface-card p-4 space-y-4">
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={async () => {
+                  if (isFirstQuizState) return;
+                  const allowed = await ensureCanCreate();
+                  if (!allowed) return;
 
-    // 🔧 Prefer the current filter, otherwise fall back to the default group
-    setGGroupId(noGroupOptionValue);
+                  // 🔧 Prefer the current filter, otherwise fall back to the default group
+                  setGGroupId(noGroupOptionValue);
 
-    setGenOpen(true);
-  }}
-  disabled={isFirstQuizState}
-                className={`${btnBase} ${btnGreen} justify-center text-sm h-12 ${
-                  isFirstQuizState ? "opacity-50 cursor-not-allowed" : ""
-                }`}
+                  setGenOpen(true);
+                }}
+                disabled={isFirstQuizState}
+                className={`${btnBase} ${btnGreen} justify-center text-sm h-12 ${isFirstQuizState ? "opacity-50 cursor-not-allowed" : ""
+                  }`}
               >
                 + Generate quiz with AI
               </button>
 
 
-    <button
-      onClick={createQuiz}
-              className={`${btnBase} ${btnGray} justify-center text-sm h-12`}
-              disabled={creating}
-            >
-              {creating ? "Creating…" : "New empty quiz"}
-            </button>
-  </div>
+              <button
+                onClick={createQuiz}
+                className={`${btnBase} ${btnGray} justify-center text-sm h-12`}
+                disabled={creating}
+              >
+                {creating ? "Creating…" : "New empty quiz"}
+              </button>
+            </div>
 
-  <div className="space-y-3">
-    <div className="space-y-1">
-      <label className="text-xs uppercase tracking-wide text-white/60">
-        Filter by group
-      </label>
-      <select
-        className="w-full h-12 custom-select"
-        value={normalizedFilterGroupId}
-        onChange={(e) => setFilterGroupId(e.target.value)}
-      >
-        <option value="">All</option>
-        {orderedGroups.map((g) => (
-          <option key={g.id} value={g.id}>
-            {g.name}
-          </option>
-        ))}
-      </select>
-    </div>
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-xs uppercase tracking-wide text-white/60">
+                  Filter by group
+                </label>
+                <select
+                  className="w-full h-12 custom-select"
+                  value={normalizedFilterGroupId}
+                  onChange={(e) => setFilterGroupId(e.target.value)}
+                >
+                  <option value="">All</option>
+                  {orderedGroups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-    <div className="space-y-1">
-      <label className="text-xs uppercase tracking-wide text-white/60">
-        Search
-      </label>
-      <input
-        className="w-full h-12"
-        placeholder="Search quizzes…"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-      />
-    </div>
+              <div className="space-y-1">
+                <label className="text-xs uppercase tracking-wide text-white/60">
+                  Search
+                </label>
+                <input
+                  className="w-full h-12"
+                  placeholder="Search quizzes…"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                />
+              </div>
 
-    {hasSelected && (
-      <div className="flex flex-col gap-2 pt-2">
-        <button onClick={() => setMoveOpen(true)} className={`${btnBase} ${btnGray}`}>
-          Move to group
-        </button>
-        <button onClick={() => setBulkConfirmOpen(true)} className={`${btnBase} ${btnRed}`}>
-          Delete selected
-        </button>
-      </div>
-    )}
-  </div>
-</div>
-)}
+              {hasSelected && (
+                <div className="flex flex-col gap-2 pt-2">
+                  <button onClick={() => setMoveOpen(true)} className={`${btnBase} ${btnGray}`}>
+                    Move to group
+                  </button>
+                  <button onClick={() => setBulkConfirmOpen(true)} className={`${btnBase} ${btnRed}`}>
+                    Delete selected
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* ---- DESKTOP/TABLET actions ---- */}
         {hasAnyQuizzes && (
-        <div className="hidden sm:flex items-center gap-8 surface-card px-5 py-7 w-full max-w-5xl mx-auto">
-          <div className="flex gap-3 flex-none items-center">
-            <button
-  onClick={async () => {
-    if (isFirstQuizState) return;
-    const allowed = await ensureCanCreate();
-    if (!allowed) return;
+          <div className="hidden sm:flex items-center gap-8 surface-card px-5 py-7 w-full max-w-5xl mx-auto">
+            <div className="flex gap-3 flex-none items-center">
+              <button
+                onClick={async () => {
+                  if (isFirstQuizState) return;
+                  const allowed = await ensureCanCreate();
+                  if (!allowed) return;
 
-    // 🔧 Sync generator target with current filter (fallback to default)
-    setGGroupId(noGroupOptionValue);
+                  // 🔧 Sync generator target with current filter (fallback to default)
+                  setGGroupId(noGroupOptionValue);
 
-    setGenOpen(true);
-  }}
-  disabled={isFirstQuizState}
-  className={`${btnBase} ${btnGreen} ${actionH} ${
-    isFirstQuizState ? "opacity-50 cursor-not-allowed" : ""
-  }`}
->
-  + Generate quiz with AI
-</button>
-            <button
-              onClick={createQuiz}
-              className={`${btnBase} ${btnGray} ${actionH}`}
-              disabled={creating}
-            >
-              {creating ? "Creating…" : "New empty quiz"}
-            </button>
-          </div>
+                  setGenOpen(true);
+                }}
+                disabled={isFirstQuizState}
+                className={`${btnBase} ${btnGreen} ${actionH} ${isFirstQuizState ? "opacity-50 cursor-not-allowed" : ""
+                  }`}
+              >
+                + Generate quiz with AI
+              </button>
+              <button
+                onClick={createQuiz}
+                className={`${btnBase} ${btnGray} ${actionH}`}
+                disabled={creating}
+              >
+                {creating ? "Creating…" : "New empty quiz"}
+              </button>
+            </div>
 
-          <div className="flex flex-1 justify-center">
-            <div
-              className={`flex flex-1 flex-wrap items-start justify-between gap-4 w-full ${
-                hasSelected ? "max-w-[50rem] ml-8 mr-4" : "max-w-[46rem]"
-              }`}
-            >
-              {hasSelected ? (
-              <>
-                <div className="flex-1 min-w-[260px] max-w-lg">
-                  <label
-                    htmlFor="desktop-search"
-                    className="block text-xs uppercase tracking-wide text-white/60 mb-1"
-                  >
-                    Search
-                  </label>
-                  <input
-                    id="desktop-search"
-                    className="w-full h-12"
-                    placeholder="Search quizzes…"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                  />
-                  <div className="mt-4 flex items-center gap-4">
-                    <div className="w-56">
+            <div className="flex flex-1 justify-center">
+              <div
+                className={`flex flex-1 flex-wrap items-start justify-between gap-4 w-full ${hasSelected ? "max-w-[50rem] ml-8 mr-4" : "max-w-[46rem]"
+                  }`}
+              >
+                {hasSelected ? (
+                  <>
+                    <div className="flex-1 min-w-[260px] max-w-lg">
+                      <label
+                        htmlFor="desktop-search"
+                        className="block text-xs uppercase tracking-wide text-white/60 mb-1"
+                      >
+                        Search
+                      </label>
+                      <input
+                        id="desktop-search"
+                        className="w-full h-12"
+                        placeholder="Search quizzes…"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                      />
+                      <div className="mt-4 flex items-center gap-4">
+                        <div className="w-56">
+                          <label
+                            htmlFor="desktop-filter"
+                            className="block text-xs uppercase tracking-wide text-white/60 mb-1"
+                          >
+                            Filter by group
+                          </label>
+                          <select
+                            id="desktop-filter"
+                            className="w-full h-12 custom-select"
+                            value={normalizedFilterGroupId}
+                            onChange={(e) => setFilterGroupId(e.target.value)}
+                          >
+                            <option value="">All</option>
+                            {orderedGroups.map((g) => (
+                              <option key={g.id} value={g.id}>
+                                {g.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="flex items-center gap-2 flex-none self-end">
+                          <button
+                            onClick={() => setMoveOpen(true)}
+                            className={`${btnBase} ${btnGray} ${actionH}`}
+                          >
+                            Move to group
+                          </button>
+                          <button
+                            onClick={() => setBulkConfirmOpen(true)}
+                            className={`${btnBase} ${btnRed} ${actionH}`}
+                          >
+                            Delete selected
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex-1 min-w-[220px] max-w-sm relative">
+                      <label
+                        htmlFor="desktop-search"
+                        className="absolute left-0 -top-6 text-xs uppercase tracking-wide text-white/60"
+                      >
+                        Search
+                      </label>
+                      <input
+                        id="desktop-search"
+                        className="w-full h-12"
+                        placeholder="Search quizzes…"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="w-56 flex-none relative">
                       <label
                         htmlFor="desktop-filter"
-                        className="block text-xs uppercase tracking-wide text-white/60 mb-1"
+                        className="absolute left-0 -top-6 text-xs uppercase tracking-wide text-white/60"
                       >
                         Filter by group
                       </label>
@@ -1566,70 +1742,14 @@ useEffect(() => {
                         ))}
                       </select>
                     </div>
-                    <div className="flex items-center gap-2 flex-none self-end">
-                      <button
-                        onClick={() => setMoveOpen(true)}
-                        className={`${btnBase} ${btnGray} ${actionH}`}
-                      >
-                        Move to group
-                      </button>
-                      <button
-                        onClick={() => setBulkConfirmOpen(true)}
-                        className={`${btnBase} ${btnRed} ${actionH}`}
-                      >
-                        Delete selected
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="flex-1 min-w-[220px] max-w-sm relative">
-                  <label
-                    htmlFor="desktop-search"
-                    className="absolute left-0 -top-6 text-xs uppercase tracking-wide text-white/60"
-                  >
-                    Search
-                  </label>
-                  <input
-                    id="desktop-search"
-                    className="w-full h-12"
-                    placeholder="Search quizzes…"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                  />
-                </div>
-
-                <div className="w-56 flex-none relative">
-                  <label
-                    htmlFor="desktop-filter"
-                    className="absolute left-0 -top-6 text-xs uppercase tracking-wide text-white/60"
-                  >
-                    Filter by group
-                  </label>
-                  <select
-                    id="desktop-filter"
-                    className="w-full h-12 custom-select"
-                    value={normalizedFilterGroupId}
-                    onChange={(e) => setFilterGroupId(e.target.value)}
-                  >
-                    <option value="">All</option>
-                    {orderedGroups.map((g) => (
-                      <option key={g.id} value={g.id}>
-                        {g.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </>
-            )}
+                  </>
+                )}
+              </div>
             </div>
           </div>
-        </div>
         )}
 
-                {/* ----------------------- QUIZ LIST / CAROUSEL ---------------------- */}
+        {/* ----------------------- QUIZ LIST / CAROUSEL ---------------------- */}
         {!hasVisibleQuizzes ? (
           hasAnyQuizzes ? (
             <div className="mt-4 surface-card max-w-3xl mx-auto p-6 text-center text-white/70">
@@ -1637,188 +1757,228 @@ useEffect(() => {
             </div>
           ) : (
             <>
-          {/* Inline “Generate with AI” panel for brand-new users */}
-          <section className="mt-4 max-w-3xl mx-auto surface-card p-5 sm:p-6 space-y-4">
-            <h2 className="text-xl sm:text-2xl font-semibold mb-2">
-              Generate a quiz with AI
-            </h2>
-            <p className="text-sm text-white/70 mb-4">
-              Use this form to instantly create your first AI quiz.
-            </p>
+              {/* Inline “Generate with AI” panel for brand-new users */}
+              <section className="mt-4 max-w-3xl mx-auto surface-card p-5 sm:p-6 space-y-4">
+                <h2 className="text-xl sm:text-2xl font-semibold mb-2">
+                  Generate a quiz with AI
+                </h2>
+                <p className="text-sm text-white/70 mb-4">
+                  Use this form to instantly create your first AI quiz.
+                </p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="sm:col-span-2">
-                <label
-                  className="block text-sm text-white/70 mb-1"
-                  htmlFor="inline-gen-title"
-                >
-                  Name
-                </label>
-                <input
-                  id="inline-gen-title"
-                  className="field w-full placeholder:text-slate-500"
-                  placeholder="Bash Top 10"
-                  value={gTitle}
-                  onChange={(e) => setGTitle(e.target.value)}
-                  disabled={generating}
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <label
-                  className="block text-sm text-white/70 mb-1"
-                  htmlFor="inline-gen-topic"
-                >
-                  Prompt
-                </label>
-                <textarea
-                  id="inline-gen-topic"
-                  className="field-textarea w-full min-h-[8rem] resize-y placeholder:text-slate-500"
-                  placeholder="Create 10 questions that test the 10 most-used Bash commands."
-                  value={gTopic}
-                  onChange={(e) => setGTopic(e.target.value)}
-                  disabled={generating}
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="inline-flex items-center gap-2 text-sm text-white/80">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4"
-                    checked={gNoRepeat}
-                    onChange={(e) => setGNoRepeat(e.target.checked)}
-                    disabled={generating}
-                  />
-                  <span>Do not repeat previous questions</span>
-                </label>
-              </div>
-
-              <div className="sm:col-span-2">
-                <label
-                  className="block text-sm text-white/70 mb-1"
-                  htmlFor="inline-gen-file"
-                >
-                  Optional document to use as source (PDF / TXT / MD)
-                </label>
-                <div className="w-full sm:w-1/2">
-                  <input
-                    id="inline-gen-file"
-                    type="file"
-                    accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
-                    className="w-full"
-                    onChange={(e) => setGFile(e.target.files?.[0] ?? null)}
-                    disabled={generating}
-                  />
-                </div>
-                {gFile && (
-                  <div className="mt-1 text-xs text-white/60">
-                    Selected: {gFile.name}{" "}
-                    <button
-                      type="button"
-                      className="underline"
-                      onClick={() => setGFile(null)}
-                      disabled={generating}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                )}
-              </div>
-
-                <div className="sm:col-span-2">
-                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-                  <div className="w-full sm:flex-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="sm:col-span-2">
                     <label
                       className="block text-sm text-white/70 mb-1"
-                      htmlFor="inline-gen-group"
+                      htmlFor="inline-gen-title"
                     >
-                      Add to group
-                    </label>
-                    <select
-                      id="inline-gen-group"
-                      className="field w-full h-12"
-                      value={gGroupId}
-                      onChange={(e) => setGGroupId(e.target.value)}
-                      disabled={generating}
-                    >
-                      <option value={noGroupOptionValue}>{NO_GROUP_LABEL}</option>
-                      {selectableGroupOptions.map((g) => (
-                        <option key={g.id} value={g.id}>
-                          {g.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <button
-                    type="button"
-                    className={`${btnBase} ${btnGray} h-12 px-6`}
-                    onClick={() => {
-                      setGNewName("");
-                      setGNewOpen(true);
-                    }}
-                    disabled={generating}
-                  >
-                    New group +
-                  </button>
-
-                  <div className="w-full sm:w-28">
-                    <label
-                      className="block text-sm text-white/70 mb-1"
-                      htmlFor="inline-gen-count"
-                    >
-                      # of questions
+                      Name
                     </label>
                     <input
-                      id="inline-gen-count"
-                      className="field w-full h-12 text-center"
-                      type="number"
-                      min={1}
-                      max={30}
-                      value={gCount}
-                      onChange={(e) =>
-                        setGCount(Number(e.target.value) || 10)
-                      }
+                      id="inline-gen-title"
+                      className="field w-full placeholder:text-slate-500"
+                      placeholder="Bash Top 10"
+                      value={gTitle}
+                      onChange={(e) => setGTitle(e.target.value)}
                       disabled={generating}
                     />
                   </div>
 
-                  <button
-                    className={`${btnBase} ${btnGreen} h-12 px-6 sm:ml-auto`}
-                    onClick={generateQuiz}
-                    disabled={generating}
-                  >
-                    {generating ? "Generating…" : "Generate"}
-                  </button>
+                  <div className="sm:col-span-2">
+                    <label
+                      className="block text-sm text-white/70 mb-1"
+                      htmlFor="inline-gen-topic"
+                    >
+                      Prompt
+                    </label>
+                    <textarea
+                      id="inline-gen-topic"
+                      className="field-textarea w-full min-h-[8rem] resize-y placeholder:text-slate-500"
+                      placeholder="Create 10 questions that test the 10 most-used Bash commands."
+                      value={gTopic}
+                      onChange={(e) => setGTopic(e.target.value)}
+                      disabled={generating}
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="inline-flex items-center gap-2 text-sm text-white/80">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={gNoRepeat}
+                        onChange={(e) => setGNoRepeat(e.target.checked)}
+                        disabled={generating}
+                      />
+                      <span>Do not repeat previous questions</span>
+                    </label>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label
+                      className="block text-sm text-white/70 mb-1"
+                      htmlFor="inline-gen-file"
+                    >
+                      Optional document to use as source (PDF / TXT / MD)
+                    </label>
+                    <div className="w-full sm:w-1/2">
+                      <input
+                        id="inline-gen-file"
+                        type="file"
+                        accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+                        className="w-full"
+                        onChange={(e) => {
+                          setGFile(e.target.files?.[0] ?? null);
+                          if (e.target.files?.[0]) setYoutubeUrl("");
+                        }}
+                        disabled={generating || !!youtubeUrl}
+                      />
+                    </div>
+                    {gFile && (
+                      <div className="mt-1 text-xs text-white/60">
+                        Selected: {gFile.name}{" "}
+                        <button
+                          type="button"
+                          className="underline"
+                          onClick={() => setGFile(null)}
+                          disabled={generating}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label
+                      className="block text-sm text-white/70 mb-1"
+                      htmlFor="inline-gen-youtube"
+                    >
+                      Or YouTube Video URL
+                    </label>
+                    <div className="flex gap-2 items-center">
+                      <input
+                        id="inline-gen-youtube"
+                        className="field flex-1 placeholder:text-slate-500"
+                        placeholder="https://www.youtube.com/watch?v=..."
+                        value={youtubeUrl}
+                        onChange={(e) => {
+                          setYoutubeUrl(e.target.value);
+                          if (e.target.value) setGFile(null);
+                        }}
+                        disabled={generating || !!gFile}
+                      />
+                      {youtubeUrl && (
+                        <button
+                          type="button"
+                          onClick={handleDownloadTranscript}
+                          disabled={downloadingTranscript || generating}
+                          className="h-10 px-3 rounded-lg bg-white/10 hover:bg-white/20 text-white/90 transition-colors flex items-center justify-center"
+                          title="Download Transcript"
+                        >
+                          {downloadingTranscript ? (
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                          ) : (
+                            <Download className="w-5 h-5" />
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+                      <div className="w-full sm:flex-1">
+                        <label
+                          className="block text-sm text-white/70 mb-1"
+                          htmlFor="inline-gen-group"
+                        >
+                          Add to group
+                        </label>
+                        <select
+                          id="inline-gen-group"
+                          className="field w-full h-12"
+                          value={gGroupId}
+                          onChange={(e) => setGGroupId(e.target.value)}
+                          disabled={generating}
+                        >
+                          <option value={noGroupOptionValue}>{NO_GROUP_LABEL}</option>
+                          {selectableGroupOptions.map((g) => (
+                            <option key={g.id} value={g.id}>
+                              {g.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <button
+                        type="button"
+                        className={`${btnBase} ${btnGray} h-12 px-6`}
+                        onClick={() => {
+                          setGNewName("");
+                          setGNewOpen(true);
+                        }}
+                        disabled={generating}
+                      >
+                        New group +
+                      </button>
+
+                      <div className="w-full sm:w-28">
+                        <label
+                          className="block text-sm text-white/70 mb-1"
+                          htmlFor="inline-gen-count"
+                        >
+                          # of questions
+                        </label>
+                        <input
+                          id="inline-gen-count"
+                          className="field w-full h-12 text-center"
+                          type="number"
+                          min={1}
+                          max={30}
+                          value={gCount}
+                          onChange={(e) =>
+                            setGCount(Number(e.target.value) || 10)
+                          }
+                          disabled={generating}
+                        />
+                      </div>
+
+                      <button
+                        className={`${btnBase} ${btnGreen} h-12 px-6 sm:ml-auto`}
+                        onClick={generateQuiz}
+                        disabled={generating}
+                      >
+                        {generating ? "Generating…" : "Generate"}
+                      </button>
+                    </div>
+                  </div>
                 </div>
+
+              </section>
+              <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3 max-w-3xl mx-auto px-5 sm:px-0">
+                <p className="text-white/70 text-sm">
+                  Want to create a quiz from scratch without AI?
+                </p>
+                <button
+                  className={`${btnBase} ${btnGray} w-full sm:w-auto`}
+                  onClick={createQuiz}
+                  disabled={creating}
+                >
+                  {creating ? "Creating…" : "New Blank Quiz"}
+                </button>
               </div>
-            </div>
-            
-          </section>
-          <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3 max-w-3xl mx-auto px-5 sm:px-0">
-            <p className="text-white/70 text-sm">
-              Want to create a quiz from scratch without AI?
-            </p>
-            <button
-              className={`${btnBase} ${btnGray} w-full sm:w-auto`}
-              onClick={createQuiz}
-              disabled={creating}
-            >
-              {creating ? "Creating…" : "New Blank Quiz"}
-            </button>
-          </div>
-          </>
+            </>
           )
         ) : (
           <>
             {/* --- MOBILE vertical list --- */}
             <div className="sm:hidden">
               <div className="relative">
-                 <div
-      className="w-full pt-2 max-h-[72vh] overflow-y-auto overscroll-auto"
-      aria-label="Your quizzes (scrollable list)"
-    >
+                <div
+                  className="w-full pt-2 max-h-[72vh] overflow-y-auto overscroll-auto"
+                  aria-label="Your quizzes (scrollable list)"
+                >
                   <ul className="grid grid-cols-1 gap-3">
                     {visibleQuizzes.map((q) => {
                       const score = scoresByQuiz[q.id];
@@ -1828,10 +1988,10 @@ useEffect(() => {
                       return (
                         <li
                           key={q.id}
-                          className="w-full max-w-[620px] surface-panel p-6 flex flex-col overflow-visible h-[380px]"
+                          className="w-full max-w-[620px] surface-panel p-6 flex flex-col overflow-visible min-h-[380px] h-auto"
                         >
                           {/* Top: meta + preview */}
-                          <div className="flex-1 grid grid-cols-1 gap-3 min-h-0 overflow-hidden">
+                          <div className="flex-1 grid grid-cols-1 gap-3 min-h-0 overflow-visible">
                             {/* LEFT: title + meta */}
                             <div className="min-w-0">
                               <div className="flex items-start gap-3 pl-1">
@@ -1842,82 +2002,95 @@ useEffect(() => {
                                   onChange={() => toggleSelected(q.id)}
                                   aria-label={`Select ${q.title || "Untitled Quiz"}`}
                                 />
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-start justify-between gap-3">
-                                  <div className="min-w-0">
-                                    <div
-                                      className="text-xl font-semibold leading-tight break-words"
-                                      title={q.title || "Untitled Quiz"}
-                                    >
-                                      {q.title || "Untitled Quiz"}
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <div
+                                        className="text-xl font-semibold leading-tight break-words"
+                                        title={q.title || "Untitled Quiz"}
+                                      >
+                                        {q.title || "Untitled Quiz"}
+                                      </div>
+
+                                      <div className="mt-2 text-xs text-white/70 space-y-0.5">
+                                        <div>{q.questions?.length ?? 0} questions</div>
+                                        <div>
+                                          Last score:{" "}
+                                          {score?.last != null ? (
+                                            <span
+                                              className={
+                                                score.last >= 90
+                                                  ? "text-green-400 font-semibold"
+                                                  : ""
+                                              }
+                                            >
+                                              {score.last}%
+                                            </span>
+                                          ) : (
+                                            "—"
+                                          )}
+                                        </div>
+                                        <div>
+                                          Revisit score:{" "}
+                                          {score?.review != null ? (
+                                            <span
+                                              className={
+                                                score.review >= 90
+                                                  ? "text-green-400 font-semibold"
+                                                  : ""
+                                              }
+                                            >
+                                              {score.review}%
+                                            </span>
+                                          ) : (
+                                            "—"
+                                          )}
+                                        </div>
+                                      </div>
                                     </div>
 
-                                    <div className="mt-2 text-xs text-white/70 space-y-0.5">
-                                      <div>{q.questions?.length ?? 0} questions</div>
-                                      <div>
-                                        Last score:{" "}
-                                        {score?.last != null ? (
-                                          <span
-                                            className={
-                                              score.last >= 90
-                                                ? "text-green-400 font-semibold"
-                                                : ""
-                                            }
-                                          >
-                                            {score.last}%
-                                          </span>
-                                        ) : (
-                                          "—"
-                                        )}
-                                      </div>
-                                      <div>
-                                        Revisit score:{" "}
-                                        {score?.review != null ? (
-                                          <span
-                                            className={
-                                              score.review >= 90
-                                                ? "text-green-400 font-semibold"
-                                                : ""
-                                            }
-                                          >
-                                            {score.review}%
-                                          </span>
-                                        ) : (
-                                          "—"
-                                        )}
-                                      </div>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      <button
+                                        onClick={() => toggleMenu(q.id)}
+                                        className={`${btnBase} ${btnGray} h-11 w-11 sm:h-12 sm:w-12 p-0 flex items-center justify-center shrink-0 ${expandedMenuId === q.id ? "bg-white/20" : ""}`}
+                                        aria-label="Toggle options"
+                                        title="More options"
+                                      >
+                                        <PanelRight className="h-5 w-5 sm:h-6 sm:w-6" />
+                                      </button>
                                     </div>
-                                  </div>
-
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    <Link
-                                      to={`/scores/${q.id}`}
-                                      className={`${btnBase} ${btnGray} h-11 w-11 sm:h-12 sm:w-12 p-0 flex items-center justify-center shrink-0`}
-                                      aria-label="View quiz scores"
-                                      title="Scores"
-                                    >
-                                      <img
-                                        src="/icons/scoreboard.svg"
-                                        alt=""
-                                        className="h-5 w-5 sm:h-6 sm:w-6"
-                                        aria-hidden="true"
-                                      />
-                                    </Link>
-                                    <button
-                                      onClick={() => handleShareQuiz(q.id, q.title || "Untitled Quiz")}
-                                      className={`${btnBase} ${btnGray} h-11 w-11 sm:h-12 sm:w-12 p-0 flex items-center justify-center shrink-0`}
-                                      aria-label="Copy share link"
-                                      title="Copy share link"
-                                    >
-                                      <Mail className="h-5 w-5 sm:h-6 sm:w-6" />
-                                    </button>
                                   </div>
                                 </div>
                               </div>
                             </div>
-                          </div>
 
-                          {/* RIGHT: Questions preview */}
+                            {/* Collapsible Menu */}
+                            <div
+                              className={`overflow-hidden transition-all duration-300 ease-in-out ${expandedMenuId === q.id ? "max-h-40 opacity-100 mb-3" : "max-h-0 opacity-0"}`}
+                            >
+                              <div className="bg-white/5 rounded-xl p-2 space-y-1">
+                                <button
+                                  onClick={() => handleShareQuiz(q.id, q.title || "Untitled Quiz")}
+                                  className="w-full text-left px-4 py-3 rounded-lg hover:bg-white/10 text-sm font-medium flex items-center gap-3 transition-colors"
+                                >
+                                  <div className="w-5 flex justify-center shrink-0">
+                                    <Mail className="h-4 w-4 text-white/70" />
+                                  </div>
+                                  Copy link to share
+                                </button>
+                                <Link
+                                  to={`/scores/${q.id}`}
+                                  className="w-full text-left px-4 py-3 rounded-lg hover:bg-white/10 text-sm font-medium flex items-center gap-3 transition-colors"
+                                >
+                                  <div className="w-5 flex justify-center shrink-0">
+                                    <img src="/icons/scoreboard.svg" alt="" className="h-[18px] w-[18px] opacity-70" />
+                                  </div>
+                                  View scoreboard
+                                </Link>
+                              </div>
+                            </div>
+
+                            {/* RIGHT: Questions preview */}
                             <div className="relative bg-white/5 border border-white/5 rounded-2xl p-3 overflow-hidden">
                               <ol className="text-[13px] leading-5 list-decimal pl-5 pr-3 pb-7 space-y-1.5 max-h-[160px] overflow-hidden">
                                 {(Array.isArray(q.questions) ? q.questions : []).map(
@@ -1940,59 +2113,58 @@ useEffect(() => {
                           </div>
 
                           {/* Bottom actions */}
-<div className="mt-3 grid grid-cols-4 gap-2">
-  <Link
-    to={`/play/${q.id}`}
-    className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
-    aria-label="Play quiz"
-    title="Play"
-  >
-    <Play className="h-5 w-5" />
-  </Link>
+                          <div className="mt-3 grid grid-cols-4 gap-2">
+                            <Link
+                              to={`/play/${q.id}`}
+                              className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
+                              aria-label="Play quiz"
+                              title="Play"
+                            >
+                              <Play className="h-5 w-5" />
+                            </Link>
 
-  <Link
-    to={reviewDisabled ? "#" : `/play/${q.id}?mode=review`}
-    onClick={(e) => {
-      if (reviewDisabled) e.preventDefault();
-    }}
-    className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center ${
-      reviewDisabled ? "opacity-50 cursor-not-allowed" : ""
-    }`}
-    aria-label={
-      reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"
-    }
-    title={
-      reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"
-    }
-  >
-    <History className="h-5 w-5" />
-  </Link>
+                            <Link
+                              to={reviewDisabled ? "#" : `/play/${q.id}?mode=review`}
+                              onClick={(e) => {
+                                if (reviewDisabled) e.preventDefault();
+                              }}
+                              className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center ${reviewDisabled ? "opacity-50 cursor-not-allowed" : ""
+                                }`}
+                              aria-label={
+                                reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"
+                              }
+                              title={
+                                reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"
+                              }
+                            >
+                              <History className="h-5 w-5" />
+                            </Link>
 
-  <Link
-    to={`/edit/${q.id}`}
-    className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
-    aria-label="Edit quiz"
-    title="Edit"
-  >
-    <SquarePen className="h-5 w-5" />
-  </Link>
+                            <Link
+                              to={`/edit/${q.id}`}
+                              className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
+                              aria-label="Edit quiz"
+                              title="Edit"
+                            >
+                              <SquarePen className="h-5 w-5" />
+                            </Link>
 
-  <button
-    onClick={() => {
-      setTarget({
-        id: q.id,
-        title: q.title || "Untitled Quiz",
-        group_id: q.group_id ?? null,
-      });
-      setConfirmOpen(true);
-    }}
-    className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
-    aria-label="Delete quiz"
-    title="Delete"
-  >
-    <Trash2 className="h-5 w-5" />
-  </button>
-</div>
+                            <button
+                              onClick={() => {
+                                setTarget({
+                                  id: q.id,
+                                  title: q.title || "Untitled Quiz",
+                                  group_id: q.group_id ?? null,
+                                });
+                                setConfirmOpen(true);
+                              }}
+                              className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
+                              aria-label="Delete quiz"
+                              title="Delete"
+                            >
+                              <Trash2 className="h-5 w-5" />
+                            </button>
+                          </div>
                         </li>
                       );
                     })}
@@ -2047,18 +2219,18 @@ useEffect(() => {
                         {/* Top content */}
                         <div className="flex-1 grid grid-cols-2 gap-4 min-h-0 overflow-hidden">
                           {/* LEFT: title + meta */}
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-start gap-3 pl-1">
-                                  <input
-                                    type="checkbox"
-                                    className="h-6 w-6 accent-emerald-500 mt-1 shrink-0"
-                                    checked={selectedIds.has(q.id)}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-start gap-3 pl-1">
+                              <input
+                                type="checkbox"
+                                className="h-6 w-6 accent-emerald-500 mt-1 shrink-0"
+                                checked={selectedIds.has(q.id)}
                                 onChange={() => toggleSelected(q.id)}
                                 aria-label={`Select ${q.title || "Untitled Quiz"}`}
                               />
                               <div className="min-w-0">
                                 <div
-                                  className="text-2xl font-semibold leading-tight break-words"
+                                  className="text-2xl font-semibold leading-tight break-words line-clamp-2 h-[3.8rem] overflow-hidden"
                                   title={q.title || "Untitled Quiz"}
                                 >
                                   {q.title || "Untitled Quiz"}
@@ -2100,27 +2272,40 @@ useEffect(() => {
                                   </div>
                                 </div>
                                 <div className="mt-5 flex items-center gap-3">
-                                  <Link
-                                    to={`/scores/${q.id}`}
-                                    className={`${btnBase} ${btnGray} h-12 w-12 sm:h-14 sm:w-14 p-0 flex items-center justify-center`}
-                                    aria-label="View quiz scores"
-                                    title="Scores"
-                                  >
-                                    <img
-                                      src="/icons/scoreboard.svg"
-                                      alt=""
-                                      className="h-5 w-5 sm:h-6 sm:w-6"
-                                      aria-hidden="true"
-                                    />
-                                  </Link>
                                   <button
-                                    onClick={() => handleShareQuiz(q.id, q.title || "Untitled Quiz")}
-                                    className={`${btnBase} ${btnGray} h-12 w-12 sm:h-14 sm:w-14 p-0 flex items-center justify-center`}
-                                    aria-label="Copy share link"
-                                    title="Copy share link"
+                                    onClick={() => toggleMenu(q.id)}
+                                    className={`${btnBase} ${btnGray} h-12 w-12 sm:h-14 sm:w-14 p-0 flex items-center justify-center ${expandedMenuId === q.id ? "bg-white/20" : ""}`}
+                                    aria-label="Toggle options"
+                                    title="More options"
                                   >
-                                    <Mail className="h-5 w-5 sm:h-6 sm:w-6" />
+                                    <PanelRight className="h-5 w-5 sm:h-6 sm:w-6" />
                                   </button>
+                                </div>
+
+                                {/* Collapsible Menu */}
+                                <div
+                                  className={`overflow-hidden transition-all duration-300 ease-in-out ${expandedMenuId === q.id ? "max-h-40 opacity-100 mt-3" : "max-h-0 opacity-0"}`}
+                                >
+                                  <div className="bg-white/5 rounded-xl p-2 space-y-1">
+                                    <button
+                                      onClick={() => handleShareQuiz(q.id, q.title || "Untitled Quiz")}
+                                      className="w-full text-left px-4 py-3 rounded-lg hover:bg-white/10 text-sm font-medium flex items-center gap-3 transition-colors"
+                                    >
+                                      <div className="w-5 flex justify-center shrink-0">
+                                        <Mail className="h-4 w-4 text-white/70" />
+                                      </div>
+                                      Copy link to share
+                                    </button>
+                                    <Link
+                                      to={`/scores/${q.id}`}
+                                      className="w-full text-left px-4 py-3 rounded-lg hover:bg-white/10 text-sm font-medium flex items-center gap-3 transition-colors"
+                                    >
+                                      <div className="w-5 flex justify-center shrink-0">
+                                        <img src="/icons/scoreboard.svg" alt="" className="h-[18px] w-[18px] opacity-70" />
+                                      </div>
+                                      View scoreboard
+                                    </Link>
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -2150,60 +2335,59 @@ useEffect(() => {
                           </div>
                         </div>
 
-                                               {/* Bottom actions */}
-<div className="mt-4 grid grid-cols-4 gap-2">
-  <Link
-    to={`/play/${q.id}`}
-    className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
-    aria-label="Play quiz"
-    title="Play"
-  >
-    <Play className="h-6 w-6" />
-  </Link>
+                        {/* Bottom actions */}
+                        <div className="mt-4 grid grid-cols-4 gap-2">
+                          <Link
+                            to={`/play/${q.id}`}
+                            className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
+                            aria-label="Play quiz"
+                            title="Play"
+                          >
+                            <Play className="h-6 w-6" />
+                          </Link>
 
-  <Link
-    to={reviewDisabled ? "#" : `/play/${q.id}?mode=review`}
-    onClick={(e) => {
-      if (reviewDisabled) e.preventDefault();
-    }}
-    className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center ${
-      reviewDisabled ? "opacity-50 cursor-not-allowed" : ""
-    }`}
-    aria-label={
-      reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"
-    }
-    title={
-      reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"
-    }
-  >
-    <History className="h-6 w-6" />
-  </Link>
+                          <Link
+                            to={reviewDisabled ? "#" : `/play/${q.id}?mode=review`}
+                            onClick={(e) => {
+                              if (reviewDisabled) e.preventDefault();
+                            }}
+                            className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center ${reviewDisabled ? "opacity-50 cursor-not-allowed" : ""
+                              }`}
+                            aria-label={
+                              reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"
+                            }
+                            title={
+                              reviewDisabled ? "No Revisit questions yet" : "Practice Revisit"
+                            }
+                          >
+                            <History className="h-6 w-6" />
+                          </Link>
 
-  <Link
-    to={`/edit/${q.id}`}
-    className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
-    aria-label="Edit quiz"
-    title="Edit"
-  >
-    <SquarePen className="h-6 w-6" />
-  </Link>
+                          <Link
+                            to={`/edit/${q.id}`}
+                            className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
+                            aria-label="Edit quiz"
+                            title="Edit"
+                          >
+                            <SquarePen className="h-6 w-6" />
+                          </Link>
 
-  <button
-    onClick={() => {
-      setTarget({
-        id: q.id,
-        title: q.title || "Untitled Quiz",
-        group_id: q.group_id ?? null,
-      });
-      setConfirmOpen(true);
-    }}
-    className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
-    aria-label="Delete quiz"
-    title="Delete"
-  >
-    <Trash2 className="h-6 w-6" />
-  </button>
-</div>
+                          <button
+                            onClick={() => {
+                              setTarget({
+                                id: q.id,
+                                title: q.title || "Untitled Quiz",
+                                group_id: q.group_id ?? null,
+                              });
+                              setConfirmOpen(true);
+                            }}
+                            className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
+                            aria-label="Delete quiz"
+                            title="Delete"
+                          >
+                            <Trash2 className="h-6 w-6" />
+                          </button>
+                        </div>
 
                       </li>
                     );
@@ -2218,177 +2402,175 @@ useEffect(() => {
         {dbg("FOOTER check", { filterGroupId, isEmpty: !normalizedFilterGroupId, hasCurrent: !!currentGroup })}
 
         {/* ---------------- Footer actions + “Last score” ------------------- */}
-{(() => {
-  const hasAnyQuizzes = (quizzes?.length ?? 0) > 0;
-  if (!hasAnyQuizzes) return null;
+        {(() => {
+          const hasAnyQuizzes = (quizzes?.length ?? 0) > 0;
+          if (!hasAnyQuizzes) return null;
 
-  const isAll = !normalizedFilterGroupId;
-  const activeGroup = currentGroup ?? null;
-  const heading = isAll
-    ? "All Quizzes"
-    : activeGroup
-    ? `${activeGroup.name} Quizzes`
-    : "Group";
+          const isAll = !normalizedFilterGroupId;
+          const activeGroup = currentGroup ?? null;
+          const heading = isAll
+            ? "All Quizzes"
+            : activeGroup
+              ? `${activeGroup.name} Quizzes`
+              : "Group";
 
-  const lastRevisitScore = isAll
-    ? typeof allRevisitScore === "number"
-      ? allRevisitScore
-      : null
-    : activeGroup
-    ? groupRevisitScores.get(activeGroup.id) ?? null
-    : null;
+          const lastRevisitScore = isAll
+            ? typeof allRevisitScore === "number"
+              ? allRevisitScore
+              : null
+            : activeGroup
+              ? groupRevisitScores.get(activeGroup.id) ?? null
+              : null;
 
-  const lastAllScore = isAll
-    ? typeof allAllScore === "number"
-      ? allAllScore
-      : null
-    : activeGroup
-    ? groupAllScores.get(activeGroup.id) ?? null
-    : null;
+          const lastAllScore = isAll
+            ? typeof allAllScore === "number"
+              ? allAllScore
+              : null
+            : activeGroup
+              ? groupAllScores.get(activeGroup.id) ?? null
+              : null;
 
-  const reviewCount = isAll ? allReviewCount : groupReviewCount;
-  const allCount = isAll ? allAllCount : groupAllCount;
+          const reviewCount = isAll ? allReviewCount : groupReviewCount;
+          const allCount = isAll ? allAllCount : groupAllCount;
 
-  const reviewLink = isAll
-    ? "/play/all?mode=review"
-    : activeGroup
-    ? `/play/group/${activeGroup.id}?mode=review`
-    : "#";
-  const allLink = isAll
-    ? "/play/all?mode=all"
-    : activeGroup
-    ? `/play/group/${activeGroup.id}?mode=all`
-    : "#";
+          const reviewLink = isAll
+            ? "/play/all?mode=review"
+            : activeGroup
+              ? `/play/group/${activeGroup.id}?mode=review`
+              : "#";
+          const allLink = isAll
+            ? "/play/all?mode=all"
+            : activeGroup
+              ? `/play/group/${activeGroup.id}?mode=all`
+              : "#";
 
-  return (
-    <div className="mt-8 flex justify-center">
-      <div className="w-full sm:w-auto">
-        <div className="w-full sm:w-auto surface-card p-5 sm:p-6">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between md:flex-nowrap gap-4">
-            {/* LEFT: context + last scores */}
-            <div className="text-base text-white/70 space-y-2 text-center md:text-left">
-              <div>
-                <span className="font-semibold text-white text-xl sm:text-2xl tracking-tight">
-                  {heading}
-                </span>
+          return (
+            <div className="mt-8 flex justify-center">
+              <div className="w-full sm:w-auto">
+                <div className="w-full sm:w-auto surface-card p-5 sm:p-6">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between md:flex-nowrap gap-4">
+                    {/* LEFT: context + last scores */}
+                    <div className="text-base text-white/70 space-y-2 text-center md:text-left">
+                      <div>
+                        <span className="font-semibold text-white text-xl sm:text-2xl tracking-tight">
+                          {heading}
+                        </span>
+                      </div>
+
+                      {/* Revisit last score */}
+                      <div className="text-sm sm:text-base">
+                        <span className="text-white/60">Revisit last score:</span>{" "}
+                        {typeof lastRevisitScore === "number" ? (
+                          <span
+                            className={
+                              lastRevisitScore >= 90
+                                ? "text-green-400 font-semibold"
+                                : "text-white"
+                            }
+                          >
+                            {lastRevisitScore}%
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </div>
+
+                      {/* All-Questions last score */}
+                      <div className="text-sm sm:text-base">
+                        <span className="text-white/60">All-questions last score:</span>{" "}
+                        {typeof lastAllScore === "number" ? (
+                          <span
+                            className={
+                              lastAllScore >= 90
+                                ? "text-green-400 font-semibold"
+                                : "text-white"
+                            }
+                          >
+                            {lastAllScore}%
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </div>
+
+                    </div>
+
+                    {/* RIGHT: actions */}
+                    <div className="flex flex-col gap-3 w-full items-center md:items-start md:w-auto md:flex-row md:flex-wrap">
+                      <Link
+                        to={reviewCount > 0 ? reviewLink : "#"}
+                        onClick={(e) => {
+                          if (reviewCount === 0) e.preventDefault();
+                        }}
+                        className={`${btnBase} ${btnGray} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl ${reviewCount === 0 ? "opacity-50 cursor-not-allowed" : ""
+                          }`}
+                        title={
+                          reviewCount === 0
+                            ? "No Revisit questions yet"
+                            : isAll
+                              ? "Play Revisit Questions (All quizzes)"
+                              : `Play "${activeGroup?.name ?? ""}" Revisit Questions`
+                        }
+                        aria-label={
+                          isAll
+                            ? "Play Revisit Questions (All)"
+                            : `Play ${activeGroup?.name ?? "group"} Revisit Questions`
+                        }
+                      >
+                        <History className="h-7 w-7 sm:h-8 sm:w-8 shrink-0" />
+                      </Link>
+
+                      <Link
+                        to={allCount > 0 ? allLink : "#"}
+                        onClick={(e) => {
+                          if (allCount === 0) e.preventDefault();
+                        }}
+                        className={`${btnBase} ${btnGreen} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl ${allCount === 0 ? "opacity-50 cursor-not-allowed" : ""
+                          }`}
+                        title={
+                          allCount === 0
+                            ? "No questions yet"
+                            : isAll
+                              ? "Play All Questions (All quizzes)"
+                              : `Play "${activeGroup?.name ?? ""}" All Questions`
+                        }
+                        aria-label={
+                          isAll
+                            ? "Play All Questions (All)"
+                            : `Play ${activeGroup?.name ?? "group"} All Questions`
+                        }
+                      >
+                        <Play className="h-7 w-7 sm:h-8 sm:w-8 shrink-0" />
+                      </Link>
+
+                      {activeGroup && (
+                        <>
+                          <button
+                            onClick={openEditGroup}
+                            className={`${btnBase} ${btnGray} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl`}
+                            title="Edit this group’s name"
+                            aria-label="Edit group name"
+                          >
+                            <SquarePen className="h-8 w-8" strokeWidth={2} />
+                          </button>
+
+                          <button
+                            onClick={() => setDeleteGroupOpen(true)}
+                            className={`${btnBase} ${btnRed} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl`}
+                            title={`Delete "${activeGroup.name}" and all its quizzes`}
+                            aria-label={`Delete ${activeGroup.name} group`}
+                          >
+                            <Trash2 className="h-8 w-8" strokeWidth={2} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
-
-              {/* Revisit last score */}
-              <div className="text-sm sm:text-base">
-                <span className="text-white/60">Revisit last score:</span>{" "}
-                {typeof lastRevisitScore === "number" ? (
-                  <span
-                    className={
-                      lastRevisitScore >= 90
-                        ? "text-green-400 font-semibold"
-                        : "text-white"
-                    }
-                  >
-                    {lastRevisitScore}%
-                  </span>
-                ) : (
-                  "—"
-                )}
-              </div>
-
-              {/* All-Questions last score */}
-              <div className="text-sm sm:text-base">
-                <span className="text-white/60">All-questions last score:</span>{" "}
-                {typeof lastAllScore === "number" ? (
-                  <span
-                    className={
-                      lastAllScore >= 90
-                        ? "text-green-400 font-semibold"
-                        : "text-white"
-                    }
-                  >
-                    {lastAllScore}%
-                  </span>
-                ) : (
-                  "—"
-                )}
-              </div>
-
             </div>
-
-            {/* RIGHT: actions */}
-            <div className="flex flex-col gap-3 w-full items-center md:items-start md:w-auto md:flex-row md:flex-wrap">
-              <Link
-                to={reviewCount > 0 ? reviewLink : "#"}
-                onClick={(e) => {
-                  if (reviewCount === 0) e.preventDefault();
-                }}
-                className={`${btnBase} ${btnGray} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl ${
-                  reviewCount === 0 ? "opacity-50 cursor-not-allowed" : ""
-                }`}
-                title={
-                  reviewCount === 0
-                    ? "No Revisit questions yet"
-                    : isAll
-                    ? "Play Revisit Questions (All quizzes)"
-                    : `Play "${activeGroup?.name ?? ""}" Revisit Questions`
-                }
-                aria-label={
-                  isAll
-                    ? "Play Revisit Questions (All)"
-                    : `Play ${activeGroup?.name ?? "group"} Revisit Questions`
-                }
-              >
-                <History className="h-7 w-7 sm:h-8 sm:w-8 shrink-0" />
-              </Link>
-
-              <Link
-                to={allCount > 0 ? allLink : "#"}
-                onClick={(e) => {
-                  if (allCount === 0) e.preventDefault();
-                }}
-                className={`${btnBase} ${btnGreen} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl ${
-                  allCount === 0 ? "opacity-50 cursor-not-allowed" : ""
-                }`}
-                title={
-                  allCount === 0
-                    ? "No questions yet"
-                    : isAll
-                    ? "Play All Questions (All quizzes)"
-                    : `Play "${activeGroup?.name ?? ""}" All Questions`
-                }
-                aria-label={
-                  isAll
-                    ? "Play All Questions (All)"
-                    : `Play ${activeGroup?.name ?? "group"} All Questions`
-                }
-              >
-                <Play className="h-7 w-7 sm:h-8 sm:w-8 shrink-0" />
-              </Link>
-
-              {activeGroup && (
-                <>
-                  <button
-                    onClick={openEditGroup}
-                    className={`${btnBase} ${btnGray} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl`}
-                    title="Edit this group’s name"
-                    aria-label="Edit group name"
-                  >
-                    <SquarePen className="h-8 w-8" strokeWidth={2} />
-                  </button>
-
-                  <button
-                    onClick={() => setDeleteGroupOpen(true)}
-                    className={`${btnBase} ${btnRed} inline-flex items-center justify-center w-48 sm:w-auto min-h-[3.5rem] sm:min-h-[3.75rem] px-5 rounded-2xl`}
-                    title={`Delete "${activeGroup.name}" and all its quizzes`}
-                    aria-label={`Delete ${activeGroup.name} group`}
-                  >
-                    <Trash2 className="h-8 w-8" strokeWidth={2} />
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-})()}
+          );
+        })()}
 
 
 
@@ -2437,7 +2619,7 @@ useEffect(() => {
           </div>
         </div>
       )}
-{accountOpen && (
+      {accountOpen && (
         <div
           className="fixed inset-0 bg-black/60 grid place-items-center z-[96]"
           aria-modal="true"
@@ -2457,16 +2639,16 @@ useEffect(() => {
             <h2 className="text-xl font-bold mb-4">Account</h2>
 
             <button
-  className={`${btnBase} ${btnRed} mb-6 px-6 mx-auto block`}
-  onClick={() => {
-    if (!accountDeleting) {
-      setAccountConfirmOpen(true);
-    }
-  }}
-  disabled={accountDeleting}
->
-  Delete Account
-</button>
+              className={`${btnBase} ${btnRed} mb-6 px-6 mx-auto block`}
+              onClick={() => {
+                if (!accountDeleting) {
+                  setAccountConfirmOpen(true);
+                }
+              }}
+              disabled={accountDeleting}
+            >
+              Delete Account
+            </button>
             <p className="text-white/70 text-sm">
               Feedback? -{" "}
               <span className="text-white/70 text-sm">support@smart-quiz.app</span>
@@ -2646,20 +2828,20 @@ useEffect(() => {
 
             <div className="mt-3 flex justify-center">
               <button
-  type="button"
-  onClick={() => oauthOrLink("google")}
-  className="h-12 w-12 rounded-full bg-white border border-gray-300 shadow flex items-center justify-center hover:shadow-md active:scale-95 transition"
-  aria-label="Continue with Google"
-  title="Continue with Google"
-  disabled={authBusy}
->
-  <svg width="24" height="24" viewBox="0 0 48 48" aria-hidden="true">
-    <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.6 32.4 29.2 35 24 35c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C33.8 5.1 29.2 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21c10.5 0 20-7.6 20-21 0-1.3-.1-2.7-.4-3.5z"/>
-    <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 16 19 13 24 13c3 0 5.8 1.1 7.9 3l5.7-5.7C33.8 5.1 29.2 3 24 3 16 3 8.9 7.6 6.3 14.7z"/>
-    <path fill="#4CAF50" d="M24 45c5.1 0 9.8-1.9 13.3-5.1l-6.1-5c-2 1.5-4.6 2.4-7.2 2.4-5.2 0-9.6-3.5-11.2-8.3L6.2 33.9C8.8 41 16 45 24 45z"/>
-    <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-1.1 3.1-3.6 5.6-6.6 6.9l6.1 5C37.8 37.9 41 31.9 41 24c0-1.3-.1-2.7-.4-3.5z"/>
-  </svg>
-</button>
+                type="button"
+                onClick={() => oauthOrLink("google")}
+                className="h-12 w-12 rounded-full bg-white border border-gray-300 shadow flex items-center justify-center hover:shadow-md active:scale-95 transition"
+                aria-label="Continue with Google"
+                title="Continue with Google"
+                disabled={authBusy}
+              >
+                <svg width="24" height="24" viewBox="0 0 48 48" aria-hidden="true">
+                  <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.6 32.4 29.2 35 24 35c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C33.8 5.1 29.2 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21c10.5 0 20-7.6 20-21 0-1.3-.1-2.7-.4-3.5z" />
+                  <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 16 19 13 24 13c3 0 5.8 1.1 7.9 3l5.7-5.7C33.8 5.1 29.2 3 24 3 16 3 8.9 7.6 6.3 14.7z" />
+                  <path fill="#4CAF50" d="M24 45c5.1 0 9.8-1.9 13.3-5.1l-6.1-5c-2 1.5-4.6 2.4-7.2 2.4-5.2 0-9.6-3.5-11.2-8.3L6.2 33.9C8.8 41 16 45 24 45z" />
+                  <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-1.1 3.1-3.6 5.6-6.6 6.9l6.1 5C37.8 37.9 41 31.9 41 24c0-1.3-.1-2.7-.4-3.5z" />
+                </svg>
+              </button>
             </div>
           </div>
         </div>
@@ -2678,7 +2860,7 @@ useEffect(() => {
           >
             <h2 className="text-xl font-bold mb-4">Generate a quiz</h2>
 
-           <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-5 sm:gap-y-6 gap-x-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-5 sm:gap-y-6 gap-x-4">
               <div className="sm:col-span-2">
                 <label className="block text-sm text-white/70 mb-1" htmlFor="gen-title">
                   Name
@@ -2726,7 +2908,11 @@ useEffect(() => {
                   type="file"
                   accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
                   className="w-full"
-                  onChange={(e) => setGFile(e.target.files?.[0] ?? null)}
+                  onChange={(e) => {
+                    setGFile(e.target.files?.[0] ?? null);
+                    if (e.target.files?.[0]) setYoutubeUrl("");
+                  }}
+                  disabled={generating || !!youtubeUrl}
                 />
                 {gFile && (
                   <div className="mt-1 text-xs text-white/70">
@@ -2742,7 +2928,44 @@ useEffect(() => {
                 )}
               </div>
 
-                                         <div className="sm:col-span-2">
+              <div className="sm:col-span-2">
+                <label
+                  className="block text-sm text-white/70 mb-1"
+                  htmlFor="gen-youtube"
+                >
+                  Or YouTube Video URL
+                </label>
+                <div className="flex gap-2 items-center">
+                  <input
+                    id="gen-youtube"
+                    className="field flex-1 placeholder:text-gray-400"
+                    placeholder="https://www.youtube.com/watch?v=..."
+                    value={youtubeUrl}
+                    onChange={(e) => {
+                      setYoutubeUrl(e.target.value);
+                      if (e.target.value) setGFile(null);
+                    }}
+                    disabled={generating || !!gFile}
+                  />
+                  {youtubeUrl && (
+                    <button
+                      type="button"
+                      onClick={handleDownloadTranscript}
+                      disabled={downloadingTranscript || generating}
+                      className="h-10 px-3 rounded-lg bg-white/10 hover:bg-white/20 text-white/90 transition-colors flex items-center justify-center"
+                      title="Download Transcript"
+                    >
+                      {downloadingTranscript ? (
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                      ) : (
+                        <Download className="w-5 h-5" />
+                      )}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="sm:col-span-2">
                 <div className="flex flex-col sm:flex-row sm:items-end gap-2">
                   <div className="w-full sm:flex-1">
                     <label
@@ -2877,8 +3100,8 @@ useEffect(() => {
               <span className="block mt-1 font-semibold break-words">
                 {Array.from(selectedIds).length
                   ? Array.from(selectedIds)
-                      .map((id) => quizzes.find((q) => q.id === id)?.title || "Untitled Quiz")
-                      .join(", ")
+                    .map((id) => quizzes.find((q) => q.id === id)?.title || "Untitled Quiz")
+                    .join(", ")
                   : "None"}
               </span>
             </p>

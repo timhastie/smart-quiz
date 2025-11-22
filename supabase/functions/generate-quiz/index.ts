@@ -44,7 +44,7 @@ function normalize(s: string) {
     .trim();
 }
 const STOP = new Set([
-  "the","a","an","to","of","in","on","at","for","with","and","or","is","are","be","this","that","these","those","as","by","from","into","over","under","up","down","all",
+  "the", "a", "an", "to", "of", "in", "on", "at", "for", "with", "and", "or", "is", "are", "be", "this", "that", "these", "those", "as", "by", "from", "into", "over", "under", "up", "down", "all",
 ]);
 function tokenize(s: string) {
   return normalize(s)
@@ -72,7 +72,7 @@ async function embedBatch(texts: string[]): Promise<number[][]> {
 }
 function cosine(a: number[], b: number[]) {
   let dot = 0, na = 0, nb = 0;
-  for (let i = 0; i < a.length; i++) { dot += a[i]*b[i]; na += a[i]*a[i]; nb += b[i]*b[i]; }
+  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
   return dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-12);
 }
 
@@ -213,8 +213,8 @@ Avoid paraphrasing prior items; prefer NEW subtopics, different entities/times/a
   const priorText =
     priorSlice.length > 0
       ? `Here are prior prompts (do NOT ask about the same fact/entity even if reworded):\n${JSON.stringify(
-          priorSlice
-        )}`
+        priorSlice
+      )}`
       : "";
 
   const docText = docContext
@@ -289,6 +289,7 @@ Deno.serve(async (req) => {
       avoid_prompts,         // extra prior prompts from client
       source_prompt,         // optional: prompt to persist (usually equals topic)
       source_file_name,      // optional: human-readable file name to persist
+      source_type,           // optional: 'document' | 'youtube'
     } = await req.json();
 
     const n = Math.max(1, Math.min(Number(count) || 10, 30));
@@ -453,6 +454,7 @@ Deno.serve(async (req) => {
           file_id: file_id || null,
           source_prompt: promptToPersist,
           source_file_name: nameToPersist,
+          source_type: source_type || "document",
           updated_at: now,
         })
         .eq("id", replace_quiz_id)
@@ -478,6 +480,7 @@ Deno.serve(async (req) => {
         file_id: file_id || null,
         source_prompt: promptToPersist,
         source_file_name: nameToPersist,
+        source_type: source_type || "document",
         created_at: now,
         updated_at: now,
       })

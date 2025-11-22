@@ -38,10 +38,7 @@
   input,
   select,
   textarea {
-    @apply bg-white/85 text-slate-900 placeholder-slate-500
-      rounded-2xl border border-teal-100/70 px-4 py-3
-      focus:outline-none focus:ring-2 focus:ring-teal-300/80 focus:border-teal-300/80
-      transition shadow;
+    @apply bg-white/85 text-slate-900 placeholder-slate-500 rounded-2xl border border-teal-100/70 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-teal-300/80 focus:border-teal-300/80 transition shadow;
   }
 
   textarea {
@@ -60,11 +57,9 @@
   font-family: inherit;
   color: #0f172a;
   line-height: 1.25rem;
-  background-image: linear-gradient(
-      180deg,
+  background-image: linear-gradient(180deg,
       rgba(255, 255, 255, 0.35),
-      rgba(255, 255, 255, 0.15)
-    ),
+      rgba(255, 255, 255, 0.15)),
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%230f172a' d='M6 8 0 0h12z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: center, right 1.1rem center;
@@ -81,6 +76,10 @@
 .surface-card {
   @apply bg-teal-300/10 border border-teal-200/40 rounded-3xl shadow-2xl shadow-teal-900/25 backdrop-blur-xl;
   -webkit-backdrop-filter: blur(32px);
+  backdrop-filter: blur(32px);
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  will-change: transform;
 }
 
 .surface-panel {
@@ -89,27 +88,29 @@
 }
 
 .field {
-  @apply bg-white/85 text-slate-900 placeholder-slate-500
-    rounded-2xl border border-teal-100/70 px-4 py-3
-    focus:outline-none focus:ring-2 focus:ring-teal-300/80 focus:border-teal-300/80;
+  @apply bg-white/85 text-slate-900 placeholder-slate-500 rounded-2xl border border-teal-100/70 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-teal-300/80 focus:border-teal-300/80;
 }
 
 .field-textarea {
-  @apply bg-white/85 text-slate-900 placeholder-slate-500
-    rounded-2xl border border-teal-100/70 px-4 py-3 min-h-[140px] leading-relaxed
-    focus:outline-none focus:ring-2 focus:ring-teal-300/80 focus:border-teal-300/80;
+  @apply bg-white/85 text-slate-900 placeholder-slate-500 rounded-2xl border border-teal-100/70 px-4 py-3 min-h-[140px] leading-relaxed focus:outline-none focus:ring-2 focus:ring-teal-300/80 focus:border-teal-300/80;
 }
 
 /* Play page: force dark textarea and neutralize UA dark theming */
-.quiz-play { 
-  color-scheme: light; /* stop auto dark theming */
+.quiz-play {
+  color-scheme: light;
+  /* stop auto dark theming */
 }
+
 .quiz-play textarea {
-  background-color: #ffffff !important;       /* white bg */
-  color: #111827 !important;                   /* gray-900 text */
-  -webkit-text-fill-color: #111827 !important; /* Safari text color */
+  background-color: #ffffff !important;
+  /* white bg */
+  color: #111827 !important;
+  /* gray-900 text */
+  -webkit-text-fill-color: #111827 !important;
+  /* Safari text color */
   caret-color: #111827 !important;
-  border-color: #d1d5db !important;            /* gray-300 border */
+  border-color: #d1d5db !important;
+  /* gray-300 border */
 
   appearance: none !important;
   -webkit-appearance: none !important;

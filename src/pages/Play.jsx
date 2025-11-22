@@ -7,6 +7,7 @@ import {
   useSearchParams,
   useLocation,
 } from "react-router-dom";
+import { Dice5 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
 import { getInitialGroupFromUrlOrStorage } from "../lib/groupFilter";
@@ -25,8 +26,8 @@ async function saveGroupRevisitScore(userId, { scope, groupId, percentExact }) {
       scope === "all"
         ? ALL_GROUP_ID
         : groupId && groupId !== "null" && groupId !== ""
-        ? groupId
-        : null;
+          ? groupId
+          : null;
     if (scope === "group" && !gid) return;
 
     const payload = {
@@ -71,8 +72,8 @@ async function saveGroupAllScore(userId, { scope, groupId, percentExact }) {
       scope === "all"
         ? ALL_GROUP_ID
         : groupId && groupId !== "null" && groupId !== ""
-        ? groupId
-        : null;
+          ? groupId
+          : null;
     if (scope === "group" && !gid) return;
 
     const payload = {
@@ -405,8 +406,8 @@ export default function Play() {
               ? row.review_questions
               : []
             : Array.isArray(row?.questions)
-            ? row.questions
-            : [];
+              ? row.questions
+              : [];
           for (const q of arr) {
             merged.push({
               prompt: String(q?.prompt ?? ""),
@@ -481,8 +482,8 @@ export default function Play() {
               ? row.review_questions
               : []
             : Array.isArray(row?.questions)
-            ? row.questions
-            : [];
+              ? row.questions
+              : [];
           for (const qq of arr) {
             merged.push({
               prompt: String(qq?.prompt ?? ""),
@@ -604,7 +605,7 @@ export default function Play() {
     setFurthestIndex((prev) => (index > prev ? index : prev));
   }, [index]);
 
-       // --- Unanswered question helpers (frontier-based behavior) ---
+  // --- Unanswered question helpers (frontier-based behavior) ---
   function collectUnansweredIndices(arr) {
     const res = [];
     for (let i = 0; i < arr.length; i++) {
@@ -681,7 +682,7 @@ export default function Play() {
     setIndex((i) => Math.min(i + 1, total - 1));
     areaRef.current?.blur();
   }
-  
+
   function handleChange(val) {
     setInput(val);
     setInputs((arr) => {
@@ -1001,52 +1002,52 @@ export default function Play() {
 
     const treatAsStrict = strict; // <-- ONLY the toggle controls strictness now
 
-  if (treatAsStrict) {
-    isCorrect = strictFactCorrect(userAns, expected);
-    if (!isCorrect) {
-      setFeedback(
-        "Incorrect ❌ (exact value needed) Press c to continue"
-      );
-    }
-  } else {
-    const local = localGrade(userAns, expected);
-    if (local.pass) {
-      isCorrect = true;
-    } else {
-      try {
-        const { data: sessionRes } = await supabase.auth.getSession();
-        const jwt = sessionRes?.session?.access_token;
-
-        const res = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/grade-answer`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
-            },
-            body: JSON.stringify({
-              question,
-              expected,
-              user_answer: userAns,
-            }),
-          }
+    if (treatAsStrict) {
+      isCorrect = strictFactCorrect(userAns, expected);
+      if (!isCorrect) {
+        setFeedback(
+          "Incorrect ❌ (exact value needed) Press c to continue"
         );
+      }
+    } else {
+      const local = localGrade(userAns, expected);
+      if (local.pass) {
+        isCorrect = true;
+      } else {
+        try {
+          const { data: sessionRes } = await supabase.auth.getSession();
+          const jwt = sessionRes?.session?.access_token;
 
-        if (res.ok) {
-          const out = await res.json();
-          isCorrect = !!out.correct;
-          if (!isCorrect) {
+          const res = await fetch(
+            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/grade-answer`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+              },
+              body: JSON.stringify({
+                question,
+                expected,
+                user_answer: userAns,
+              }),
+            }
+          );
+
+          if (res.ok) {
+            const out = await res.json();
+            isCorrect = !!out.correct;
+            if (!isCorrect) {
+              setFeedback("Incorrect ❌ Press c to continue");
+            }
+          } else {
             setFeedback("Incorrect ❌ Press c to continue");
           }
-        } else {
+        } catch {
           setFeedback("Incorrect ❌ Press c to continue");
         }
-      } catch {
-        setFeedback("Incorrect ❌ Press c to continue");
       }
     }
-  }
 
     const attemptedNext = attempted.slice();
     const firstTryNext = firstTryCorrect.slice();
@@ -1191,6 +1192,38 @@ export default function Play() {
     setPeekStash(Array(len).fill(""));
   }
 
+  function randomizeQuestions() {
+    if (!quiz) return;
+
+    // Determine which array to shuffle
+    const isReview = isReviewMode;
+    const currentList = isReview
+      ? (quiz.review_questions || [])
+      : (quiz.questions || []);
+
+    if (currentList.length === 0) return;
+
+    // Fisher-Yates shuffle
+    const shuffled = [...currentList];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+
+    // Update quiz state
+    setQuiz(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        questions: isReview ? prev.questions : shuffled,
+        review_questions: isReview ? shuffled : prev.review_questions
+      };
+    });
+
+    // Reset progress
+    retake();
+  }
+
   // --- Peek/toggle actions ---
   const isPeeking = !!peekOn[index];
 
@@ -1268,8 +1301,8 @@ export default function Play() {
                     ? " — Review"
                     : " — All Questions"
                   : isReviewMode
-                  ? " — Review"
-                  : ""}
+                    ? " — Review"
+                    : ""}
               </h1>
             </div>
           </div>
@@ -1290,9 +1323,18 @@ export default function Play() {
           {current ? (
             <>
               <div className="surface-card p-5 sm:p-8 space-y-6">
+                <div className="flex items-center justify-between">
                   <p className="text-xs uppercase tracking-wide text-white/60">
                     Question {index + 1} / {questionsArr.length}
                   </p>
+                  <button
+                    onClick={randomizeQuestions}
+                    className="text-white/40 hover:text-white transition-colors p-2 rounded-md hover:bg-white/10"
+                    title="Randomize question order"
+                  >
+                    <Dice5 className="w-6 h-6" />
+                  </button>
+                </div>
                 <p className="text-lg sm:text-2xl font-semibold leading-snug">
                   {current.prompt}
                 </p>
@@ -1325,11 +1367,10 @@ export default function Play() {
                             if (originalQuizDisabled)
                               e.preventDefault();
                           }}
-                          className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} ${
-                            originalQuizDisabled
-                              ? "opacity-50 cursor-not-allowed"
-                              : ""
-                          }`}
+                          className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} ${originalQuizDisabled
+                            ? "opacity-50 cursor-not-allowed"
+                            : ""
+                            }`}
                           title="Go to the original quiz for this question"
                         >
                           Play main quiz
@@ -1433,11 +1474,10 @@ export default function Play() {
                           if (originalQuizDisabled)
                             e.preventDefault();
                         }}
-                        className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal ${
-                          originalQuizDisabled
-                            ? "opacity-50 cursor-not-allowed"
-                            : ""
-                        }`}
+                        className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal ${originalQuizDisabled
+                          ? "opacity-50 cursor-not-allowed"
+                          : ""
+                          }`}
                       >
                         Play main quiz
                       </Link>
@@ -1578,11 +1618,10 @@ export default function Play() {
                 {/* NAV BUTTONS */}
                 <div className="mt-0">
                   <div
-                    className={`hidden sm:grid ${
-                      showGoToUnanswered
-                        ? "sm:grid-cols-3"
-                        : "sm:grid-cols-2"
-                    } gap-3`}
+                    className={`hidden sm:grid ${showGoToUnanswered
+                      ? "sm:grid-cols-3"
+                      : "sm:grid-cols-2"
+                      } gap-3`}
                   >
                     <button
                       type="button"
@@ -1628,11 +1667,10 @@ export default function Play() {
                   {/* Feedback + prompts */}
                   {feedback && (
                     <p
-                      className={`mt-3 text-base sm:text-lg text-center ${
-                        isPositiveFeedback
-                          ? "text-green-400"
-                          : "text-red-400"
-                      }`}
+                      className={`mt-3 text-base sm:text-lg text-center ${isPositiveFeedback
+                        ? "text-green-400"
+                        : "text-red-400"
+                        }`}
                       aria-live="polite"
                     >
                       {feedback}
@@ -1710,8 +1748,8 @@ export default function Play() {
                   ? "Revisit Score"
                   : "All Questions Score"
                 : isReviewMode
-                ? "Revisit Score"
-                : "Your Score"}{" "}
+                  ? "Revisit Score"
+                  : "Your Score"}{" "}
               {hasConfetti ? "🎉" : ""}
             </h2>
             <p className="text-base sm:text-lg mb-6">
@@ -1722,8 +1760,8 @@ export default function Play() {
                   ? "revisit set"
                   : "all-questions set"
                 : isReviewMode
-                ? "revisit set"
-                : "quiz"}
+                  ? "revisit set"
+                  : "quiz"}
               .
             </p>
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2">

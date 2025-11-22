@@ -7,6 +7,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import OpenAI from "npm:openai@4.56.0";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+
 // ---------- CORS ----------
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -60,9 +61,42 @@ Deno.serve(async (req) => {
     // Body
     const body = await req.json().catch(() => ({} as any));
     let textIn: string = String(body?.text ?? "");
-    const file_name: string =
-      String(body?.file_name ?? "").trim() || "document.txt";
+    let file_name: string = String(body?.file_name ?? "").trim() || "document.txt";
+    const youtube_url = body?.youtube_url;
+    const fetch_only = body?.fetch_only;
+
+    if (youtube_url) {
+      const YT_SERVICE_URL = Deno.env.get("YOUTUBE_SERVICE_URL");
+      if (!YT_SERVICE_URL) {
+        return text("YOUTUBE_SERVICE_URL is not configured.", 500);
+      }
+
+      try {
+        const ytRes = await fetch(`${YT_SERVICE_URL}/transcript`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: youtube_url }),
+        });
+
+        if (!ytRes.ok) {
+          const errText = await ytRes.text();
+          return text(`YouTube Service Error: ${errText}`, 400);
+        }
+
+        const ytData = await ytRes.json();
+        textIn = ytData.transcript;
+        file_name = youtube_url;
+      } catch (e: any) {
+        return text(`Failed to call YouTube service: ${e.message}`, 500);
+      }
+    }
+
     if (!textIn) return text("No text provided", 400);
+
+    // If fetch_only is requested, return the text immediately without indexing
+    if (fetch_only) {
+      return json({ transcript: textIn }, 200);
+    }
 
     // Cap extremely large inputs (~500k chars)
     if (textIn.length > 500_000) textIn = textIn.slice(0, 500_000);
