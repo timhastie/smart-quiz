@@ -114,11 +114,13 @@ serve(async (req) => {
       attemptPayload.participant_user_id = participant_user_id;
     }
 
-    const { error: insAttemptErr } = await supabase
+    const { data: attemptData, error: insAttemptErr } = await supabase
       .from("quiz_share_attempts")
-      .insert(attemptPayload);
+      .insert(attemptPayload)
+      .select("id")
+      .single();
 
-    if (insAttemptErr) {
+    if (insAttemptErr || !attemptData) {
       console.error("Error inserting attempt:", insAttemptErr);
       return new Response(
         JSON.stringify({ error: "Failed to record attempt" }),
@@ -130,6 +132,30 @@ serve(async (req) => {
           },
         },
       );
+    }
+
+    const attemptId = attemptData.id;
+
+    // 3.5) Insert answers if provided
+    const answers = body?.answers;
+    if (Array.isArray(answers) && answers.length > 0) {
+      const answerRows = answers.map((a: any, idx: number) => ({
+        attempt_id: attemptId,
+        question_index: typeof a.question_index === "number" ? a.question_index : idx,
+        question_text: a.question_text || "",
+        correct_answer: a.correct_answer || "",
+        user_answer: a.user_answer || "",
+        is_correct: !!a.is_correct,
+      }));
+
+      const { error: ansErr } = await supabase
+        .from("quiz_share_answers")
+        .insert(answerRows);
+
+      if (ansErr) {
+        console.error("Error inserting answers:", ansErr);
+        // We don't fail the whole request, but we log it
+      }
     }
 
     // 4) Update / upsert the aggregate scoreboard row (quiz_share_scores)

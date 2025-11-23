@@ -628,7 +628,15 @@ export default function SharedPlay() {
             slug,
             participant_name: trimmedName,
             participant_user_id: participantId,
+            participant_user_id: participantId,
             score: scorePct,
+            answers: (quiz.questions || []).map((q, i) => ({
+              question_index: i,
+              question_text: q.prompt || "",
+              correct_answer: q.answer || "",
+              user_answer: inputs[i] || "",
+              is_correct: !!firstTryCorrect[i],
+            })),
           }),
         }
       );
@@ -754,7 +762,7 @@ export default function SharedPlay() {
       if (user && isAnon) {
         try {
           storeGuestId(user.id);
-        } catch {}
+        } catch { }
       }
       const { error } = await signup(email, password);
       if (error) {
@@ -963,11 +971,10 @@ export default function SharedPlay() {
                 {/* Feedback */}
                 {feedback && (
                   <p
-                    className={`mt-3 text-base sm:text-lg text-center ${
-                      feedback.startsWith("✅")
+                    className={`mt-3 text-base sm:text-lg text-center ${feedback.startsWith("✅")
                         ? "text-green-400"
                         : "text-red-400"
-                    }`}
+                      }`}
                     aria-live="polite"
                   >
                     {feedback}
@@ -1010,8 +1017,8 @@ export default function SharedPlay() {
                           {scoreSaved
                             ? "Score saved"
                             : savingScore
-                            ? "Saving…"
-                            : "Save my score"}
+                              ? "Saving…"
+                              : "Save my score"}
                         </button>
                       </div>
                       {scoreSaveError && (

@@ -9,6 +9,7 @@ import Signup from "./pages/Signup";
 import AuthCallback from "./pages/AuthCallback.jsx";
 import SharedPlay from "./pages/SharedPlay";
 import SharedQuizScores from "./pages/sharedQuizScores";
+import SharedAttemptAnswers from "./pages/SharedAttemptAnswers";
 
 export default function App() {
   return (
@@ -59,6 +60,16 @@ export default function App() {
         element={
           <ProtectedRoute>
             <SharedQuizScores />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Detailed attempt view (owner) */}
+      <Route
+        path="/shared/:quizId/attempt/:attemptId"
+        element={
+          <ProtectedRoute>
+            <SharedAttemptAnswers />
           </ProtectedRoute>
         }
       />

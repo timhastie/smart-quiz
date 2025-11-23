@@ -322,6 +322,13 @@ export default function SharedQuizScores() {
             >
               Back
             </Link>
+            <Link
+              to="/"
+              className={`${btnBase} ${btnGray}`}
+              title="Go to dashboard"
+            >
+              Home
+            </Link>
           </div>
         </div>
       </header>
@@ -367,6 +374,7 @@ export default function SharedQuizScores() {
                     <th className="py-2 pr-4">Attempt #</th>
                     <th className="py-2 pr-4">Score</th>
                     <th className="py-2 pr-4">Date</th>
+                    <th className="py-2 pr-4 text-right">Details</th>
                     <th className="py-2 text-right"> </th>
                   </tr>
                 </thead>
@@ -441,6 +449,16 @@ export default function SharedQuizScores() {
                           {activeRow?.created_at
                             ? new Date(activeRow.created_at).toLocaleString()
                             : "—"}
+                        </td>
+                        <td className="py-2 pr-4 text-right">
+                          {activeRow && (
+                            <Link
+                              to={`/shared/${quizId}/attempt/${activeRow.id}`}
+                              className="text-emerald-400 hover:text-emerald-300 text-xs font-semibold uppercase tracking-wide"
+                            >
+                              View
+                            </Link>
+                          )}
                         </td>
                         <td className="py-2 text-right">
                           <button
