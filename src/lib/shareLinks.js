@@ -61,20 +61,50 @@ export async function createOrGetShareLink(supabase, quizId) {
  * @returns {Promise<string>} The full URL that was copied
  */
 export async function copyShareLinkToClipboard(supabase, quizId) {
-  const slug = await createOrGetShareLink(supabase, quizId);
-  const url = `${window.location.origin}/share/${slug}`;
+  // 1. Prepare the promise that resolves to the URL
+  const urlPromise = createOrGetShareLink(supabase, quizId).then((slug) => {
+    return `${window.location.origin}/share/${slug}`;
+  });
 
-  // Strategy 1: Modern Async Clipboard API
+  // Strategy 1: Safari / Modern Async Clipboard (ClipboardItem + Promise)
+  // This MUST be called synchronously, before any await.
+  try {
+    if (
+      typeof ClipboardItem !== "undefined" &&
+      navigator.clipboard &&
+      navigator.clipboard.write
+    ) {
+      // Create a promise that resolves to a Blob
+      const textBlobPromise = urlPromise.then(
+        (url) => new Blob([url], { type: "text/plain" })
+      );
+      // Pass the promise to ClipboardItem
+      const item = new ClipboardItem({
+        "text/plain": textBlobPromise,
+      });
+      await navigator.clipboard.write([item]);
+      return await urlPromise; // Return URL so caller can show it/use it
+    }
+  } catch (err) {
+    console.warn("ClipboardItem + Promise strategy failed, trying fallbacks...", err);
+  }
+
+  // Fallback: Wait for URL, then try standard writeText / execCommand
+  // Note: This WILL fail on Safari if the network request took too long,
+  // but it's the best we can do for older browsers.
+  const url = await urlPromise;
+
+  // Strategy 2: Standard writeText
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(url);
       return url;
     }
   } catch (err) {
-    console.warn('Async clipboard failed, trying fallback...', err);
+    console.warn("navigator.clipboard.writeText failed, trying execCommand...", err);
   }
 
-  // Strategy 2: Legacy execCommand (often works better on mobile/async)
+  // Strategy 3: Legacy execCommand
   try {
     const textArea = document.createElement("textarea");
     textArea.value = url;
@@ -88,20 +118,12 @@ export async function copyShareLinkToClipboard(supabase, quizId) {
     textArea.focus();
     textArea.select();
 
-    const successful = document.execCommand('copy');
+    const successful = document.execCommand("copy");
     document.body.removeChild(textArea);
 
     if (successful) return url;
     else throw new Error("execCommand returned false");
   } catch (err) {
-    console.error('All copy methods failed', err);
-    // Only show prompt as absolute last resort if user really needs the link
-    // But user specifically asked to avoid it, so we might just fail silently 
-    // or let the UI show "Link copied" (which is a lie, but better than the annoying prompt?)
-    // Let's keep the prompt but maybe the execCommand will fix it 99% of the time.
-    // The user said "I dont want a window to open", so let's remove the prompt.
-    // If it fails, it fails. The UI will likely still show "Link copied" because handleShareQuiz catches errors?
-    // No, handleShareQuiz catches errors and alerts "Could not create a share link".
     // So we should throw here if we failed.
     throw new Error("Clipboard copy failed");
   }
