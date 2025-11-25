@@ -1,5 +1,0 @@
-fastapi
-uvicorn
-pydantic
-requests
-youtube-transcript-api==1.2.3

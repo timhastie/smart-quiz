@@ -446,6 +446,11 @@ export default function Dashboard() {
   const [cleanupGroup, setCleanupGroup] = useState(null);
   const [cleaning, setCleaning] = useState(false);
 
+  const [transcriptOptions, setTranscriptOptions] = useState([]);
+  const [selectedTranscript, setSelectedTranscript] = useState(null);
+  const [showTranscriptModal, setShowTranscriptModal] = useState(false);
+  const [transcriptSearchTerm, setTranscriptSearchTerm] = useState("");
+
   const [selectedIds, setSelectedIds] = useState(new Set());
   const hasSelected = selectedIds.size > 0;
 
@@ -466,6 +471,12 @@ export default function Dashboard() {
 
   const [query, setQuery] = useState("");
 
+  async function continueWithTranscript(transcript) {
+    setShowTranscriptModal(false);
+    setSelectedTranscript(transcript);
+    // Pass transcript directly to avoid state race conditions
+    generateQuiz(transcript);
+  }
   async function handleSignOut() {
     resetGroupFilterToAll();
     await signout();
@@ -972,7 +983,7 @@ export default function Dashboard() {
     }
   }
 
-  async function generateQuiz() {
+  async function generateQuiz(preSelectedTranscript = null) {
     try {
       if (generating) return;
 
@@ -1007,6 +1018,9 @@ export default function Dashboard() {
       let file_id = null;
       let sourceType = "document";
 
+      // Use pre-selected or state-selected transcript
+      const activeTranscript = preSelectedTranscript || selectedTranscript;
+
       if (youtubeUrl) {
         // Validate URL
         const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/;
@@ -1017,6 +1031,8 @@ export default function Dashboard() {
         }
 
         sourceType = "youtube";
+
+        // Directly fetch transcript without showing selector modal
         const idxRes = await fetch(
           `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/index-source`,
           {
@@ -1025,7 +1041,10 @@ export default function Dashboard() {
               "Content-Type": "application/json",
               ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
             },
-            body: JSON.stringify({ youtube_url: youtubeUrl }),
+            body: JSON.stringify({
+              youtube_url: youtubeUrl,
+              // No language_code or is_generated - let Supadata use default
+            }),
           }
         );
         const idxText = await idxRes.text();
@@ -1165,6 +1184,7 @@ export default function Dashboard() {
       setGenOpen(false);
       if (gFile) setGFile(null);
       setGenerating(false);
+      setSelectedTranscript(null); // Clear selected transcript after successful generation
       await load();
     } catch (e) {
       console.log("[Generate] Failed with error:", e);
@@ -1946,7 +1966,7 @@ export default function Dashboard() {
 
                       <button
                         className={`${btnBase} ${btnGreen} h-12 px-6 sm:ml-auto`}
-                        onClick={generateQuiz}
+                        onClick={() => generateQuiz()}
                         disabled={generating}
                       >
                         {generating ? "Generating…" : "Generate"}
@@ -3033,7 +3053,7 @@ export default function Dashboard() {
               </button>
               <button
                 className={`${btnBase} ${btnGreen}`}
-                onClick={generateQuiz}
+                onClick={() => generateQuiz()}
                 disabled={generating}
               >
                 {generating ? "Generating…" : "Generate"}
@@ -3306,6 +3326,86 @@ export default function Dashboard() {
               >
                 {cleaning ? "Deleting…" : "Delete group"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transcript Selection Modal */}
+      {showTranscriptModal && (
+        <div className="fixed inset-0 z-[110] bg-black/70 flex items-center justify-center p-4">
+          <div className="surface-card max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+            <div className="p-6 space-y-4">
+              <h2 className="text-2xl font-bold text-white">Select Transcript</h2>
+              <p className="text-white/70 text-sm">
+                Choose which transcript/caption to use for quiz generation:
+              </p>
+
+              <div className="space-y-2">
+                {/* Search Bar */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search languages..."
+                    value={transcriptSearchTerm}
+                    onChange={(e) => setTranscriptSearchTerm(e.target.value)}
+                    className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-white/50 focus:outline-none focus:border-emerald-500"
+                    autoFocus
+                  />
+                </div>
+
+                <div className="max-h-[60vh] overflow-y-auto space-y-2 pr-2">
+                  {transcriptOptions
+                    .filter(t =>
+                      t.language.toLowerCase().includes(transcriptSearchTerm.toLowerCase()) ||
+                      t.language_code.toLowerCase().includes(transcriptSearchTerm.toLowerCase())
+                    )
+                    .map((transcript, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => continueWithTranscript(transcript)}
+                        className="w-full text-left p-4 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-emerald-500/50 transition-all"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1">
+                            <div className="font-semibold text-white">
+                              {transcript.language}
+                            </div>
+                            <div className="text-sm text-white/60 mt-1">
+                              Code: {transcript.language_code}
+                            </div>
+                          </div>
+                          <div className="flex flex-col items-end gap-1">
+                            <span className={`text-xs px-2 py-1 rounded ${transcript.is_generated
+                              ? 'bg-yellow-500/20 text-yellow-400'
+                              : 'bg-emerald-500/20 text-emerald-400'
+                              }`}>
+                              {transcript.is_generated ? 'Auto-generated' : 'Manual'}
+                            </span>
+                            {transcript.is_translatable && (
+                              <span className="text-xs px-2 py-1 rounded bg-blue-500/20 text-blue-400">
+                                Translatable
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                </div>
+
+                <div className="flex justify-end pt-4">
+                  <button
+                    onClick={() => {
+                      setShowTranscriptModal(false);
+                      setTranscriptOptions([]);
+                      setGenerating(false);
+                    }}
+                    className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
