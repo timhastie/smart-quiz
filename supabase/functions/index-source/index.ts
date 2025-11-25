@@ -62,7 +62,7 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({} as any));
     let textIn: string = String(body?.text ?? "");
     let file_name: string = String(body?.file_name ?? "").trim() || "document.txt";
-    const youtube_url = body?.youtube_url;
+    const youtube_url = body?.youtube_url ? String(body.youtube_url).trim() : undefined;
     const fetch_only = body?.fetch_only;
     const action = body?.action; // 'list_transcripts' or undefined
     const language_code = body?.language_code;

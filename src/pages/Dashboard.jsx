@@ -367,9 +367,113 @@ export default function Dashboard() {
   const [gNewOpen, setGNewOpen] = useState(false);
   const [gNewName, setGNewName] = useState("");
   const [gCreatingGroup, setGCreatingGroup] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
 
   // Animated "Generating..." dots for overlay
   const [genDots, setGenDots] = useState(".");
+
+  // Prompt suggestions
+  const [suggestedPrompts, setSuggestedPrompts] = useState([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+
+  const [transcriptText, setTranscriptText] = useState("");
+
+  async function fetchTranscript(url) {
+    if (!url) return null;
+    try {
+      const { data: sessionRes } = await supabase.auth.getSession();
+      const jwt = sessionRes?.session?.access_token;
+
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/index-source`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+          },
+          body: JSON.stringify({ youtube_url: url, fetch_only: true }),
+        }
+      );
+
+      if (!res.ok) {
+        const errText = await res.text();
+        let msg = errText;
+        if (errText.includes("Transcript is disabled")) {
+          msg = "This video does not have captions/transcripts available.";
+        } else if (errText.includes("No transcript found")) {
+          msg = "No transcript could be found for this video.";
+        }
+        console.error("Transcript fetch failed:", msg);
+        return null;
+      }
+
+      const data = await res.json();
+      return data.transcript || null;
+    } catch (e) {
+      console.error("Error fetching transcript:", e);
+      return null;
+    }
+  }
+
+  // Auto-suggest for YouTube URLs
+  useEffect(() => {
+    if (!youtubeUrl) return;
+
+    const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/;
+    if (!ytRegex.test(youtubeUrl)) return;
+
+    // Add YouTube-specific suggestion
+    const youtubeSuggestion = "Create a quiz based on the content of this video";
+
+    // Check if it's already in the suggestions
+    if (!suggestedPrompts.includes(youtubeSuggestion)) {
+      setSuggestedPrompts(prev => [youtubeSuggestion, ...prev]);
+    }
+  }, [youtubeUrl]);
+
+  // Restore Auto-suggest prompts based on Title ONLY
+  useEffect(() => {
+    if (!gTitle || gTitle.length < 3) {
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      // If we are currently loading suggestions (e.g. from YouTube), don't interrupt?
+      // Or just let it race.
+
+      setLoadingSuggestions(true);
+      try {
+        const { data: sessionRes } = await supabase.auth.getSession();
+        const jwt = sessionRes?.session?.access_token;
+
+        const res = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/suggest-prompts`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+            },
+            body: JSON.stringify({ topic: gTitle }),
+          }
+        );
+
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.suggestions)) {
+            setSuggestedPrompts(data.suggestions);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to fetch suggestions", error);
+      } finally {
+        setLoadingSuggestions(false);
+      }
+    }, 1000); // 1 second debounce
+
+    return () => clearTimeout(timer);
+  }, [gTitle]);
 
   const location = useLocation();
 
@@ -918,6 +1022,8 @@ export default function Dashboard() {
     return true;
   }
 
+
+
   async function handleDownloadTranscript() {
     if (!youtubeUrl || downloadingTranscript) return;
 
@@ -930,38 +1036,10 @@ export default function Dashboard() {
 
     setDownloadingTranscript(true);
     try {
-      const { data: sessionRes } = await supabase.auth.getSession();
-      const jwt = sessionRes?.session?.access_token;
-
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/index-source`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
-          },
-          body: JSON.stringify({ youtube_url: youtubeUrl, fetch_only: true }),
-        }
-      );
-
-      if (!res.ok) {
-        const errText = await res.text();
-        let msg = errText;
-        if (errText.includes("Transcript is disabled")) {
-          msg = "This video does not have captions/transcripts available.";
-        } else if (errText.includes("No transcript found")) {
-          msg = "No transcript could be found for this video.";
-        }
-        alert(`Failed to download transcript:\n${msg}`);
-        return;
-      }
-
-      const data = await res.json();
-      const transcript = data.transcript;
+      const transcript = await fetchTranscript(youtubeUrl);
 
       if (!transcript) {
-        alert("No transcript content returned.");
+        alert("Failed to download transcript or no content found.");
         return;
       }
 
@@ -1150,7 +1228,7 @@ export default function Dashboard() {
             title: (gTitle || "").trim() || "Bash Top 10",
             topic:
               (gTopic || "").trim() ||
-              "Create 10 questions that test the 10 most-used Bash commands.",
+              "Create a quiz about...",
             count,
             group_id: resolvedGroupId,
             file_id,
@@ -1792,12 +1870,12 @@ export default function Dashboard() {
                       className="block text-sm text-white/70 mb-1"
                       htmlFor="inline-gen-title"
                     >
-                      Name
+                      Title
                     </label>
                     <input
                       id="inline-gen-title"
                       className="field w-full placeholder:text-slate-500"
-                      placeholder="Bash Top 10"
+                      placeholder=""
                       value={gTitle}
                       onChange={(e) => setGTitle(e.target.value)}
                       disabled={generating}
@@ -1811,10 +1889,35 @@ export default function Dashboard() {
                     >
                       Prompt
                     </label>
+
+                    {/* Prompt Suggestions */}
+                    {loadingSuggestions && (
+                      <div className="mb-2 text-xs text-white/50 animate-pulse">
+                        Generating ideas...
+                      </div>
+                    )}
+                    {!loadingSuggestions && suggestedPrompts.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        {suggestedPrompts.map((prompt, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => {
+                              setGTopic(prompt);
+                              setSuggestedPrompts([]); // Clear suggestions after selection
+                            }}
+                            className="text-xs bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-500/30 px-3 py-1.5 rounded-full transition-colors text-left"
+                          >
+                            {prompt}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
                     <textarea
                       id="inline-gen-topic"
                       className="field-textarea w-full min-h-[8rem] resize-y placeholder:text-slate-500"
-                      placeholder="Create 10 questions that test the 10 most-used Bash commands."
+                      placeholder="Create a quiz about..."
                       value={gTopic}
                       onChange={(e) => setGTopic(e.target.value)}
                       disabled={generating}
@@ -1841,32 +1944,76 @@ export default function Dashboard() {
                     >
                       Optional document to use as source (PDF / TXT / MD)
                     </label>
-                    <div className="w-full sm:w-1/2">
+
+                    {/* Drag and Drop Zone */}
+                    <div
+                      className={`relative border-2 border-dashed rounded-xl p-6 transition-colors text-center cursor-pointer ${isDragging
+                        ? "border-emerald-500 bg-emerald-500/10"
+                        : "border-white/10 hover:border-white/20 hover:bg-white/5"
+                        } ${gFile ? "bg-emerald-500/5 border-emerald-500/30" : ""}`}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        if (!generating && !youtubeUrl) setIsDragging(true);
+                      }}
+                      onDragLeave={() => setIsDragging(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsDragging(false);
+                        if (generating || youtubeUrl) return;
+
+                        const droppedFile = e.dataTransfer.files?.[0];
+                        if (droppedFile) {
+                          setGFile(droppedFile);
+                          setYoutubeUrl("");
+                        }
+                      }}
+                      onClick={() => {
+                        if (!generating && !youtubeUrl) {
+                          document.getElementById("inline-gen-file").click();
+                        }
+                      }}
+                    >
                       <input
                         id="inline-gen-file"
                         type="file"
                         accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
-                        className="w-full"
+                        className="hidden"
                         onChange={(e) => {
                           setGFile(e.target.files?.[0] ?? null);
                           if (e.target.files?.[0]) setYoutubeUrl("");
                         }}
                         disabled={generating || !!youtubeUrl}
                       />
+
+                      {gFile ? (
+                        <div className="flex flex-col items-center gap-2">
+                          <div className="h-10 w-10 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" /><polyline points="14 2 14 8 20 8" /></svg>
+                          </div>
+                          <div className="text-sm font-medium text-white">{gFile.name}</div>
+                          <button
+                            type="button"
+                            className="text-xs text-red-400 hover:text-red-300 underline mt-1"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setGFile(null);
+                            }}
+                            disabled={generating}
+                          >
+                            Remove file
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center gap-2 text-white/60">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
+                          <span className="text-sm">
+                            {youtubeUrl
+                              ? "Clear YouTube URL to upload a file"
+                              : "Click to upload or drag and drop PDF"}
+                          </span>
+                        </div>
+                      )}
                     </div>
-                    {gFile && (
-                      <div className="mt-1 text-xs text-white/60">
-                        Selected: {gFile.name}{" "}
-                        <button
-                          type="button"
-                          className="underline"
-                          onClick={() => setGFile(null)}
-                          disabled={generating}
-                        >
-                          Clear
-                        </button>
-                      </div>
-                    )}
                   </div>
 
                   <div className="sm:col-span-2">
@@ -2883,12 +3030,12 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-5 sm:gap-y-6 gap-x-4">
               <div className="sm:col-span-2">
                 <label className="block text-sm text-white/70 mb-1" htmlFor="gen-title">
-                  Name
+                  Title
                 </label>
                 <input
                   id="gen-title"
                   className="field w-full placeholder:text-gray-400"
-                  placeholder="Bash Top 10"
+                  placeholder=""
                   value={gTitle}
                   onChange={(e) => setGTitle(e.target.value)}
                 />
@@ -2898,10 +3045,35 @@ export default function Dashboard() {
                 <label className="block text-sm text-white/70 mb-1" htmlFor="gen-topic">
                   Prompt
                 </label>
+
+                {/* Prompt Suggestions */}
+                {loadingSuggestions && (
+                  <div className="mb-2 text-xs text-white/50 animate-pulse">
+                    Generating ideas...
+                  </div>
+                )}
+                {!loadingSuggestions && suggestedPrompts.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {suggestedPrompts.map((prompt, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          setGTopic(prompt);
+                          setSuggestedPrompts([]); // Clear suggestions after selection
+                        }}
+                        className="text-xs bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-500/30 px-3 py-1.5 rounded-full transition-colors text-left"
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 <textarea
                   id="gen-topic"
                   className="field-textarea w-full min-h-[8rem] resize-y placeholder:text-gray-400"
-                  placeholder="Create 10 questions that test the 10 most-used Bash commands."
+                  placeholder="Create a quiz about..."
                   value={gTopic}
                   onChange={(e) => setGTopic(e.target.value)}
                 />
@@ -2923,29 +3095,76 @@ export default function Dashboard() {
                 <label className="block text-sm text-white/70 mb-1" htmlFor="gen-file">
                   Optional document to use as source (PDF / TXT / MD)
                 </label>
-                <input
-                  id="gen-file"
-                  type="file"
-                  accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
-                  className="w-full"
-                  onChange={(e) => {
-                    setGFile(e.target.files?.[0] ?? null);
-                    if (e.target.files?.[0]) setYoutubeUrl("");
+
+                {/* Drag and Drop Zone */}
+                <div
+                  className={`relative border-2 border-dashed rounded-xl p-6 transition-colors text-center cursor-pointer ${isDragging
+                    ? "border-emerald-500 bg-emerald-500/10"
+                    : "border-white/10 hover:border-white/20 hover:bg-white/5"
+                    } ${gFile ? "bg-emerald-500/5 border-emerald-500/30" : ""}`}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    if (!generating && !youtubeUrl) setIsDragging(true);
                   }}
-                  disabled={generating || !!youtubeUrl}
-                />
-                {gFile && (
-                  <div className="mt-1 text-xs text-white/70">
-                    Selected: {gFile.name}{" "}
-                    <button
-                      type="button"
-                      className="underline"
-                      onClick={() => setGFile(null)}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                )}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDragging(false);
+                    if (generating || youtubeUrl) return;
+
+                    const droppedFile = e.dataTransfer.files?.[0];
+                    if (droppedFile) {
+                      setGFile(droppedFile);
+                      setYoutubeUrl("");
+                    }
+                  }}
+                  onClick={() => {
+                    if (!generating && !youtubeUrl) {
+                      document.getElementById("gen-file").click();
+                    }
+                  }}
+                >
+                  <input
+                    id="gen-file"
+                    type="file"
+                    accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+                    className="hidden"
+                    onChange={(e) => {
+                      setGFile(e.target.files?.[0] ?? null);
+                      if (e.target.files?.[0]) setYoutubeUrl("");
+                    }}
+                    disabled={generating || !!youtubeUrl}
+                  />
+
+                  {gFile ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="h-10 w-10 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" /><polyline points="14 2 14 8 20 8" /></svg>
+                      </div>
+                      <div className="text-sm font-medium text-white">{gFile.name}</div>
+                      <button
+                        type="button"
+                        className="text-xs text-red-400 hover:text-red-300 underline mt-1"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setGFile(null);
+                        }}
+                        disabled={generating}
+                      >
+                        Remove file
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-2 text-white/60">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
+                      <span className="text-sm">
+                        {youtubeUrl
+                          ? "Clear YouTube URL to upload a file"
+                          : "Click to upload or drag and drop PDF"}
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="sm:col-span-2">
@@ -3061,371 +3280,388 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
-      )}
+      )
+      }
 
-      {gNewOpen && (
-        <div
-          className="fixed inset-0 bg-black/60 grid place-items-center z-50"
-          aria-modal="true"
-          role="dialog"
-          onClick={() => !gCreatingGroup && setGNewOpen(false)}
-        >
+      {
+        gNewOpen && (
           <div
-            className="w-full max-w-md surface-card p-6"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 bg-black/60 grid place-items-center z-50"
+            aria-modal="true"
+            role="dialog"
+            onClick={() => !gCreatingGroup && setGNewOpen(false)}
           >
-            <h2 className="text-xl font-bold mb-4">Create new group</h2>
-            <input
-              className="w-full"
-              placeholder="Group name"
-              value={gNewName}
-              onChange={(e) => setGNewName(e.target.value)}
-            />
-            <div className="flex justify-end gap-2 mt-6">
-              <button
-                className={`${btnBase} ${btnGray}`}
-                onClick={() => setGNewOpen(false)}
-                disabled={gCreatingGroup}
-              >
-                Cancel
-              </button>
-              <button
-                className={`${btnBase} ${btnGreen}`}
-                onClick={createGroupForModal}
-                disabled={gCreatingGroup || !gNewName.trim()}
-              >
-                {gCreatingGroup ? "Creating…" : "Create"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {bulkConfirmOpen && (
-        <div
-          className="fixed inset-0 bg-black/60 grid place-items-center z-50"
-          aria-modal="true"
-          role="dialog"
-          onClick={() => !bulkDeleting && setBulkConfirmOpen(false)}
-        >
-          <div
-            className="w-full max-w-md surface-card p-6 max-h-[85vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 className="text-xl font-bold mb-2">
-              Delete selected quizzes?
-            </h2>
-            <p className="text-white/70 mb-4">
-              You have selected:
-              <span className="block mt-1 font-semibold break-words">
-                {Array.from(selectedIds).length
-                  ? Array.from(selectedIds)
-                    .map((id) => quizzes.find((q) => q.id === id)?.title || "Untitled Quiz")
-                    .join(", ")
-                  : "None"}
-              </span>
-            </p>
-            <div className="flex flex-col sm:flex-row justify-end gap-2">
-              <button
-                className={`${btnBase} ${btnGray}`}
-                onClick={() => setBulkConfirmOpen(false)}
-                disabled={bulkDeleting}
-              >
-                Cancel
-              </button>
-              <button
-                className={`${btnBase} ${btnRedSoft}`}
-                onClick={doBulkDelete}
-                disabled={bulkDeleting}
-              >
-                {bulkDeleting ? "Deleting…" : "Delete selected"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {moveOpen && (
-        <div
-          className="fixed inset-0 bg-black/60 grid place-items-center z-50"
-          aria-modal="true"
-          role="dialog"
-          onClick={() => !moving && setMoveOpen(false)}
-        >
-          <div
-            className="w-full max-w-md surface-card p-6 max-h-[85vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 className="text-xl font-bold mb-4">Move selected to group</h2>
-            <p className="text-white/70 mb-4">
-              Selected: <span className="font-semibold">{selectedIds.size}</span>{" "}
-              {selectedIds.size === 1 ? "quiz" : "quizzes"}
-            </p>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-white/70 mb-1">
-                  Choose existing group
-                </label>
-                <select
-                  className="w-full"
-                  value={moveGroupId}
-                  onChange={(e) => setMoveGroupId(e.target.value)}
+            <div
+              className="w-full max-w-md surface-card p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-xl font-bold mb-4">Create new group</h2>
+              <input
+                className="w-full"
+                placeholder="Group name"
+                value={gNewName}
+                onChange={(e) => setGNewName(e.target.value)}
+              />
+              <div className="flex justify-end gap-2 mt-6">
+                <button
+                  className={`${btnBase} ${btnGray}`}
+                  onClick={() => setGNewOpen(false)}
+                  disabled={gCreatingGroup}
                 >
-                  <option value="">Select…</option>
-                  {orderedGroups.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm text-white/70 mb-1">
-                  Or create a new group
-                </label>
-                <input
-                  className="w-full"
-                  placeholder="New group name (optional)"
-                  value={moveNewName}
-                  onChange={(e) => setMoveNewName(e.target.value)}
-                />
-                <p className="text-xs text-white/60 mt-1">
-                  If you enter a name here, a new group will be created and
-                  used.
-                </p>
+                  Cancel
+                </button>
+                <button
+                  className={`${btnBase} ${btnGreen}`}
+                  onClick={createGroupForModal}
+                  disabled={gCreatingGroup || !gNewName.trim()}
+                >
+                  {gCreatingGroup ? "Creating…" : "Create"}
+                </button>
               </div>
             </div>
-
-            <div className="flex flex-col sm:flex-row justify-end gap-2 mt-6">
-              <button
-                className={`${btnBase} ${btnGray}`}
-                onClick={() => setMoveOpen(false)}
-                disabled={moving}
-              >
-                Cancel
-              </button>
-              <button
-                className={`${btnBase} ${btnGreen}`}
-                onClick={doBulkMove}
-                disabled={moving || selectedIds.size === 0}
-                title={selectedIds.size === 0 ? "No quizzes selected" : ""}
-              >
-                {moving ? "Moving…" : "Move"}
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
-      {deleteGroupOpen && currentGroup && (
-        <div
-          className="fixed inset-0 bg-black/60 grid place-items-center z-50"
-          aria-modal="true"
-          role="dialog"
-          onClick={() => !deletingGroup && setDeleteGroupOpen(false)}
-        >
+      {
+        bulkConfirmOpen && (
           <div
-            className="w-full max-w-md surface-card p-6 max-h-[85vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 bg-black/60 grid place-items-center z-50"
+            aria-modal="true"
+            role="dialog"
+            onClick={() => !bulkDeleting && setBulkConfirmOpen(false)}
           >
-            <h2 className="text-xl font-bold mb-2">Delete group?</h2>
-            <p className="text-white/70 mb-6">
-              This deletes the group{" "}
-              <span className="font-semibold">{currentGroup.name}</span> and all
-              quizzes inside it.
-            </p>
-            <div className="flex flex-col sm:flex-row justify-end gap-2">
-              <button
-                className={`${btnBase} ${btnGray}`}
-                onClick={() => setDeleteGroupOpen(false)}
-                disabled={deletingGroup}
-              >
-                Cancel
-              </button>
-              <button
-                className={`${btnBase} ${btnRed}`}
-                onClick={deleteCurrentGroupNow}
-                disabled={deletingGroup}
-              >
-                {deletingGroup ? "Deleting…" : "Delete group"}
-              </button>
+            <div
+              className="w-full max-w-md surface-card p-6 max-h-[85vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-xl font-bold mb-2">
+                Delete selected quizzes?
+              </h2>
+              <p className="text-white/70 mb-4">
+                You have selected:
+                <span className="block mt-1 font-semibold break-words">
+                  {Array.from(selectedIds).length
+                    ? Array.from(selectedIds)
+                      .map((id) => quizzes.find((q) => q.id === id)?.title || "Untitled Quiz")
+                      .join(", ")
+                    : "None"}
+                </span>
+              </p>
+              <div className="flex flex-col sm:flex-row justify-end gap-2">
+                <button
+                  className={`${btnBase} ${btnGray}`}
+                  onClick={() => setBulkConfirmOpen(false)}
+                  disabled={bulkDeleting}
+                >
+                  Cancel
+                </button>
+                <button
+                  className={`${btnBase} ${btnRedSoft}`}
+                  onClick={doBulkDelete}
+                  disabled={bulkDeleting}
+                >
+                  {bulkDeleting ? "Deleting…" : "Delete selected"}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
-      {editGroupOpen && currentGroup && (
-        <div
-          className="fixed inset-0 bg-black/60 grid place-items-center z-50"
-          aria-modal="true"
-          role="dialog"
-          onClick={() => !savingGroupName && setEditGroupOpen(false)}
-        >
+      {
+        moveOpen && (
           <div
-            className="w-full max-w-md surface-card p-6 max-h-[85vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 bg-black/60 grid place-items-center z-50"
+            aria-modal="true"
+            role="dialog"
+            onClick={() => !moving && setMoveOpen(false)}
           >
-            <h2 className="text-xl font-bold mb-4">Rename group</h2>
-            <input
-              className="w-full"
-              value={editGroupName}
-              onChange={(e) => setEditGroupName(e.target.value)}
-              placeholder="Group name"
-            />
-            <div className="flex flex-col sm:flex-row justify-end gap-2 mt-6">
-              <button
-                className={`${btnBase} ${btnGray}`}
-                onClick={() => setEditGroupOpen(false)}
-                disabled={savingGroupName}
-              >
-                Cancel
-              </button>
-              <button
-                className={`${btnBase} ${btnGreen}`}
-                onClick={saveGroupName}
-                disabled={savingGroupName || !editGroupName.trim()}
-              >
-                {savingGroupName ? "Saving…" : "Save"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {cleanupOpen && cleanupGroup && (
-        <div
-          className="fixed inset-0 bg-black/60 grid place-items-center z-50"
-          aria-modal="true"
-          role="dialog"
-          onClick={() => !cleaning && setCleanupOpen(false)}
-        >
-          <div
-            className="w-full max-w-md surface-card p-6 max-h-[85vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 className="text-xl font-bold mb-2">Delete empty group?</h2>
-            <p className="text-white/70 mb-6">
-              The group{" "}
-              <span className="font-semibold">{cleanupGroup.name}</span> is now
-              empty. Would you like to delete it?
-            </p>
-            <div className="flex flex-col sm:flex-row justify-end gap-2">
-              <button
-                className={`${btnBase} ${btnGray}`}
-                onClick={keepEmptyGroupNow}
-                disabled={cleaning}
-              >
-                Keep group
-              </button>
-              <button
-                className={`${btnBase} ${btnRed}`}
-                onClick={deleteEmptyGroupNow}
-                disabled={cleaning}
-              >
-                {cleaning ? "Deleting…" : "Delete group"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Transcript Selection Modal */}
-      {showTranscriptModal && (
-        <div className="fixed inset-0 z-[110] bg-black/70 flex items-center justify-center p-4">
-          <div className="surface-card max-w-2xl w-full max-h-[80vh] overflow-y-auto">
-            <div className="p-6 space-y-4">
-              <h2 className="text-2xl font-bold text-white">Select Transcript</h2>
-              <p className="text-white/70 text-sm">
-                Choose which transcript/caption to use for quiz generation:
+            <div
+              className="w-full max-w-md surface-card p-6 max-h-[85vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-xl font-bold mb-4">Move selected to group</h2>
+              <p className="text-white/70 mb-4">
+                Selected: <span className="font-semibold">{selectedIds.size}</span>{" "}
+                {selectedIds.size === 1 ? "quiz" : "quizzes"}
               </p>
 
-              <div className="space-y-2">
-                {/* Search Bar */}
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="Search languages..."
-                    value={transcriptSearchTerm}
-                    onChange={(e) => setTranscriptSearchTerm(e.target.value)}
-                    className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-white/50 focus:outline-none focus:border-emerald-500"
-                    autoFocus
-                  />
-                </div>
-
-                <div className="max-h-[60vh] overflow-y-auto space-y-2 pr-2">
-                  {transcriptOptions
-                    .filter(t =>
-                      t.language.toLowerCase().includes(transcriptSearchTerm.toLowerCase()) ||
-                      t.language_code.toLowerCase().includes(transcriptSearchTerm.toLowerCase())
-                    )
-                    .map((transcript, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => continueWithTranscript(transcript)}
-                        className="w-full text-left p-4 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-emerald-500/50 transition-all"
-                      >
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="flex-1">
-                            <div className="font-semibold text-white">
-                              {transcript.language}
-                            </div>
-                            <div className="text-sm text-white/60 mt-1">
-                              Code: {transcript.language_code}
-                            </div>
-                          </div>
-                          <div className="flex flex-col items-end gap-1">
-                            <span className={`text-xs px-2 py-1 rounded ${transcript.is_generated
-                              ? 'bg-yellow-500/20 text-yellow-400'
-                              : 'bg-emerald-500/20 text-emerald-400'
-                              }`}>
-                              {transcript.is_generated ? 'Auto-generated' : 'Manual'}
-                            </span>
-                            {transcript.is_translatable && (
-                              <span className="text-xs px-2 py-1 rounded bg-blue-500/20 text-blue-400">
-                                Translatable
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </button>
-                    ))}
-                </div>
-
-                <div className="flex justify-end pt-4">
-                  <button
-                    onClick={() => {
-                      setShowTranscriptModal(false);
-                      setTranscriptOptions([]);
-                      setGenerating(false);
-                    }}
-                    className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm text-white/70 mb-1">
+                    Choose existing group
+                  </label>
+                  <select
+                    className="w-full"
+                    value={moveGroupId}
+                    onChange={(e) => setMoveGroupId(e.target.value)}
                   >
-                    Cancel
-                  </button>
+                    <option value="">Select…</option>
+                    {orderedGroups.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm text-white/70 mb-1">
+                    Or create a new group
+                  </label>
+                  <input
+                    className="w-full"
+                    placeholder="New group name (optional)"
+                    value={moveNewName}
+                    onChange={(e) => setMoveNewName(e.target.value)}
+                  />
+                  <p className="text-xs text-white/60 mt-1">
+                    If you enter a name here, a new group will be created and
+                    used.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row justify-end gap-2 mt-6">
+                <button
+                  className={`${btnBase} ${btnGray}`}
+                  onClick={() => setMoveOpen(false)}
+                  disabled={moving}
+                >
+                  Cancel
+                </button>
+                <button
+                  className={`${btnBase} ${btnGreen}`}
+                  onClick={doBulkMove}
+                  disabled={moving || selectedIds.size === 0}
+                  title={selectedIds.size === 0 ? "No quizzes selected" : ""}
+                >
+                  {moving ? "Moving…" : "Move"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {
+        deleteGroupOpen && currentGroup && (
+          <div
+            className="fixed inset-0 bg-black/60 grid place-items-center z-50"
+            aria-modal="true"
+            role="dialog"
+            onClick={() => !deletingGroup && setDeleteGroupOpen(false)}
+          >
+            <div
+              className="w-full max-w-md surface-card p-6 max-h-[85vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-xl font-bold mb-2">Delete group?</h2>
+              <p className="text-white/70 mb-6">
+                This deletes the group{" "}
+                <span className="font-semibold">{currentGroup.name}</span> and all
+                quizzes inside it.
+              </p>
+              <div className="flex flex-col sm:flex-row justify-end gap-2">
+                <button
+                  className={`${btnBase} ${btnGray}`}
+                  onClick={() => setDeleteGroupOpen(false)}
+                  disabled={deletingGroup}
+                >
+                  Cancel
+                </button>
+                <button
+                  className={`${btnBase} ${btnRed}`}
+                  onClick={deleteCurrentGroupNow}
+                  disabled={deletingGroup}
+                >
+                  {deletingGroup ? "Deleting…" : "Delete group"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {
+        editGroupOpen && currentGroup && (
+          <div
+            className="fixed inset-0 bg-black/60 grid place-items-center z-50"
+            aria-modal="true"
+            role="dialog"
+            onClick={() => !savingGroupName && setEditGroupOpen(false)}
+          >
+            <div
+              className="w-full max-w-md surface-card p-6 max-h-[85vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-xl font-bold mb-4">Rename group</h2>
+              <input
+                className="w-full"
+                value={editGroupName}
+                onChange={(e) => setEditGroupName(e.target.value)}
+                placeholder="Group name"
+              />
+              <div className="flex flex-col sm:flex-row justify-end gap-2 mt-6">
+                <button
+                  className={`${btnBase} ${btnGray}`}
+                  onClick={() => setEditGroupOpen(false)}
+                  disabled={savingGroupName}
+                >
+                  Cancel
+                </button>
+                <button
+                  className={`${btnBase} ${btnGreen}`}
+                  onClick={saveGroupName}
+                  disabled={savingGroupName || !editGroupName.trim()}
+                >
+                  {savingGroupName ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {
+        cleanupOpen && cleanupGroup && (
+          <div
+            className="fixed inset-0 bg-black/60 grid place-items-center z-50"
+            aria-modal="true"
+            role="dialog"
+            onClick={() => !cleaning && setCleanupOpen(false)}
+          >
+            <div
+              className="w-full max-w-md surface-card p-6 max-h-[85vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-xl font-bold mb-2">Delete empty group?</h2>
+              <p className="text-white/70 mb-6">
+                The group{" "}
+                <span className="font-semibold">{cleanupGroup.name}</span> is now
+                empty. Would you like to delete it?
+              </p>
+              <div className="flex flex-col sm:flex-row justify-end gap-2">
+                <button
+                  className={`${btnBase} ${btnGray}`}
+                  onClick={keepEmptyGroupNow}
+                  disabled={cleaning}
+                >
+                  Keep group
+                </button>
+                <button
+                  className={`${btnBase} ${btnRed}`}
+                  onClick={deleteEmptyGroupNow}
+                  disabled={cleaning}
+                >
+                  {cleaning ? "Deleting…" : "Delete group"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {/* Transcript Selection Modal */}
+      {
+        showTranscriptModal && (
+          <div className="fixed inset-0 z-[110] bg-black/70 flex items-center justify-center p-4">
+            <div className="surface-card max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+              <div className="p-6 space-y-4">
+                <h2 className="text-2xl font-bold text-white">Select Transcript</h2>
+                <p className="text-white/70 text-sm">
+                  Choose which transcript/caption to use for quiz generation:
+                </p>
+
+                <div className="space-y-2">
+                  {/* Search Bar */}
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Search languages..."
+                      value={transcriptSearchTerm}
+                      onChange={(e) => setTranscriptSearchTerm(e.target.value)}
+                      className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-white/50 focus:outline-none focus:border-emerald-500"
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="max-h-[60vh] overflow-y-auto space-y-2 pr-2">
+                    {transcriptOptions
+                      .filter(t =>
+                        t.language.toLowerCase().includes(transcriptSearchTerm.toLowerCase()) ||
+                        t.language_code.toLowerCase().includes(transcriptSearchTerm.toLowerCase())
+                      )
+                      .map((transcript, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => continueWithTranscript(transcript)}
+                          className="w-full text-left p-4 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-emerald-500/50 transition-all"
+                        >
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1">
+                              <div className="font-semibold text-white">
+                                {transcript.language}
+                              </div>
+                              <div className="text-sm text-white/60 mt-1">
+                                Code: {transcript.language_code}
+                              </div>
+                            </div>
+                            <div className="flex flex-col items-end gap-1">
+                              <span className={`text-xs px-2 py-1 rounded ${transcript.is_generated
+                                ? 'bg-yellow-500/20 text-yellow-400'
+                                : 'bg-emerald-500/20 text-emerald-400'
+                                }`}>
+                                {transcript.is_generated ? 'Auto-generated' : 'Manual'}
+                              </span>
+                              {transcript.is_translatable && (
+                                <span className="text-xs px-2 py-1 rounded bg-blue-500/20 text-blue-400">
+                                  Translatable
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                  </div>
+
+                  <div className="flex justify-end pt-4">
+                    <button
+                      onClick={() => {
+                        setShowTranscriptModal(false);
+                        setTranscriptOptions([]);
+                        setGenerating(false);
+                      }}
+                      className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
-      {generating && (
-        <div className="fixed inset-0 z-[120] bg-black/70 flex items-center justify-center">
-          <div className="w-40 h-40 sm:w-48 sm:h-48 rounded-full bg-emerald-500 flex flex-col items-center justify-center shadow-2xl animate-pulse">
-            <div className="text-gray-900 font-semibold text-xl sm:text-2xl select-none">
-              Generating
-            </div>
-            <div className="flex gap-1 mt-1 text-gray-900 text-2xl leading-none select-none">
-              <span className="animate-bounce [animation-delay:0ms]">•</span>
-              <span className="animate-bounce [animation-delay:150ms]">•</span>
-              <span className="animate-bounce [animation-delay:300ms]">•</span>
+      {
+        generating && (
+          <div className="fixed inset-0 z-[120] bg-black/70 flex items-center justify-center">
+            <div className="w-40 h-40 sm:w-48 sm:h-48 rounded-full bg-emerald-500 flex flex-col items-center justify-center shadow-2xl animate-pulse">
+              <div className="text-gray-900 font-semibold text-xl sm:text-2xl select-none">
+                Generating
+              </div>
+              <div className="flex gap-1 mt-1 text-gray-900 text-2xl leading-none select-none">
+                <span className="animate-bounce [animation-delay:0ms]">•</span>
+                <span className="animate-bounce [animation-delay:150ms]">•</span>
+                <span className="animate-bounce [animation-delay:300ms]">•</span>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
-    </div>
+    </div >
   );
 }
