@@ -7,7 +7,7 @@ import {
   useSearchParams,
   useLocation,
 } from "react-router-dom";
-import { Dice5, Volume2, Lightbulb, Play as PlayIcon, Mic } from "lucide-react";
+import { Dice5, Volume2, Lightbulb, Play as PlayIcon, Mic, Loader2 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
 import { getInitialGroupFromUrlOrStorage } from "../lib/groupFilter";
@@ -410,61 +410,130 @@ export default function Play() {
 
   // --- Speech to Text ---
   const [isListening, setIsListening] = useState(false);
+  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
+
+  // Whisper (Universal/Mobile) refs
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+
+  // Native (Chrome Desktop) refs
   const recognitionRef = useRef(null);
 
-  const toggleListening = () => {
+  const toggleListening = async () => {
+    // STOP LISTENING
     if (isListening) {
-      recognitionRef.current?.stop();
+      // Stop Whisper Recorder
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
+      // Stop Native Recognition
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
       setIsListening(false);
       return;
     }
 
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert("Your browser does not support speech recognition.");
-      return;
-    }
+    // START LISTENING
+    const userAgent = navigator.userAgent;
+    const isChrome = userAgent.indexOf("Chrome") > -1;
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+    const isChromeDesktop = isChrome && !isMobile;
 
-    const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = true; // Enable interim results for faster feedback
-    recognition.lang = "en-US";
+    // 1. Chrome Desktop -> Use Native Web Speech API (Faster)
+    if (isChromeDesktop && (window.SpeechRecognition || window.webkitSpeechRecognition)) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = "en-US";
 
-    recognition.onstart = () => {
-      setIsListening(true);
-    };
+      recognition.onstart = () => setIsListening(true);
+      recognition.onend = () => setIsListening(false);
+      recognition.onerror = (event) => {
+        console.error("Native Speech error", event.error);
+        setIsListening(false);
+      };
 
-    recognition.onresult = (event) => {
-      let finalTranscript = "";
-      let interimTranscript = "";
-
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript;
-        } else {
-          interimTranscript += event.results[i][0].transcript;
+      recognition.onresult = (event) => {
+        let finalTranscript = "";
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          }
         }
+        if (finalTranscript) {
+          setInput((prev) => {
+            const trimmedPrev = prev ? prev.trim() : "";
+            return trimmedPrev ? trimmedPrev + " " + finalTranscript : finalTranscript;
+          });
+        }
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+      return;
+    }
+
+    // 2. All Other Browsers/Mobile -> Use Whisper (Reliable, no beep on iOS)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(track => track.stop());
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        if (audioBlob.size < 100) return;
+
+        setIsProcessingAudio(true);
+        try {
+          const formData = new FormData();
+          formData.append('file', audioBlob, 'audio.webm');
+          const { data: { session } } = await supabase.auth.getSession();
+          const token = session?.access_token;
+
+          const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/transcribe`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+            body: formData,
+          });
+
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.error || `Server error ${res.status}`);
+          }
+
+          const data = await res.json();
+          if (data.text) {
+            setInput((prev) => {
+              const trimmedPrev = prev ? prev.trim() : "";
+              return trimmedPrev ? trimmedPrev + " " + data.text : data.text;
+            });
+          }
+        } catch (err) {
+          console.error("Transcription error:", err);
+          alert(`Transcription failed: ${err.message}`);
+        } finally {
+          setIsProcessingAudio(false);
+        }
+      };
+
+      mediaRecorder.start();
+      setIsListening(true);
+    } catch (err) {
+      console.error("Microphone access error:", err);
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        alert("Microphone access denied.\n\nOn iOS: Go to Settings > Safari > Microphone and set it to 'Ask' or 'Allow'.\n\nNote: You cannot link directly to settings from a website.");
+      } else {
+        alert(`Could not access microphone (${err.name}).\n\nImportant: Microphone access REQUIRES a secure connection (HTTPS) or localhost. It will not work on http://192.168...`);
       }
-
-      if (finalTranscript) {
-        setInput((prev) => {
-          const trimmedPrev = prev ? prev.trim() : "";
-          return trimmedPrev ? trimmedPrev + " " + finalTranscript : finalTranscript;
-        });
-      }
-    };
-
-    recognition.onerror = (event) => {
-      console.error("Speech recognition error", event.error);
-      setIsListening(false);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-    };
-
-    recognitionRef.current = recognition;
-    recognition.start();
+    }
   };
 
   useEffect(() => {
@@ -1935,13 +2004,20 @@ export default function Play() {
                         <button
                           type="button"
                           onClick={toggleListening}
+                          disabled={isProcessingAudio}
                           className={`absolute bottom-3 right-3 p-2 rounded-full transition-all shadow-sm z-10 ${isListening
                             ? "bg-rose-500 text-white animate-pulse ring-2 ring-rose-300"
-                            : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                            : isProcessingAudio
+                              ? "bg-slate-100 text-slate-400 cursor-wait"
+                              : "bg-slate-100 text-slate-500 hover:bg-slate-200"
                             }`}
                           title={isListening ? "Stop listening" : "Speak answer"}
                         >
-                          <Mic className="w-5 h-5" />
+                          {isProcessingAudio ? (
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                          ) : (
+                            <Mic className="w-5 h-5" />
+                          )}
                         </button>
                       )}
                     </div>
