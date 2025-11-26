@@ -1074,10 +1074,7 @@ export default function Dashboard() {
       if (!allowed) return;
       setGenerating(true);
 
-      console.log("[Generate] Starting", {
-        gGroupId,
-        groupsCount: groups.length,
-      });
+
 
       const { data: sessionRes } = await supabase.auth.getSession();
       const jwt = sessionRes?.session?.access_token;
@@ -1089,9 +1086,7 @@ export default function Dashboard() {
         return;
       }
 
-      console.log("[Generate] Resolved target group", {
-        chosenGroupId: resolvedGroupId,
-      });
+
 
       const targetGroupIdForNoRepeat = resolvedGroupId;
 
@@ -1259,7 +1254,7 @@ export default function Dashboard() {
         return;
       }
 
-      console.log("[Generate] Quiz generation succeeded, reloading dashboard…");
+
 
       setGenOpen(false);
       if (gFile) setGFile(null);
@@ -1267,7 +1262,7 @@ export default function Dashboard() {
       setSelectedTranscript(null); // Clear selected transcript after successful generation
       await load();
     } catch (e) {
-      console.log("[Generate] Failed with error:", e);
+
       alert("Failed to generate quiz. Please try again.");
       setGenerating(false);
     }
@@ -1672,7 +1667,7 @@ export default function Dashboard() {
             {/* Toggle button for filters */}
             <button
               onClick={() => setShowMobileFilters(!showMobileFilters)}
-              className="flex items-center justify-center gap-2 w-full py-1 text-sm text-white/70 hover:text-white transition-colors"
+              className="flex items-center justify-center gap-2 w-full pt-2 pb-0 text-sm text-white/70 hover:text-white transition-colors"
             >
               <span>{showMobileFilters ? "Hide" : "Show"} Filters</span>
               <svg
@@ -2360,25 +2355,23 @@ export default function Dashboard() {
                               </div>
                             </div>
 
-                            {/* RIGHT: Questions preview */}
-                            <div className="relative bg-white/5 border border-white/5 rounded-2xl p-3 overflow-hidden">
-                              <ol className="text-[13px] leading-5 list-decimal pl-5 pr-3 pb-7 space-y-1.5 max-h-[160px] overflow-hidden">
-                                {(Array.isArray(q.questions) ? q.questions : []).map(
-                                  (it, idx) => {
-                                    const p = (it?.prompt || "").toString().trim();
-                                    if (!p) return null;
-                                    return (
-                                      <li key={idx} className="break-words">
-                                        {p}
-                                      </li>
-                                    );
-                                  }
-                                )}
-                              </ol>
-                              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-slate-950/70 via-slate-950/25 to-transparent" />
-                              <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end pr-3 pb-1.5 select-none">
-                                <span>…</span>
+                            <div className="relative bg-white/5 border border-white/5 rounded-2xl p-3 overflow-hidden h-[200px]">
+                              <div
+                                className="text-[13px] leading-5 whitespace-pre-wrap text-white/90 font-normal"
+                                style={{
+                                  display: '-webkit-box',
+                                  WebkitLineClamp: 8,
+                                  WebkitBoxOrient: 'vertical',
+                                  overflow: 'hidden'
+                                }}
+                              >
+                                {(Array.isArray(q.questions) ? q.questions : []).slice(0, 20).map((it, idx) => {
+                                  const p = (it?.prompt || "").toString().trim();
+                                  if (!p) return null;
+                                  return `${idx + 1}. ${p}`;
+                                }).filter(Boolean).join("\n\n")}
                               </div>
+                              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-slate-950/60 to-transparent" />
                             </div>
                           </div>
 
@@ -2581,27 +2574,15 @@ export default function Dashboard() {
                             </div>
                           </div>
 
-                          {/* RIGHT: Questions preview */}
                           <div className="relative bg-white/5 border border-white/5 rounded-2xl p-3 overflow-hidden">
-                            <ol className="text-sm leading-6 list-decimal pl-5 pr-3 pb-8 space-y-2 max-h-[320px] overflow-hidden">
-                              {(Array.isArray(q.questions) ? q.questions : []).map(
-                                (it, idx) => {
-                                  const p = (it?.prompt || "")
-                                    .toString()
-                                    .trim();
-                                  if (!p) return null;
-                                  return (
-                                    <li key={idx} className="break-words">
-                                      {p}
-                                    </li>
-                                  );
-                                }
-                              )}
-                            </ol>
-                            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-slate-950/70 via-slate-950/25 to-transparent" />
-                            <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end pr-3 pb-2 select-none">
-                              <span>…</span>
+                            <div className="text-sm leading-6 whitespace-pre-wrap line-clamp-[13] text-white/90 font-normal">
+                              {(Array.isArray(q.questions) ? q.questions : []).slice(0, 20).map((it, idx) => {
+                                const p = (it?.prompt || "").toString().trim();
+                                if (!p) return null;
+                                return `${idx + 1}. ${p}`;
+                              }).filter(Boolean).join("\n\n")}
                             </div>
+                            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-slate-950/60 to-transparent" />
                           </div>
                         </div>
 
@@ -2716,8 +2697,8 @@ export default function Dashboard() {
 
           return (
             <div className="mt-8 flex justify-center">
-              <div className="w-full sm:w-auto">
-                <div className="w-full sm:w-auto surface-card p-5 sm:p-6">
+              <div className="w-fit sm:w-auto">
+                <div className="w-fit sm:w-auto surface-card p-5 sm:p-6">
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between md:flex-nowrap gap-4">
                     {/* LEFT: context + last scores */}
                     <div className="text-base text-white/70 space-y-2 text-center md:text-left">
@@ -2766,7 +2747,7 @@ export default function Dashboard() {
                     </div>
 
                     {/* RIGHT: actions */}
-                    <div className="flex flex-col gap-3 w-full items-center md:items-start md:w-auto md:flex-row md:flex-wrap">
+                    <div className="flex flex-col gap-3 w-auto items-center md:items-start md:w-auto md:flex-row md:flex-wrap">
                       <Link
                         to={reviewCount > 0 ? reviewLink : "#"}
                         onClick={(e) => {

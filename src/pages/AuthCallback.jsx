@@ -12,32 +12,20 @@ function sleep(ms) {
 
 export default function AuthCallback() {
   useEffect(() => {
-    console.log("[AuthCallback] mounted", {
-      path:
-        typeof window !== "undefined"
-          ? window.location.href
-          : "(no-window href)",
-    });
+
 
     (async () => {
       try {
         // Let Supabase finish exchanging tokens (implicit) then poll briefly
         let { data: s0 } = await supabase.auth.getSession();
-        console.log("[AuthCallback] initial getSession", {
-          hasSession: !!s0?.session,
-          userId: s0?.session?.user?.id ?? null,
-        });
+
 
         let session = s0?.session ?? null;
         for (let i = 0; !session && i < 6; i++) {
           await sleep(250);
           const { data: sn } = await supabase.auth.getSession();
           session = sn?.session ?? null;
-          console.log("[AuthCallback] polling getSession", {
-            attempt: i + 1,
-            hasSession: !!session,
-            userId: session?.user?.id ?? null,
-          });
+
           if (session) break;
         }
 
@@ -62,20 +50,11 @@ export default function AuthCallback() {
           console.warn("[AuthCallback] error reading LS_OAUTH_RETURN_PATH", e);
         }
 
-        console.log("[AuthCallback] session + guest info", {
-          newUserId,
-          guestId,
-          LS_GUEST_ID,
-          returnPath,
-          LS_OAUTH_RETURN_PATH,
-        });
+
 
         // === RPC-only ADOPTION ===
         if (guestId && guestId !== newUserId) {
-          console.log("[AuthCallback] calling adopt_guest RPC", {
-            p_old_user: guestId,
-            newUserId,
-          });
+
 
           const { data, error } = await supabase.rpc("adopt_guest", {
             p_old_user: guestId,
@@ -92,27 +71,18 @@ export default function AuthCallback() {
               raw: error,
             });
           } else {
-            console.log("[AuthCallback] adopt_guest RPC success", {
-              guestId,
-              newUserId,
-              data,
-            });
+
             // Expected shape from our updated function:
             // { ok: true, old_id, new_id, moved: { quizzes, groups, quiz_scores } }
           }
         } else {
-          console.log("[AuthCallback] no adoption needed", {
-            guestId,
-            newUserId,
-          });
+
         }
 
         // Clean up local flags regardless of outcome
         try {
           localStorage.removeItem(LS_GUEST_ID);
-          console.log("[AuthCallback] removed LS_GUEST_ID from localStorage", {
-            key: LS_GUEST_ID,
-          });
+
         } catch (e) {
           console.warn("[AuthCallback] error removing LS_GUEST_ID", e);
         }
@@ -120,10 +90,7 @@ export default function AuthCallback() {
         try {
           if (returnPath) {
             localStorage.removeItem(LS_OAUTH_RETURN_PATH);
-            console.log(
-              "[AuthCallback] removed LS_OAUTH_RETURN_PATH from localStorage",
-              { key: LS_OAUTH_RETURN_PATH }
-            );
+
           }
         } catch (e) {
           console.warn("[AuthCallback] error removing LS_OAUTH_RETURN_PATH", e);
@@ -133,7 +100,7 @@ export default function AuthCallback() {
         try {
           const clean = `${window.location.origin}/auth/callback`;
           window.history.replaceState({}, "", clean);
-          console.log("[AuthCallback] cleaned URL to /auth/callback");
+
         } catch (e) {
           console.warn("[AuthCallback] error cleaning URL", e);
         }
@@ -141,7 +108,7 @@ export default function AuthCallback() {
         // Go back to where the user started OAuth (fallback to /)
         const target =
           returnPath && typeof returnPath === "string" ? returnPath : "/";
-        console.log("[AuthCallback] redirecting after OAuth", { target });
+
         window.location.replace(target);
       } catch (e) {
         console.error("[AuthCallback] outer error", e);

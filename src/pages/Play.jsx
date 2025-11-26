@@ -1928,7 +1928,7 @@ export default function Play() {
                             type="button"
                             onClick={() => {
                               if (!current) return;
-                              const text = current.answer || "";
+                              const text = input || "";
                               if (!text) return;
 
                               // Cancel any ongoing speech

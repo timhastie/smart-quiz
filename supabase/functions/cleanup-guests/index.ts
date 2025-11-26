@@ -10,6 +10,12 @@ const admin = createClient(url, serviceKey, {
 });
 
 serve(async (req) => {
+  // CRITICAL SECURITY CHECK: Ensure caller has the Service Role Key
+  const authHeader = req.headers.get("Authorization");
+  if (authHeader !== `Bearer ${serviceKey}`) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
   let age_hours = 24;
   try {
     const body = await req.json();

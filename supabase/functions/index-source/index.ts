@@ -55,8 +55,59 @@ Deno.serve(async (req) => {
 
     // Auth -> user_id (RLS-friendly)
     const { data: u } = await auth.auth.getUser();
-    const user_id = u.user?.id;
+    const user = u.user;
+    const user_id = user?.id;
     if (!user_id) return text("Unauthorized", 401);
+
+    // --- RATE LIMITING (IP-based for Anon) ---
+    const isAnon =
+      user?.app_metadata?.provider === "anonymous" ||
+      user?.user_metadata?.is_anonymous === true ||
+      (Array.isArray(user?.identities) &&
+        user.identities.some((i: any) => i?.provider === "anonymous"));
+
+    // --- RATE LIMITING ---
+    const LIMIT = isAnon ? 5 : 20;
+    const WINDOW_MS = 60 * 60 * 1000; // 1 hour
+
+    let rateKey = "";
+    if (isAnon) {
+      rateKey = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    } else {
+      rateKey = user_id;
+    }
+
+    if (rateKey !== "unknown") {
+      // Reuse SERVICE_ROLE client (svc)
+      const { data: usage } = await svc
+        .from("rate_limits")
+        .select("*")
+        .eq("key", rateKey)
+        .eq("endpoint", "index-source")
+        .single();
+
+      const now = Date.now();
+      let newCount = 1;
+      let newStart = new Date().toISOString();
+
+      if (usage) {
+        const start = new Date(usage.window_start).getTime();
+        if (now - start < WINDOW_MS) {
+          if (usage.count >= LIMIT) {
+            return text("Rate limit exceeded. Please try again later.", 429);
+          }
+          newCount = usage.count + 1;
+          newStart = usage.window_start; // keep old window
+        }
+      }
+
+      await svc.from("rate_limits").upsert({
+        key: rateKey,
+        endpoint: "index-source",
+        count: newCount,
+        window_start: newStart
+      });
+    }
 
     // Body
     const body = await req.json().catch(() => ({} as any));

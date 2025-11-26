@@ -1,11 +1,22 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import OpenAI from "npm:openai@4.56.0";
 
+import { createClient } from "npm:@supabase/supabase-js@2";
+
 const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+        status,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+    });
+
+const text = (body: string, status = 200) =>
+    new Response(body, { status, headers: { ...corsHeaders } });
 
 Deno.serve(async (req) => {
     if (req.method === "OPTIONS") {
@@ -13,6 +24,65 @@ Deno.serve(async (req) => {
     }
 
     try {
+        // --- RATE LIMITING ---
+        const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+        const supabaseAnon = Deno.env.get("SUPABASE_ANON_KEY")!;
+        const supa = createClient(supabaseUrl, supabaseAnon, {
+            global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+        });
+
+        const { data: { user } } = await supa.auth.getUser();
+
+        const isAnon = !user ||
+            user?.app_metadata?.provider === "anonymous" ||
+            user?.user_metadata?.is_anonymous === true ||
+            (Array.isArray(user?.identities) &&
+                user.identities.some((i: any) => i?.provider === "anonymous"));
+
+        const LIMIT = isAnon ? 5 : 20;
+        const WINDOW_MS = 60 * 60 * 1000; // 1 hour
+
+        let rateKey = "";
+        if (isAnon) {
+            rateKey = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+        } else {
+            rateKey = user!.id;
+        }
+
+        if (rateKey !== "unknown") {
+            const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+            const admin = createClient(supabaseUrl, SERVICE_ROLE);
+
+            const { data: usage } = await admin
+                .from("rate_limits")
+                .select("*")
+                .eq("key", rateKey)
+                .eq("endpoint", "suggest-prompts")
+                .single();
+
+            const now = Date.now();
+            let newCount = 1;
+            let newStart = new Date().toISOString();
+
+            if (usage) {
+                const start = new Date(usage.window_start).getTime();
+                if (now - start < WINDOW_MS) {
+                    if (usage.count >= LIMIT) {
+                        return text("Rate limit exceeded. Please try again later.", 429);
+                    }
+                    newCount = usage.count + 1;
+                    newStart = usage.window_start; // keep old window
+                }
+            }
+
+            await admin.from("rate_limits").upsert({
+                key: rateKey,
+                endpoint: "suggest-prompts",
+                count: newCount,
+                window_start: newStart
+            });
+        }
+
         const { topic, context } = await req.json();
 
         if (!topic && !context) {

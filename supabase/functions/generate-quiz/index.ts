@@ -298,13 +298,14 @@ Deno.serve(async (req) => {
     const wantNoRepeat = no_repeat !== false; // default = true
 
     // Fast trial-cap precheck only if we are INSERTING a new quiz
-    if (!replace_quiz_id) {
-      const isAnon =
-        user?.app_metadata?.provider === "anonymous" ||
-        user?.user_metadata?.is_anonymous === true ||
-        (Array.isArray(user?.identities) &&
-          user.identities.some((i: any) => i?.provider === "anonymous"));
+    // Fast trial-cap precheck only if we are INSERTING a new quiz
+    const isAnon =
+      user?.app_metadata?.provider === "anonymous" ||
+      user?.user_metadata?.is_anonymous === true ||
+      (Array.isArray(user?.identities) &&
+        user.identities.some((i: any) => i?.provider === "anonymous"));
 
+    if (!replace_quiz_id) {
       if (isAnon) {
         const { count: quizCount, error: cErr } = await supa
           .from("quizzes")
@@ -318,6 +319,57 @@ Deno.serve(async (req) => {
         }
       }
     }
+
+    // --- RATE LIMITING ---
+    // Anon: Limit by IP (5/hour) to prevent mass account creation attacks.
+    // Auth: Limit by User ID (20/hour) to prevent compromised account abuse.
+
+    const LIMIT = isAnon ? 5 : 20;
+    const WINDOW_MS = 60 * 60 * 1000; // 1 hour
+
+    let rateKey = "";
+    if (isAnon) {
+      rateKey = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+      // If we can't determine IP, we might want to fail open or closed. 
+      // For now, "unknown" buckets them all together (risky but safe for dev).
+    } else {
+      rateKey = user.id;
+    }
+
+    if (rateKey !== "unknown") {
+      const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+      const admin = createClient(supabaseUrl, SERVICE_ROLE);
+
+      const { data: usage } = await admin
+        .from("rate_limits")
+        .select("*")
+        .eq("key", rateKey)
+        .eq("endpoint", "generate-quiz")
+        .single();
+
+      const now = Date.now();
+      let newCount = 1;
+      let newStart = new Date().toISOString();
+
+      if (usage) {
+        const start = new Date(usage.window_start).getTime();
+        if (now - start < WINDOW_MS) {
+          if (usage.count >= LIMIT) {
+            return text("Rate limit exceeded. Please try again later.", 429);
+          }
+          newCount = usage.count + 1;
+          newStart = usage.window_start; // keep old window
+        }
+      }
+
+      await admin.from("rate_limits").upsert({
+        key: rateKey,
+        endpoint: "generate-quiz",
+        count: newCount,
+        window_start: newStart
+      });
+    }
+
 
     if (!group_id || typeof group_id !== "string") {
       return text("group_id is required", 400);
