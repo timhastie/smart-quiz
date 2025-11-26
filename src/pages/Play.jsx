@@ -427,16 +427,31 @@ export default function Play() {
 
     const recognition = new SpeechRecognition();
     recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = "en-US"; // Default to English, could be dynamic
+    recognition.interimResults = true; // Enable interim results for faster feedback
+    recognition.lang = "en-US";
 
     recognition.onstart = () => {
       setIsListening(true);
     };
 
     recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      setInput((prev) => (prev ? prev + " " + transcript : transcript));
+      let finalTranscript = "";
+      let interimTranscript = "";
+
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        } else {
+          interimTranscript += event.results[i][0].transcript;
+        }
+      }
+
+      if (finalTranscript) {
+        setInput((prev) => {
+          const trimmedPrev = prev ? prev.trim() : "";
+          return trimmedPrev ? trimmedPrev + " " + finalTranscript : finalTranscript;
+        });
+      }
     };
 
     recognition.onerror = (event) => {
@@ -1721,7 +1736,7 @@ export default function Play() {
 
                   {/* Mobile-only actions */}
 
-                  <div className="mt-2 flex w-full gap-1 sm:hidden">
+                  <div className="mt-2 grid grid-cols-4 gap-1 w-full sm:hidden">
                     {isSyntheticMode ? (
                       <Link
                         to={originalQuizLink}
@@ -1729,26 +1744,26 @@ export default function Play() {
                           if (originalQuizDisabled)
                             e.preventDefault();
                         }}
-                        className={`flex-1 inline-flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap ${originalQuizDisabled
+                        className={`flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap w-full ${originalQuizDisabled
                           ? "opacity-50 cursor-not-allowed"
                           : ""
                           }`}
                       >
-                        <PlayIcon className="w-3 h-3 mr-1 fill-current" /> Main
+                        <PlayIcon className="w-3 h-3 mr-1 fill-current shrink-0" /> Main
                       </Link>
                     ) : isReviewMode ? (
                       <Link
                         to={`/play/${quizId}`}
-                        className={`flex-1 inline-flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap`}
+                        className={`flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap w-full`}
                       >
-                        <PlayIcon className="w-3 h-3 mr-1 fill-current" /> Main
+                        <PlayIcon className="w-3 h-3 mr-1 fill-current shrink-0" /> Main
                       </Link>
                     ) : (
                       <Link
                         to={`/play/${quizId}?mode=review`}
-                        className={`flex-1 inline-flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap`}
+                        className={`flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap w-full`}
                       >
-                        <PlayIcon className="w-3 h-3 mr-1 fill-current" /> Revisit
+                        <PlayIcon className="w-3 h-3 mr-1 fill-current shrink-0" /> Revisit
                       </Link>
                     )}
 
@@ -1756,7 +1771,7 @@ export default function Play() {
                       isReviewMode ? (
                         <button
                           type="button"
-                          className={`flex-1 inline-flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap`}
+                          className={`flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap w-full`}
                           onClick={removeCurrentFromReview}
                           disabled={
                             !current ||
@@ -1770,7 +1785,7 @@ export default function Play() {
                       ) : (
                         <button
                           type="button"
-                          className={`flex-1 inline-flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap`}
+                          className={`flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap w-full`}
                           onClick={addCurrentToReview}
                           disabled={
                             !current ||
@@ -1785,7 +1800,7 @@ export default function Play() {
                     ) : isReviewMode ? (
                       <button
                         type="button"
-                        className={`flex-1 inline-flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap`}
+                        className={`flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap w-full`}
                         onClick={removeCurrentFromReview}
                         disabled={!current}
                       >
@@ -1795,7 +1810,7 @@ export default function Play() {
 
                     <button
                       type="button"
-                      className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-2 text-[10px] leading-tight whitespace-nowrap font-medium`}
+                      className={`flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap font-medium w-full`}
                       onClick={handleHint}
                       title="Get a hint"
                     >
@@ -1804,7 +1819,7 @@ export default function Play() {
 
                     <button
                       type="button"
-                      className={`flex-1 inline-flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap`}
+                      className={`flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap w-full`}
                       onClick={toggleDisplayAnswer}
                       title={
                         isPeeking
