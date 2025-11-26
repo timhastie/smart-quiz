@@ -477,6 +477,9 @@ export default function Play() {
 
     // 2. All Other Browsers/Mobile -> Use Whisper (Reliable, no beep on iOS)
     try {
+      // Ensure TTS is stopped before listening (iOS fix for audio ducking/beeping)
+      window.speechSynthesis.cancel();
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioChunksRef.current = [];
       const mediaRecorder = new MediaRecorder(stream);
@@ -1805,7 +1808,7 @@ export default function Play() {
 
                   {/* Mobile-only actions */}
 
-                  <div className="mt-2 grid grid-cols-4 gap-1 w-full sm:hidden">
+                  <div className="mt-6 grid grid-cols-4 gap-1 w-full sm:hidden">
                     {isSyntheticMode ? (
                       <Link
                         to={originalQuizLink}
@@ -2020,6 +2023,31 @@ export default function Play() {
                           )}
                         </button>
                       )}
+
+                      {/* Mobile Feedback Overlay (Inside Textarea) */}
+                      <div className="absolute bottom-3 left-4 right-16 pointer-events-none sm:hidden flex flex-col justify-end text-sm font-medium leading-tight">
+                        {feedback && (
+                          <span className={isPositiveFeedback ? "text-emerald-600" : "text-rose-600"}>
+                            {isPositiveFeedback ? "Correct! ✓" : "Incorrect ✕"}
+                          </span>
+                        )}
+
+                        {!showReviewPrompt && addedToReview && (
+                          <span className="text-gray-900 mt-0.5">
+                            Added to review group!
+                          </span>
+                        )}
+                        {isReviewMode && showRemovePrompt && !removedFromReview && (
+                          <span className="text-gray-900 mt-0.5">
+                            Remove from review group?
+                          </span>
+                        )}
+                        {isReviewMode && !showRemovePrompt && removedFromReview && (
+                          <span className="text-gray-900 mt-0.5">
+                            Removed from review group!
+                          </span>
+                        )}
+                      </div>
                     </div>
 
 
@@ -2116,46 +2144,48 @@ export default function Play() {
                     </button>
                   </div>
 
-                  {/* Feedback + prompts */}
-                  {feedback && (
-                    <p
-                      className={`mt-3 text-base sm:text-lg text-center ${isPositiveFeedback
-                        ? "text-green-400"
-                        : "text-red-400"
-                        }`}
-                      aria-live="polite"
-                    >
-                      {feedback}
-                    </p>
-                  )}
+                  {/* Feedback + prompts (Desktop Only) */}
+                  <div className="hidden sm:block">
+                    {feedback && (
+                      <p
+                        className={`mt-3 text-base sm:text-lg text-center ${isPositiveFeedback
+                          ? "text-green-400"
+                          : "text-red-400"
+                          }`}
+                        aria-live="polite"
+                      >
+                        {feedback}
+                      </p>
+                    )}
 
-                  {showReviewPrompt && !addedToReview && (
-                    <p className="mt-2 text-white text-center text-base sm:text-lg">
-                      Add question to review group? Press{" "}
-                      <span className="font-semibold">Y</span> for yes.
-                    </p>
-                  )}
-                  {!showReviewPrompt && addedToReview && (
-                    <p className="mt-2 text-white text-center text-base sm:text-lg">
-                      Added to review group!
-                    </p>
-                  )}
-
-                  {isReviewMode &&
-                    showRemovePrompt &&
-                    !removedFromReview && (
+                    {showReviewPrompt && !addedToReview && (
                       <p className="mt-2 text-white text-center text-base sm:text-lg">
-                        Remove question from review group? Press{" "}
+                        Add question to review group? Press{" "}
                         <span className="font-semibold">Y</span> for yes.
                       </p>
                     )}
-                  {isReviewMode &&
-                    !showRemovePrompt &&
-                    removedFromReview && (
+                    {!showReviewPrompt && addedToReview && (
                       <p className="mt-2 text-white text-center text-base sm:text-lg">
-                        Removed question from review group.
+                        Added to review group!
                       </p>
                     )}
+
+                    {isReviewMode &&
+                      showRemovePrompt &&
+                      !removedFromReview && (
+                        <p className="mt-2 text-white text-center text-base sm:text-lg">
+                          Remove question from review group? Press{" "}
+                          <span className="font-semibold">Y</span> for yes.
+                        </p>
+                      )}
+                    {isReviewMode &&
+                      !showRemovePrompt &&
+                      removedFromReview && (
+                        <p className="mt-2 text-white text-center text-base sm:text-lg">
+                          Removed question from review group!
+                        </p>
+                      )}
+                  </div>
                 </div>
               </div>
             </>
