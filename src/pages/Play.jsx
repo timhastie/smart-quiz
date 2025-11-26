@@ -1950,19 +1950,8 @@ export default function Play() {
                           </button>
 
                           <div className="flex items-center gap-1 bg-white rounded-lg border border-slate-200 shadow-sm p-1 max-w-full overflow-hidden">
-                            {/* Language Search Filter */}
-                            <div className="w-16 sm:w-20 shrink-0 border-r border-slate-100 pr-1">
-                              <input
-                                className="w-full text-xs px-1 py-1 bg-transparent border-none focus:ring-0 placeholder:text-slate-400 text-slate-700"
-                                placeholder="Search..."
-                                value={voiceSearch || ""}
-                                onChange={(e) => setVoiceSearch(e.target.value)}
-                                onClick={(e) => e.stopPropagation()}
-                              />
-                            </div>
-
                             <select
-                              className="bg-transparent text-slate-900 text-xs sm:text-sm border-none px-1 py-0.5 w-24 sm:w-32 focus:ring-0 cursor-pointer truncate"
+                              className="bg-transparent text-slate-900 text-xs sm:text-sm border-none border-r border-slate-100 pr-1 px-1 py-0.5 w-24 sm:w-32 focus:ring-0 cursor-pointer truncate"
                               value={selectedVoiceURI}
                               onChange={(e) => setSelectedVoiceURI(e.target.value)}
                               title="Select voice for pronunciation"
@@ -1997,6 +1986,17 @@ export default function Play() {
                                   );
                                 })}
                             </select>
+
+                            {/* Language Search Filter */}
+                            <div className="w-16 sm:w-20 shrink-0">
+                              <input
+                                className="w-full text-xs px-1 py-1 bg-transparent border-none focus:ring-0 placeholder:text-slate-400 text-slate-700"
+                                placeholder="Search..."
+                                value={voiceSearch || ""}
+                                onChange={(e) => setVoiceSearch(e.target.value)}
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            </div>
                           </div>
                         </div>
                       )}
@@ -2026,7 +2026,7 @@ export default function Play() {
 
                       {/* Mobile Feedback Overlay (Inside Textarea) */}
                       <div className="absolute bottom-3 left-4 right-16 pointer-events-none sm:hidden flex flex-col justify-end text-sm font-medium leading-tight">
-                        {feedback && (
+                        {feedback && !isPeeking && (
                           <span className={isPositiveFeedback ? "text-emerald-600" : "text-rose-600"}>
                             {isPositiveFeedback ? "Correct! ✓" : "Incorrect ✕"}
                           </span>
