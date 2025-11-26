@@ -390,27 +390,57 @@ export default function Play() {
 
   // --- TTS Voice State ---
   const [voices, setVoices] = useState([]);
-  const [selectedVoiceURI, setSelectedVoiceURI] = useState(
-    () => localStorage.getItem("quizTTSVoiceURI") || ""
-  );
+  const [selectedVoice, setSelectedVoice] = useState(null); // Object: { name, languageCode, ssmlGender }
   const [voiceSearch, setVoiceSearch] = useState("");
+  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
+  const [ttsLoading, setTtsLoading] = useState(false);
 
   useEffect(() => {
-    const loadVoices = () => {
-      const vs = window.speechSynthesis.getVoices();
-      setVoices(vs);
+    const loadVoices = async () => {
+      try {
+        const { data: session } = await supabase.auth.getSession();
+        const token = session?.access_token;
+
+        const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/google-tts/voices`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!res.ok) throw new Error("Failed to fetch voices");
+
+        const { voices: fetchedVoices } = await res.json();
+        setVoices(fetchedVoices);
+
+        // Attempt to restore selected voice from localStorage
+        const savedVoiceName = localStorage.getItem("quizTTSVoiceName");
+        if (savedVoiceName) {
+          const savedVoice = fetchedVoices.find(v => v.name === savedVoiceName);
+          if (savedVoice) {
+            setSelectedVoice(savedVoice);
+          }
+        }
+      } catch (err) {
+        console.error("Error loading TTS voices:", err);
+        setVoices([]);
+      }
     };
 
     loadVoices();
-    window.speechSynthesis.onvoiceschanged = loadVoices;
-    return () => {
-      window.speechSynthesis.onvoiceschanged = null;
-    };
   }, []);
+
+  useEffect(() => {
+    if (selectedVoice) {
+      localStorage.setItem("quizTTSVoiceName", selectedVoice.name);
+    } else {
+      localStorage.removeItem("quizTTSVoiceName");
+    }
+  }, [selectedVoice]);
 
   // --- Speech to Text ---
   const [isListening, setIsListening] = useState(false);
-  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
+  // isProcessingAudio is already declared above for TTS, but also used for STT.
 
   // Whisper (Universal/Mobile) refs
   const mediaRecorderRef = useRef(null);
@@ -538,12 +568,6 @@ export default function Play() {
       }
     }
   };
-
-  useEffect(() => {
-    if (selectedVoiceURI) {
-      localStorage.setItem("quizTTSVoiceURI", selectedVoiceURI);
-    }
-  }, [selectedVoiceURI]);
 
   // Load quiz (single, group synthetic, or all synthetic)
   useEffect(() => {
@@ -1926,34 +1950,61 @@ export default function Play() {
                         <div className="absolute bottom-3 right-3 flex items-center gap-2 z-10 max-w-[calc(100%-1.5rem)]">
                           <button
                             type="button"
-                            onClick={() => {
+                            onClick={async () => {
                               if (!current) return;
                               const text = input || "";
                               if (!text) return;
 
-                              // Cancel any ongoing speech
-                              window.speechSynthesis.cancel();
+                              setTtsLoading(true);
+                              try {
+                                const { data: { session } } = await supabase.auth.getSession();
+                                const token = session?.access_token;
 
-                              const utterance = new SpeechSynthesisUtterance(text);
+                                const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/google-tts/synthesize`, {
+                                  method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                    Authorization: `Bearer ${token}`
+                                  },
+                                  body: JSON.stringify({
+                                    text,
+                                    voiceParams: selectedVoice ? {
+                                      languageCode: selectedVoice.languageCodes[0],
+                                      name: selectedVoice.name,
+                                      ssmlGender: selectedVoice.ssmlGender
+                                    } : undefined
+                                  })
+                                });
 
-                              if (selectedVoiceURI) {
-                                const voice = voices.find(v => v.voiceURI === selectedVoiceURI);
-                                if (voice) utterance.voice = voice;
+                                if (!res.ok) throw new Error("TTS failed");
+
+                                const data = await res.json();
+                                if (data.audioContent) {
+                                  const audio = new Audio(`data:audio/mp3;base64,${data.audioContent}`);
+                                  audio.play();
+                                }
+                              } catch (err) {
+                                console.error("TTS Error:", err);
+                                alert("Failed to play audio. Check API key?");
+                              } finally {
+                                setTtsLoading(false);
                               }
-
-                              window.speechSynthesis.speak(utterance);
                             }}
-                            className="p-2 bg-emerald-100 text-emerald-700 rounded-full hover:bg-emerald-200 transition-colors shadow-sm shrink-0"
+                            className="p-2 bg-emerald-100 text-emerald-700 rounded-full hover:bg-emerald-200 transition-colors shadow-sm shrink-0 disabled:opacity-50"
                             title="Pronounce answer"
+                            disabled={ttsLoading}
                           >
-                            <Volume2 className="w-5 h-5" />
+                            {ttsLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Volume2 className="w-5 h-5" />}
                           </button>
 
                           <div className="flex items-center gap-1 bg-white rounded-lg border border-slate-200 shadow-sm p-1 max-w-full overflow-hidden">
                             <select
                               className="bg-transparent text-slate-900 text-xs sm:text-sm border-none border-r border-slate-100 pr-1 px-1 py-0.5 w-24 sm:w-32 focus:ring-0 cursor-pointer truncate"
-                              value={selectedVoiceURI}
-                              onChange={(e) => setSelectedVoiceURI(e.target.value)}
+                              value={selectedVoice?.name || ""}
+                              onChange={(e) => {
+                                const v = voices.find(v => v.name === e.target.value);
+                                setSelectedVoice(v || null);
+                              }}
                               title="Select voice for pronunciation"
                               onClick={(e) => e.stopPropagation()}
                             >
@@ -1962,25 +2013,28 @@ export default function Play() {
                                 .filter(v => {
                                   if (!voiceSearch) return true;
                                   const search = voiceSearch.toLowerCase();
-                                  let label = v.name.toLowerCase();
+                                  const name = v.name.toLowerCase();
+                                  const lang = (v.languageCodes?.[0] || "").toLowerCase();
+                                  let langName = "";
                                   try {
-                                    const langName = new Intl.DisplayNames(['en'], { type: 'language' }).of(v.lang);
-                                    if (langName) label += " " + langName.toLowerCase();
+                                    langName = (new Intl.DisplayNames(['en'], { type: 'language' }).of(v.languageCodes?.[0]) || "").toLowerCase();
                                   } catch (e) { }
-                                  return label.includes(search);
+
+                                  return name.includes(search) || lang.includes(search) || langName.includes(search);
                                 })
                                 .map((v) => {
                                   let label = v.name;
                                   try {
-                                    const langName = new Intl.DisplayNames(['en'], { type: 'language' }).of(v.lang);
+                                    const code = v.languageCodes?.[0];
+                                    const langName = new Intl.DisplayNames(['en'], { type: 'language' }).of(code);
                                     if (langName) {
-                                      label = `${v.name} (${langName})`;
+                                      // Clean up name a bit: "en-US-Neural2-J" -> "Neural2-J (English)"
+                                      const shortName = v.name.split("-").slice(2).join("-");
+                                      label = `${shortName || v.name} (${langName})`;
                                     }
-                                  } catch (e) {
-                                    // Fallback if Intl.DisplayNames fails or lang code is invalid
-                                  }
+                                  } catch (e) { }
                                   return (
-                                    <option key={v.voiceURI} value={v.voiceURI}>
+                                    <option key={v.name} value={v.name}>
                                       {label}
                                     </option>
                                   );
