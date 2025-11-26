@@ -1903,7 +1903,7 @@ export default function Dashboard() {
                     <input
                       id="inline-gen-title"
                       className="field w-full placeholder:text-slate-500"
-                      placeholder=""
+                      placeholder="My quiz"
                       value={gTitle}
                       onChange={(e) => setGTitle(e.target.value)}
                       disabled={generating}
@@ -2145,7 +2145,7 @@ export default function Dashboard() {
                     </div>
 
                     {/* Number of questions and Generate button - always visible */}
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end mt-3">
+                    <div className="flex flex-col gap-6 sm:gap-3 sm:flex-row sm:items-end mt-3">
                       <div className="w-full sm:w-28">
                         <label
                           className="block text-sm text-white/70 mb-1"
@@ -2153,16 +2153,64 @@ export default function Dashboard() {
                         >
                           # of questions
                         </label>
+
+                        {/* Mobile: Scrollable Spinner */}
+                        <div className="sm:hidden relative h-24 w-20 mx-auto overflow-hidden rounded-xl bg-white/5 border border-white/10">
+                          <div
+                            className="absolute inset-0 overflow-y-scroll scrollbar-hide"
+                            style={{
+                              scrollSnapType: 'y mandatory',
+                              paddingTop: '2.5rem',
+                              paddingBottom: '2.5rem'
+                            }}
+                            onScroll={(e) => {
+                              const scrollTop = e.target.scrollTop;
+                              const itemHeight = 28;
+                              const index = Math.round(scrollTop / itemHeight);
+                              const newValue = Math.min(50, Math.max(1, index + 1));
+                              if (newValue !== gCount) {
+                                setGCount(newValue);
+                              }
+                            }}
+                            ref={(el) => {
+                              if (el && !el.dataset.initialized) {
+                                el.dataset.initialized = 'true';
+                                el.scrollTop = (gCount - 1) * 28;
+                              }
+                            }}
+                          >
+                            {Array.from({ length: 50 }, (_, i) => i + 1).map((num) => (
+                              <div
+                                key={num}
+                                className="h-7 flex items-center justify-center text-base font-bold transition-all"
+                                style={{
+                                  scrollSnapAlign: 'center',
+                                  color: num === gCount ? '#ffffff' : '#94a3b8',
+                                  transform: num === gCount ? 'scale(1.3)' : 'scale(1)',
+                                }}
+                              >
+                                {num}
+                              </div>
+                            ))}
+                          </div>
+                          {/* Center highlight bar */}
+                          <div className="absolute top-1/2 left-0 right-0 h-7 -translate-y-1/2 bg-white/10 border-y-2 border-white/20 pointer-events-none" />
+                        </div>
+
+                        {/* Desktop: Simple Input */}
                         <input
                           id="inline-gen-count"
-                          className="field w-full h-12 text-center"
+                          className="hidden sm:block field w-full h-12 text-center"
                           type="number"
                           min={1}
-                          max={30}
+                          max={50}
                           value={gCount}
-                          onChange={(e) =>
-                            setGCount(Number(e.target.value) || 10)
-                          }
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            if (val >= 1 && val <= 50) {
+                              setGCount(val);
+                            }
+                          }}
                           disabled={generating}
                         />
                       </div>
@@ -2979,6 +3027,30 @@ export default function Dashboard() {
               quizzes stay with you.
             </p>
 
+            <button
+              type="button"
+              onClick={() => oauthOrLink("google")}
+              className="w-full h-12 bg-white text-slate-900 font-medium rounded-2xl flex items-center justify-center gap-3 hover:bg-gray-50 transition mb-6"
+              disabled={authBusy}
+            >
+              <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
+                <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.6 32.4 29.2 35 24 35c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C33.8 5.1 29.2 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21c10.5 0 20-7.6 20-21 0-1.3-.1-2.7-.4-3.5z" />
+                <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 16 19 13 24 13c3 0 5.8 1.1 7.9 3l5.7-5.7C33.8 5.1 29.2 3 24 3 16 3 8.9 7.6 6.3 14.7z" />
+                <path fill="#4CAF50" d="M24 45c5.1 0 9.8-1.9 13.3-5.1l-6.1-5c-2 1.5-4.6 2.4-7.2 2.4-5.2 0-9.6-3.5-11.2-8.3L6.2 33.9C8.8 41 16 45 24 45z" />
+                <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-1.1 3.1-3.6 5.6-6.6 6.9l6.1 5C37.8 37.9 41 31.9 41 24c0-1.3-.1-2.7-.4-3.5z" />
+              </svg>
+              Sign in / sign up with google
+            </button>
+
+            <div className="relative mb-6">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-white/10"></div>
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-[#0d3b44] text-white/50">Or with email</span>
+              </div>
+            </div>
+
             <label
               className="block text-sm text-white/70 mb-1"
               htmlFor="auth-email"
@@ -3048,23 +3120,7 @@ export default function Dashboard() {
               </button>
             </div>
 
-            <div className="mt-3 flex justify-center">
-              <button
-                type="button"
-                onClick={() => oauthOrLink("google")}
-                className="h-12 w-12 rounded-full bg-white border border-gray-300 shadow flex items-center justify-center hover:shadow-md active:scale-95 transition"
-                aria-label="Continue with Google"
-                title="Continue with Google"
-                disabled={authBusy}
-              >
-                <svg width="24" height="24" viewBox="0 0 48 48" aria-hidden="true">
-                  <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.6 32.4 29.2 35 24 35c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C33.8 5.1 29.2 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21c10.5 0 20-7.6 20-21 0-1.3-.1-2.7-.4-3.5z" />
-                  <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 16 19 13 24 13c3 0 5.8 1.1 7.9 3l5.7-5.7C33.8 5.1 29.2 3 24 3 16 3 8.9 7.6 6.3 14.7z" />
-                  <path fill="#4CAF50" d="M24 45c5.1 0 9.8-1.9 13.3-5.1l-6.1-5c-2 1.5-4.6 2.4-7.2 2.4-5.2 0-9.6-3.5-11.2-8.3L6.2 33.9C8.8 41 16 45 24 45z" />
-                  <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-1.1 3.1-3.6 5.6-6.6 6.9l6.1 5C37.8 37.9 41 31.9 41 24c0-1.3-.1-2.7-.4-3.5z" />
-                </svg>
-              </button>
-            </div>
+
           </div>
         </div>
       )}
@@ -3088,9 +3144,9 @@ export default function Dashboard() {
                   Title
                 </label>
                 <input
-                  id="gen-title"
+                  id="modal-gen-title"
                   className="field w-full placeholder:text-gray-400"
-                  placeholder=""
+                  placeholder="My quiz"
                   value={gTitle}
                   onChange={(e) => setGTitle(e.target.value)}
                 />
@@ -3321,7 +3377,7 @@ export default function Dashboard() {
                 </div>
 
                 {/* Number of questions and Generate button - always visible */}
-                <div className="flex flex-col sm:flex-row sm:items-end gap-2 mt-3">
+                <div className="flex flex-col gap-6 sm:gap-2 sm:flex-row sm:items-end mt-3">
                   <div className="w-full sm:w-24">
                     <label
                       className="block text-sm text-white/70 mb-1"
@@ -3329,46 +3385,91 @@ export default function Dashboard() {
                     >
                       # of questions
                     </label>
+
+                    {/* Mobile: Scrollable Spinner */}
+                    <div className="sm:hidden relative h-24 w-20 mx-auto overflow-hidden rounded-xl bg-white/5 border border-white/10">
+                      <div
+                        className="absolute inset-0 overflow-y-scroll scrollbar-hide"
+                        style={{
+                          scrollSnapType: 'y mandatory',
+                          paddingTop: '2.5rem',
+                          paddingBottom: '2.5rem'
+                        }}
+                        onScroll={(e) => {
+                          const scrollTop = e.target.scrollTop;
+                          const itemHeight = 28;
+                          const index = Math.round(scrollTop / itemHeight);
+                          const newValue = Math.min(50, Math.max(1, index + 1));
+                          if (newValue !== gCount) {
+                            setGCount(newValue);
+                          }
+                        }}
+                        ref={(el) => {
+                          if (el && !el.dataset.initialized) {
+                            el.dataset.initialized = 'true';
+                            el.scrollTop = (gCount - 1) * 28;
+                          }
+                        }}
+                      >
+                        {Array.from({ length: 50 }, (_, i) => i + 1).map((num) => (
+                          <div
+                            key={num}
+                            className="h-7 flex items-center justify-center text-base font-bold transition-all"
+                            style={{
+                              scrollSnapAlign: 'center',
+                              color: num === gCount ? '#ffffff' : '#94a3b8',
+                              transform: num === gCount ? 'scale(1.3)' : 'scale(1)',
+                            }}
+                          >
+                            {num}
+                          </div>
+                        ))}
+                      </div>
+                      {/* Center highlight bar */}
+                      <div className="absolute top-1/2 left-0 right-0 h-7 -translate-y-1/2 bg-white/10 border-y-2 border-white/20 pointer-events-none" />
+                    </div>
+
+                    {/* Desktop: Simple Input */}
                     <input
                       id="gen-count"
-                      className="field w-full h-12 text-center"
+                      className="hidden sm:block field w-full h-12 text-center"
                       type="number"
                       min={1}
-                      max={30}
+                      max={50}
                       value={gCount}
-                      onChange={(e) => setGCount(Number(e.target.value))}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        if (val >= 1 && val <= 50) {
+                          setGCount(val);
+                        }
+                      }}
+                      disabled={generating}
                     />
                   </div>
 
-                  <button
-                    className={`${btnBase} ${btnGreen} h-12 px-6 sm:ml-auto`}
-                    onClick={() => generateQuiz()}
-                    disabled={generating}
-                  >
-                    {generating ? "Generating…" : "Generate"}
-                  </button>
+                  <div className="flex flex-col sm:flex-row gap-2 sm:ml-auto">
+                    <button
+                      className={`${btnBase} ${btnGray}`}
+                      onClick={() => setGenOpen(false)}
+                      disabled={generating}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className={`${btnBase} ${btnGreen}`}
+                      onClick={() => generateQuiz()}
+                      disabled={generating}
+                    >
+                      {generating ? "Generating…" : "Generate"}
+                    </button>
+                  </div>
                 </div>
               </div>
 
             </div>
 
 
-            <div className="flex flex-col sm:flex-row justify-end gap-2 mt-6">
-              <button
-                className={`${btnBase} ${btnGray}`}
-                onClick={() => setGenOpen(false)}
-                disabled={generating}
-              >
-                Cancel
-              </button>
-              <button
-                className={`${btnBase} ${btnGreen}`}
-                onClick={() => generateQuiz()}
-                disabled={generating}
-              >
-                {generating ? "Generating…" : "Generate"}
-              </button>
-            </div>
+
           </div>
         </div>
       )

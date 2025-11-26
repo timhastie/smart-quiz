@@ -119,3 +119,16 @@
   /* Paint over any UA/Firefox field color */
   box-shadow: inset 0 0 0 1000px #ffffff !important;
 }
+
+/* Hide scrollbar for mobile spinner */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  /* IE and Edge */
+  scrollbar-width: none;
+  /* Firefox */
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+  /* Chrome, Safari and Opera */
+}

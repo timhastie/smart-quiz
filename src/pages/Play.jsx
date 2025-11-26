@@ -7,10 +7,11 @@ import {
   useSearchParams,
   useLocation,
 } from "react-router-dom";
-import { Dice5 } from "lucide-react";
+import { Dice5, Volume2, Lightbulb } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
 import { getInitialGroupFromUrlOrStorage } from "../lib/groupFilter";
+import SigningInOverlay from "../components/SigningInOverlay";
 
 // --- Sentinel for the ALL bucket ---
 const ALL_GROUP_ID = "00000000-0000-0000-0000-000000000000";
@@ -374,9 +375,43 @@ export default function Play() {
   const [showRemovePrompt, setShowRemovePrompt] = useState(false);
   const [removedFromReview, setRemovedFromReview] = useState(false);
 
+  // --- Review Success Overlay State ---
+  // --- Review Success Overlay State ---
+  const [reviewFeedbackMessage, setReviewFeedbackMessage] = useState("");
+
+  // --- Hint State ---
+  const [showHintModal, setShowHintModal] = useState(false);
+  const [hintLoading, setHintLoading] = useState(false);
+  const [hintText, setHintText] = useState("");
+
   // --- Peek state ---
   const [peekOn, setPeekOn] = useState([]);
   const [peekStash, setPeekStash] = useState([]);
+
+  // --- TTS Voice State ---
+  const [voices, setVoices] = useState([]);
+  const [selectedVoiceURI, setSelectedVoiceURI] = useState(
+    () => localStorage.getItem("quizTTSVoiceURI") || ""
+  );
+
+  useEffect(() => {
+    const loadVoices = () => {
+      const vs = window.speechSynthesis.getVoices();
+      setVoices(vs);
+    };
+
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    return () => {
+      window.speechSynthesis.onvoiceschanged = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (selectedVoiceURI) {
+      localStorage.setItem("quizTTSVoiceURI", selectedVoiceURI);
+    }
+  }, [selectedVoiceURI]);
 
   // Load quiz (single, group synthetic, or all synthetic)
   useEffect(() => {
@@ -596,7 +631,12 @@ export default function Play() {
     setShowReviewPrompt(false);
     setAddedToReview(false);
     setShowRemovePrompt(false);
+    setShowRemovePrompt(false);
     setRemovedFromReview(false);
+    setShowHintModal(false);
+    setHintLoading(false);
+    setHintText("");
+    requestAnimationFrame(() => areaRef.current?.focus());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [index]);
 
@@ -865,6 +905,10 @@ export default function Play() {
       );
       setAddedToReview(true);
       setShowReviewPrompt(false);
+
+      // Show success overlay
+      setReviewFeedbackMessage("Added to review group!");
+      setTimeout(() => setReviewFeedbackMessage(""), 1000);
     }
   }
 
@@ -941,6 +985,10 @@ export default function Play() {
         return candidate < 0 ? 0 : candidate;
       });
 
+      // Show success overlay
+      setReviewFeedbackMessage("Removed question from review group.");
+      setTimeout(() => setReviewFeedbackMessage(""), 1000);
+
       return;
     }
 
@@ -988,6 +1036,113 @@ export default function Play() {
         const candidate = Math.min(removedIdx, newArr.length - 1);
         return candidate < 0 ? 0 : candidate;
       });
+
+      // Show success overlay
+      setReviewFeedbackMessage("Removed question from review group.");
+      setTimeout(() => setReviewFeedbackMessage(""), 1000);
+    }
+  }
+
+  async function handleHint() {
+    if (!current) return;
+
+    // If hint already exists, show it
+    if (current.hint) {
+      setHintText(current.hint);
+      setShowHintModal(true);
+      return;
+    }
+
+    // Generate hint
+    setHintLoading(true);
+    setShowHintModal(true); // Open modal immediately to show loading state
+
+    try {
+      const { data: sessionRes } = await supabase.auth.getSession();
+      const jwt = sessionRes?.session?.access_token;
+
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-hint`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+          },
+          body: JSON.stringify({
+            question: current.prompt,
+            answer: current.answer,
+          }),
+        }
+      );
+
+      if (!res.ok) throw new Error("Failed to generate hint");
+
+      const { hint } = await res.json();
+      setHintText(hint);
+
+      // Save hint to DB
+      // Note: This logic handles single quiz mode best. 
+      // For synthetic modes, we'd need to update the source quiz, which is complex.
+      // We'll attempt to update if we have a valid source ID.
+      const srcId = current.__srcQuizId || quizId;
+
+      if (srcId && user?.id) {
+        // Fetch current questions to ensure we have the latest array
+        const { data: quizData } = await supabase
+          .from("quizzes")
+          .select("questions, review_questions")
+          .eq("id", srcId)
+          .single();
+
+        if (quizData) {
+          // Determine which array to update
+          // In synthetic mode, we don't know easily if it came from questions or review_questions
+          // We'll try to find it in both
+          let qArr = Array.isArray(quizData.questions) ? quizData.questions : [];
+          let rArr = Array.isArray(quizData.review_questions) ? quizData.review_questions : [];
+          let updated = false;
+
+          const updateQ = (arr) => {
+            return arr.map(q => {
+              if (q.prompt === current.prompt && q.answer === current.answer) {
+                updated = true;
+                return { ...q, hint };
+              }
+              return q;
+            });
+          };
+
+          const newQArr = updateQ(qArr);
+          const newRArr = updateQ(rArr);
+
+          if (updated) {
+            await supabase
+              .from("quizzes")
+              .update({
+                questions: newQArr,
+                review_questions: newRArr,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", srcId);
+
+            // Update local state if possible
+            if (!isSyntheticMode) {
+              setQuiz(prev => ({
+                ...prev,
+                questions: newQArr,
+                review_questions: newRArr
+              }));
+            }
+          }
+        }
+      }
+
+    } catch (err) {
+      console.error(err);
+      setHintText("Could not generate hint. Please try again.");
+    } finally {
+      setHintLoading(false);
     }
   }
 
@@ -1222,6 +1377,10 @@ export default function Play() {
 
     // Reset progress
     retake();
+
+    // Show success overlay
+    setReviewFeedbackMessage("Randomized question order!");
+    setTimeout(() => setReviewFeedbackMessage(""), 1000);
   }
 
   // --- Peek/toggle actions ---
@@ -1281,6 +1440,45 @@ export default function Play() {
       onKeyDown={onKey}
       tabIndex={0}
     >
+      {reviewFeedbackMessage && <SigningInOverlay label={reviewFeedbackMessage} showDots={false} />}
+
+      {/* Hint Modal */}
+      {showHintModal && (
+        <div
+          className="fixed inset-0 bg-black/70 grid place-items-center z-[100]"
+          onClick={() => setShowHintModal(false)}
+        >
+          <div
+            className="w-full max-w-md surface-card p-6 m-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+              <Lightbulb className="w-6 h-6 text-yellow-400" />
+              Hint
+            </h2>
+
+            {hintLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
+              </div>
+            ) : (
+              <p className="text-white/90 text-lg leading-relaxed mb-6">
+                {hintText}
+              </p>
+            )}
+
+            <div className="flex justify-end">
+              <button
+                className={`${btnBase} ${btnGray}`}
+                onClick={() => setShowHintModal(false)}
+              >
+                Ok
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="sticky top-0 z-30 border-b border-white/5 bg-slate-950/80 backdrop-blur-md">
         <div className="max-w-6xl mx-auto flex flex-wrap items-end justify-between gap-4 px-6 py-4 sm:items-center">
           <div className="flex flex-col items-start gap-2 pl-2 sm:flex-row sm:items-center sm:gap-3 sm:pl-0 flex-none">
@@ -1357,6 +1555,8 @@ export default function Play() {
                         Strict mode
                       </span>
                     </label>
+
+
 
                     {/* Desktop actions row */}
                     <div className="hidden sm:flex items-center gap-2">
@@ -1450,7 +1650,16 @@ export default function Play() {
 
                       <button
                         type="button"
-                        className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray}`}
+                        className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} px-3 sm:px-4 font-medium`}
+                        onClick={handleHint}
+                        title="Get a hint"
+                      >
+                        Hint
+                      </button>
+
+                      <button
+                        type="button"
+                        className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} flex-1`}
                         onClick={toggleDisplayAnswer}
                         title={
                           isPeeking
@@ -1542,7 +1751,16 @@ export default function Play() {
 
                     <button
                       type="button"
-                      className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
+                      className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal w-14 sm:w-16`}
+                      onClick={handleHint}
+                      title="Get a hint"
+                    >
+                      <Lightbulb className="w-5 h-5 sm:w-6 sm:h-6" />
+                    </button>
+
+                    <button
+                      type="button"
+                      className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal flex-1`}
                       onClick={toggleDisplayAnswer}
                       title={
                         isPeeking
@@ -1559,7 +1777,7 @@ export default function Play() {
 
                 {/* TEXTAREA FRAME */}
                 <div className="mb-3 lg:flex lg:items-center lg:gap-6">
-                  <form onSubmit={submit} className="lg:flex-1">
+                  <form onSubmit={submit} className="lg:flex-1 relative">
                     <textarea
                       ref={areaRef}
                       className="w-full h-56 p-4 rounded-lg bg-white text-gray-900 border border-gray-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-base sm:text-xl placeholder:text-gray-500"
@@ -1570,6 +1788,63 @@ export default function Play() {
                       rows={7}
                       inputMode="text"
                     />
+
+                    {/* TTS Controls - Only visible when peeking (answer displayed) */}
+                    {isPeeking && (
+                      <div className="absolute bottom-4 right-4 flex items-center gap-2 z-10">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!current) return;
+                            const text = current.answer || "";
+                            if (!text) return;
+
+                            // Cancel any ongoing speech
+                            window.speechSynthesis.cancel();
+
+                            const utterance = new SpeechSynthesisUtterance(text);
+
+                            if (selectedVoiceURI) {
+                              const voice = voices.find(v => v.voiceURI === selectedVoiceURI);
+                              if (voice) utterance.voice = voice;
+                            }
+
+                            window.speechSynthesis.speak(utterance);
+                          }}
+                          className="p-2 bg-emerald-100 text-emerald-700 rounded-full hover:bg-emerald-200 transition-colors shadow-sm"
+                          title="Pronounce answer"
+                        >
+                          <Volume2 className="w-5 h-5" />
+                        </button>
+
+                        <select
+                          className="bg-white text-slate-900 text-xs sm:text-sm rounded-lg border border-slate-200 px-2 py-1.5 max-w-[120px] sm:max-w-[200px] focus:outline-none focus:ring-1 focus:ring-emerald-500 shadow-sm"
+                          value={selectedVoiceURI}
+                          onChange={(e) => setSelectedVoiceURI(e.target.value)}
+                          title="Select voice for pronunciation"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <option value="">Default Voice</option>
+                          {voices.map((v) => {
+                            let label = v.name;
+                            try {
+                              const langName = new Intl.DisplayNames(['en'], { type: 'language' }).of(v.lang);
+                              if (langName) {
+                                label = `${v.name} (${langName})`;
+                              }
+                            } catch (e) {
+                              // Fallback if Intl.DisplayNames fails or lang code is invalid
+                            }
+                            return (
+                              <option key={v.voiceURI} value={v.voiceURI}>
+                                {label}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+                    )}
+
 
                     {/* Mobile Enter/Prev/Next */}
                     <div className="mt-3 grid grid-cols-4 gap-3 sm:hidden">
@@ -1736,53 +2011,55 @@ export default function Play() {
             </div>
           )}
         </div>
-      </main>
+      </main >
 
       {/* Results Modal */}
-      {showResult && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-3 sm:p-4 z-50">
-          <div className="surface-card p-5 sm:p-6 max-w-md w-full max-h-[85vh] overflow-y-auto">
-            <h2 className="text-xl sm:text-2xl font-bold mb-2">
-              {isSyntheticMode
-                ? isReviewMode
-                  ? "Revisit Score"
-                  : "All Questions Score"
-                : isReviewMode
-                  ? "Revisit Score"
-                  : "Your Score"}{" "}
-              {hasConfetti ? "🎉" : ""}
-            </h2>
-            <p className="text-base sm:text-lg mb-6">
-              You scored{" "}
-              <span className="font-semibold">{scorePct}%</span> on this{" "}
-              {isSyntheticMode
-                ? isReviewMode
-                  ? "revisit set"
-                  : "all-questions set"
-                : isReviewMode
-                  ? "revisit set"
-                  : "quiz"}
-              .
-            </p>
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2">
-              <button
-                type="button"
-                className={`${btnBase} ${btnGray} w-full sm:w-auto`}
-                onClick={retake}
-              >
-                Retake
-              </button>
-              <button
-                type="button"
-                className={`${btnBase} ${btnIndigo} w-full sm:w-auto`}
-                onClick={() => navigate(backPath)}
-              >
-                Return to dashboard
-              </button>
+      {
+        showResult && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-3 sm:p-4 z-50">
+            <div className="surface-card p-5 sm:p-6 max-w-md w-full max-h-[85vh] overflow-y-auto">
+              <h2 className="text-xl sm:text-2xl font-bold mb-2">
+                {isSyntheticMode
+                  ? isReviewMode
+                    ? "Revisit Score"
+                    : "All Questions Score"
+                  : isReviewMode
+                    ? "Revisit Score"
+                    : "Your Score"}{" "}
+                {hasConfetti ? "🎉" : ""}
+              </h2>
+              <p className="text-base sm:text-lg mb-6">
+                You scored{" "}
+                <span className="font-semibold">{scorePct}%</span> on this{" "}
+                {isSyntheticMode
+                  ? isReviewMode
+                    ? "revisit set"
+                    : "all-questions set"
+                  : isReviewMode
+                    ? "revisit set"
+                    : "quiz"}
+                .
+              </p>
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2">
+                <button
+                  type="button"
+                  className={`${btnBase} ${btnGray} w-full sm:w-auto`}
+                  onClick={retake}
+                >
+                  Retake
+                </button>
+                <button
+                  type="button"
+                  className={`${btnBase} ${btnIndigo} w-full sm:w-auto`}
+                  onClick={() => navigate(backPath)}
+                >
+                  Return to dashboard
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )
+      }
+    </div >
   );
 }
