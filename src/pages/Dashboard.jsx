@@ -368,6 +368,8 @@ export default function Dashboard() {
   const [gNewName, setGNewName] = useState("");
   const [gCreatingGroup, setGCreatingGroup] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const [showMobileGroups, setShowMobileGroups] = useState(false);
 
   // Animated "Generating..." dots for overlay
   const [genDots, setGenDots] = useState(".");
@@ -1569,22 +1571,23 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen text-slate-100 overflow-x-hidden pb-16">
-      <header className="sticky top-0 z-40 border-b border-white/5 bg-slate-950/95">
-        <div className="max-w-6xl mx-auto flex flex-wrap items-end justify-between gap-4 px-6 py-4 sm:items-center">
-          <div className="flex flex-col items-start gap-2 pl-2 sm:flex-row sm:items-center sm:gap-3 sm:pl-0 flex-none">
+      <header className="sticky top-0 z-40 border-b border-white/5 bg-slate-950/80 backdrop-blur-md">
+        <div className="max-w-6xl mx-auto flex items-end justify-between gap-4 px-6 py-4">
+          <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3 flex-none">
             <img
               src="/smartquizlogo.png"
               alt="Smart-Quiz logo"
               className="h-9 sm:h-10 w-auto my-1 object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,0.35)]"
               draggable="false"
             />
-            <div className="text-left w-full sm:w-auto">
-              <p className="text-xs uppercase tracking-[0.2em] text-white/60">Dashboard</p>
+            <div className="text-left">
+              <p className="text-xs uppercase tracking-[0.2em] text-white/60">
+                Dashboard
+              </p>
               <h1 className="text-2xl font-semibold tracking-tight">Your Quizzes</h1>
             </div>
           </div>
-
-          <div className="flex flex-wrap items-center justify-end gap-2 text-sm flex-none">
+          <div className="flex items-center gap-2 text-sm flex-none flex-shrink-0">
             {!ready ? (
               <span className="text-white/70">Loading…</span>
             ) : isAnon ? (
@@ -1636,7 +1639,7 @@ export default function Dashboard() {
       <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-0 py-8 space-y-6">
         {/* ---- MOBILE actions ---- */}
         {hasAnyQuizzes && (
-          <div className="sm:hidden surface-card p-4 space-y-4">
+          <div className="sm:hidden surface-card p-4 space-y-2">
             <div className="flex flex-row gap-2">
               <button
                 onClick={async () => {
@@ -1666,47 +1669,72 @@ export default function Dashboard() {
               </button>
             </div>
 
-            <div className="flex flex-row gap-2">
-              <div className="space-y-1 flex-1">
-                <label className="text-xs uppercase tracking-wide text-white/60">
-                  Filter by group
-                </label>
-                <select
-                  className="w-full h-12 custom-select"
-                  value={normalizedFilterGroupId}
-                  onChange={(e) => setFilterGroupId(e.target.value)}
-                >
-                  <option value="">All</option>
-                  {orderedGroups.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            {/* Toggle button for filters */}
+            <button
+              onClick={() => setShowMobileFilters(!showMobileFilters)}
+              className="flex items-center justify-center gap-2 w-full py-1 text-sm text-white/70 hover:text-white transition-colors"
+            >
+              <span>{showMobileFilters ? "Hide" : "Show"} Filters</span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className={`transition-transform ${showMobileFilters ? "rotate-180" : ""}`}
+              >
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
 
-              <div className="space-y-1 flex-1">
-                <label className="text-xs uppercase tracking-wide text-white/60">
-                  Search
-                </label>
-                <input
-                  className="w-full h-12"
-                  placeholder="Search quizzes…"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                />
-              </div>
-
-              {hasSelected && (
-                <div className="flex flex-col gap-2 pt-2">
-                  <button onClick={() => setMoveOpen(true)} className={`${btnBase} ${btnGray}`}>
-                    Move to group
-                  </button>
-                  <button onClick={() => setBulkConfirmOpen(true)} className={`${btnBase} ${btnRed}`}>
-                    Delete selected
-                  </button>
+            {/* Collapsible filter section */}
+            <div className={`overflow-hidden transition-all duration-300 ${showMobileFilters ? "max-h-96" : "max-h-0"}`}>
+              <div className={`flex flex-row gap-2 ${showMobileFilters ? "pt-2" : ""}`}>
+                <div className="space-y-1 flex-1">
+                  <label className="text-xs uppercase tracking-wide text-white/60">
+                    Filter by group
+                  </label>
+                  <select
+                    className="w-full h-12 custom-select"
+                    value={normalizedFilterGroupId}
+                    onChange={(e) => setFilterGroupId(e.target.value)}
+                  >
+                    <option value="">All</option>
+                    {orderedGroups.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-              )}
+
+                <div className="space-y-1 flex-1">
+                  <label className="text-xs uppercase tracking-wide text-white/60">
+                    Search
+                  </label>
+                  <input
+                    className="w-full h-12"
+                    placeholder="Search quizzes…"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                </div>
+
+                {hasSelected && (
+                  <div className="flex flex-col gap-2 pt-2">
+                    <button onClick={() => setMoveOpen(true)} className={`${btnBase} ${btnGray}`}>
+                      Move to group
+                    </button>
+                    <button onClick={() => setBulkConfirmOpen(true)} className={`${btnBase} ${btnRed}`}>
+                      Delete selected
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -2054,8 +2082,33 @@ export default function Dashboard() {
                   </div>
 
                   <div className="sm:col-span-2">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-                      <div className="w-full sm:flex-1">
+                    {/* Mobile toggle for group selection */}
+                    <div className="sm:hidden">
+                      <button
+                        type="button"
+                        onClick={() => setShowMobileGroups(!showMobileGroups)}
+                        className="flex items-center justify-between w-full py-2 text-sm text-white/70 hover:text-white transition-colors mb-2"
+                      >
+                        <span>{showMobileGroups ? "Hide" : "Show"} Group Options</span>
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className={`transition-transform ${showMobileGroups ? "rotate-180" : ""}`}
+                        >
+                          <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                      </button>
+                    </div>
+
+                    <div className={`flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end ${!showMobileGroups ? "hidden sm:flex" : ""}`}>
+                      <div className="w-full sm:w-auto sm:min-w-[180px]">
                         <label
                           className="block text-sm text-white/70 mb-1"
                           htmlFor="inline-gen-group"
@@ -2089,7 +2142,10 @@ export default function Dashboard() {
                       >
                         New group +
                       </button>
+                    </div>
 
+                    {/* Number of questions and Generate button - always visible */}
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end mt-3">
                       <div className="w-full sm:w-28">
                         <label
                           className="block text-sm text-white/70 mb-1"
@@ -2121,7 +2177,6 @@ export default function Dashboard() {
                     </div>
                   </div>
                 </div>
-
               </section>
               <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3 max-w-3xl mx-auto px-5 sm:px-0">
                 <p className="text-white/70 text-sm">
@@ -3205,8 +3260,33 @@ export default function Dashboard() {
               </div>
 
               <div className="sm:col-span-2">
-                <div className="flex flex-col sm:flex-row sm:items-end gap-2">
-                  <div className="w-full sm:flex-1">
+                {/* Mobile toggle for group selection */}
+                <div className="sm:hidden">
+                  <button
+                    type="button"
+                    onClick={() => setShowMobileGroups(!showMobileGroups)}
+                    className="flex items-center justify-between w-full py-2 text-sm text-white/70 hover:text-white transition-colors mb-2"
+                  >
+                    <span>{showMobileGroups ? "Hide" : "Show"} Group Options</span>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className={`transition-transform ${showMobileGroups ? "rotate-180" : ""}`}
+                    >
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  </button>
+                </div>
+
+                <div className={`flex flex-col sm:flex-row sm:items-end gap-2 ${!showMobileGroups ? "hidden sm:flex" : ""}`}>
+                  <div className="w-full sm:w-auto sm:min-w-[180px]">
                     <label
                       className="block text-sm text-white/70 mb-1"
                       htmlFor="gen-group"
@@ -3238,7 +3318,10 @@ export default function Dashboard() {
                   >
                     New group +
                   </button>
+                </div>
 
+                {/* Number of questions and Generate button - always visible */}
+                <div className="flex flex-col sm:flex-row sm:items-end gap-2 mt-3">
                   <div className="w-full sm:w-24">
                     <label
                       className="block text-sm text-white/70 mb-1"
@@ -3256,6 +3339,14 @@ export default function Dashboard() {
                       onChange={(e) => setGCount(Number(e.target.value))}
                     />
                   </div>
+
+                  <button
+                    className={`${btnBase} ${btnGreen} h-12 px-6 sm:ml-auto`}
+                    onClick={() => generateQuiz()}
+                    disabled={generating}
+                  >
+                    {generating ? "Generating…" : "Generate"}
+                  </button>
                 </div>
               </div>
 
