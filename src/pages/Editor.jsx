@@ -758,7 +758,7 @@ export default function Editor() {
 
   return (
     <div className="min-h-screen text-slate-100 pb-16">
-      <header className="sticky top-0 z-30 border-b border-white/5 bg-slate-950/80 backdrop-blur-md">
+      <header className="sticky top-0 z-30 border-b border-white/5 bg-slate-950 transform-gpu">
         <div className="max-w-6xl mx-auto flex flex-wrap items-end justify-between gap-4 px-6 py-4 sm:items-center">
           <div className="flex flex-col items-start gap-2 pl-2 sm:flex-row sm:items-center sm:gap-3 sm:pl-0 flex-none">
             <img

@@ -1566,7 +1566,7 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen text-slate-100 overflow-x-hidden pb-16">
-      <header className="sticky top-0 z-40 border-b border-white/5 bg-slate-950/80 backdrop-blur-md">
+      <header className="sticky top-0 z-40 border-b border-white/5 bg-slate-950 transform-gpu">
         <div className="max-w-6xl mx-auto flex items-end justify-between gap-4 px-6 py-4">
           <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3 flex-none">
             <img

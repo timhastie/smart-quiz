@@ -76,7 +76,8 @@ serve(async (req) => {
 
             if (!resp.ok) {
                 const err = await resp.text();
-                throw new Error(`Google API error: ${err}`);
+                console.error("Google TTS Error:", err, "Payload:", JSON.stringify(payload));
+                throw new Error(`Google API error: ${err} -- Payload: ${JSON.stringify(payload)}`);
             }
 
             const data = await resp.json();

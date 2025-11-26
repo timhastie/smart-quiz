@@ -399,7 +399,7 @@ export default function Play() {
     const loadVoices = async () => {
       try {
         const { data: session } = await supabase.auth.getSession();
-        const token = session?.access_token;
+        const token = session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY;
 
         const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/google-tts/voices`, {
           method: "GET",
@@ -408,9 +408,25 @@ export default function Play() {
           },
         });
 
-        if (!res.ok) throw new Error("Failed to fetch voices");
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Failed to fetch voices: ${res.status} ${res.statusText} - ${errText}`);
+        }
 
-        const { voices: fetchedVoices } = await res.json();
+        const { voices: rawVoices } = await res.json();
+        console.log("Raw voices:", rawVoices);
+
+        // Filter for known high-quality types to avoid incompatible/weird voices
+        const allowedTypes = ["Neural2", "Studio", "Wavenet", "Journey", "Standard"];
+        const fetchedVoices = rawVoices
+          .filter(v => allowedTypes.some(t => v.name.includes(t)))
+          .sort((a, b) => {
+            const langA = a.languageCodes?.[0] || "";
+            const langB = b.languageCodes?.[0] || "";
+            return langA.localeCompare(langB) || a.name.localeCompare(b.name);
+          });
+
+        console.log("Filtered voices:", fetchedVoices);
         setVoices(fetchedVoices);
 
         // Attempt to restore selected voice from localStorage
@@ -419,10 +435,14 @@ export default function Play() {
           const savedVoice = fetchedVoices.find(v => v.name === savedVoiceName);
           if (savedVoice) {
             setSelectedVoice(savedVoice);
+          } else {
+            console.warn("Saved voice not found in new list, clearing:", savedVoiceName);
+            localStorage.removeItem("quizTTSVoiceName");
           }
         }
       } catch (err) {
         console.error("Error loading TTS voices:", err);
+        alert(`Error loading voices: ${err.message}`);
         setVoices([]);
       }
     };
@@ -430,13 +450,7 @@ export default function Play() {
     loadVoices();
   }, []);
 
-  useEffect(() => {
-    if (selectedVoice) {
-      localStorage.setItem("quizTTSVoiceName", selectedVoice.name);
-    } else {
-      localStorage.removeItem("quizTTSVoiceName");
-    }
-  }, [selectedVoice]);
+
 
   // --- Speech to Text ---
   const [isListening, setIsListening] = useState(false);
@@ -1958,7 +1972,7 @@ export default function Play() {
                               setTtsLoading(true);
                               try {
                                 const { data: { session } } = await supabase.auth.getSession();
-                                const token = session?.access_token;
+                                const token = session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY;
 
                                 const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/google-tts/synthesize`, {
                                   method: "POST",
@@ -1970,13 +1984,15 @@ export default function Play() {
                                     text,
                                     voiceParams: selectedVoice ? {
                                       languageCode: selectedVoice.languageCodes[0],
-                                      name: selectedVoice.name,
-                                      ssmlGender: selectedVoice.ssmlGender
+                                      name: selectedVoice.name
                                     } : undefined
                                   })
                                 });
 
-                                if (!res.ok) throw new Error("TTS failed");
+                                if (!res.ok) {
+                                  const errText = await res.text();
+                                  throw new Error(`TTS failed: ${res.status} ${res.statusText} - ${errText}`);
+                                }
 
                                 const data = await res.json();
                                 if (data.audioContent) {
@@ -1985,7 +2001,7 @@ export default function Play() {
                                 }
                               } catch (err) {
                                 console.error("TTS Error:", err);
-                                alert("Failed to play audio. Check API key?");
+                                alert(`Failed to play audio: ${err.message}`);
                               } finally {
                                 setTtsLoading(false);
                               }
@@ -2004,6 +2020,11 @@ export default function Play() {
                               onChange={(e) => {
                                 const v = voices.find(v => v.name === e.target.value);
                                 setSelectedVoice(v || null);
+                                if (v) {
+                                  localStorage.setItem("quizTTSVoiceName", v.name);
+                                } else {
+                                  localStorage.removeItem("quizTTSVoiceName");
+                                }
                               }}
                               title="Select voice for pronunciation"
                               onClick={(e) => e.stopPropagation()}
