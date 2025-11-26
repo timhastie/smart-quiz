@@ -7,7 +7,7 @@ import {
   useSearchParams,
   useLocation,
 } from "react-router-dom";
-import { Dice5, Volume2, Lightbulb } from "lucide-react";
+import { Dice5, Volume2, Lightbulb, Play as PlayIcon, Mic } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
 import { getInitialGroupFromUrlOrStorage } from "../lib/groupFilter";
@@ -393,6 +393,7 @@ export default function Play() {
   const [selectedVoiceURI, setSelectedVoiceURI] = useState(
     () => localStorage.getItem("quizTTSVoiceURI") || ""
   );
+  const [voiceSearch, setVoiceSearch] = useState("");
 
   useEffect(() => {
     const loadVoices = () => {
@@ -406,6 +407,50 @@ export default function Play() {
       window.speechSynthesis.onvoiceschanged = null;
     };
   }, []);
+
+  // --- Speech to Text ---
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef(null);
+
+  const toggleListening = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Your browser does not support speech recognition.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = "en-US"; // Default to English, could be dynamic
+
+    recognition.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      setInput((prev) => (prev ? prev + " " + transcript : transcript));
+    };
+
+    recognition.onerror = (event) => {
+      console.error("Speech recognition error", event.error);
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  };
 
   useEffect(() => {
     if (selectedVoiceURI) {
@@ -1675,7 +1720,8 @@ export default function Play() {
                   </div>
 
                   {/* Mobile-only actions */}
-                  <div className="mt-2 grid grid-cols-3 gap-2 sm:hidden">
+
+                  <div className="mt-2 flex w-full gap-1 sm:hidden">
                     {isSyntheticMode ? (
                       <Link
                         to={originalQuizLink}
@@ -1683,26 +1729,26 @@ export default function Play() {
                           if (originalQuizDisabled)
                             e.preventDefault();
                         }}
-                        className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal ${originalQuizDisabled
+                        className={`flex-1 inline-flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap ${originalQuizDisabled
                           ? "opacity-50 cursor-not-allowed"
                           : ""
                           }`}
                       >
-                        Play main quiz
+                        <PlayIcon className="w-3 h-3 mr-1 fill-current" /> Main
                       </Link>
                     ) : isReviewMode ? (
                       <Link
                         to={`/play/${quizId}`}
-                        className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
+                        className={`flex-1 inline-flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap`}
                       >
-                        Play main quiz
+                        <PlayIcon className="w-3 h-3 mr-1 fill-current" /> Main
                       </Link>
                     ) : (
                       <Link
                         to={`/play/${quizId}?mode=review`}
-                        className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
+                        className={`flex-1 inline-flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap`}
                       >
-                        Play revisit quiz
+                        <PlayIcon className="w-3 h-3 mr-1 fill-current" /> Revisit
                       </Link>
                     )}
 
@@ -1710,7 +1756,7 @@ export default function Play() {
                       isReviewMode ? (
                         <button
                           type="button"
-                          className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
+                          className={`flex-1 inline-flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap`}
                           onClick={removeCurrentFromReview}
                           disabled={
                             !current ||
@@ -1719,12 +1765,12 @@ export default function Play() {
                             )
                           }
                         >
-                          Remove from review group
+                          - Review
                         </button>
                       ) : (
                         <button
                           type="button"
-                          className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
+                          className={`flex-1 inline-flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap`}
                           onClick={addCurrentToReview}
                           disabled={
                             !current ||
@@ -1733,34 +1779,32 @@ export default function Play() {
                             )
                           }
                         >
-                          Add to review group
+                          + Review
                         </button>
                       )
                     ) : isReviewMode ? (
                       <button
                         type="button"
-                        className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal`}
+                        className={`flex-1 inline-flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap`}
                         onClick={removeCurrentFromReview}
                         disabled={!current}
                       >
-                        Remove from review group
+                        - Review
                       </button>
-                    ) : (
-                      <div className="min-h-14" />
-                    )}
+                    ) : null}
 
                     <button
                       type="button"
-                      className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal w-14 sm:w-16`}
+                      className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-2 text-[10px] leading-tight whitespace-nowrap font-medium`}
                       onClick={handleHint}
                       title="Get a hint"
                     >
-                      <Lightbulb className="w-5 h-5 sm:w-6 sm:h-6" />
+                      Hint
                     </button>
 
                     <button
                       type="button"
-                      className={`inline-flex items-center justify-center text-center ${btnBase} ${btnGray} min-h-14 py-3 whitespace-normal leading-normal flex-1`}
+                      className={`flex-1 inline-flex items-center justify-center text-center ${btnBase} ${btnGray} h-9 px-1 text-[10px] leading-tight whitespace-nowrap`}
                       onClick={toggleDisplayAnswer}
                       title={
                         isPeeking
@@ -1769,8 +1813,8 @@ export default function Play() {
                       }
                     >
                       {isPeeking
-                        ? "Display My Answer"
-                        : "Display answer"}
+                        ? "My answer"
+                        : "Answer"}
                     </button>
                   </div>
                 </div>
@@ -1778,72 +1822,114 @@ export default function Play() {
                 {/* TEXTAREA FRAME */}
                 <div className="mb-3 lg:flex lg:items-center lg:gap-6">
                   <form onSubmit={submit} className="lg:flex-1 relative">
-                    <textarea
-                      ref={areaRef}
-                      className="w-full h-56 p-4 rounded-lg bg-white text-gray-900 border border-gray-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-base sm:text-xl placeholder:text-gray-500"
-                      value={input}
-                      onChange={(e) => handleChange(e.target.value)}
-                      placeholder="Type your answer and press Enter…"
-                      onKeyDown={onTextAreaKeyDown}
-                      rows={7}
-                      inputMode="text"
-                    />
+                    <div className="relative w-full">
+                      <textarea
+                        ref={areaRef}
+                        className="w-full h-56 p-4 pb-14 rounded-lg bg-white text-gray-900 border border-gray-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-base sm:text-xl placeholder:text-gray-500"
+                        value={input}
+                        onChange={(e) => handleChange(e.target.value)}
+                        placeholder="Type your answer and press Enter…"
+                        onKeyDown={onTextAreaKeyDown}
+                        rows={7}
+                        inputMode="text"
+                      />
 
-                    {/* TTS Controls - Only visible when peeking (answer displayed) */}
-                    {isPeeking && (
-                      <div className="absolute bottom-4 right-4 flex items-center gap-2 z-10">
+                      {/* TTS Controls - Only visible when peeking (answer displayed) */}
+                      {isPeeking && (
+                        <div className="absolute bottom-3 right-3 flex items-center gap-2 z-10 max-w-[calc(100%-1.5rem)]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!current) return;
+                              const text = current.answer || "";
+                              if (!text) return;
+
+                              // Cancel any ongoing speech
+                              window.speechSynthesis.cancel();
+
+                              const utterance = new SpeechSynthesisUtterance(text);
+
+                              if (selectedVoiceURI) {
+                                const voice = voices.find(v => v.voiceURI === selectedVoiceURI);
+                                if (voice) utterance.voice = voice;
+                              }
+
+                              window.speechSynthesis.speak(utterance);
+                            }}
+                            className="p-2 bg-emerald-100 text-emerald-700 rounded-full hover:bg-emerald-200 transition-colors shadow-sm shrink-0"
+                            title="Pronounce answer"
+                          >
+                            <Volume2 className="w-5 h-5" />
+                          </button>
+
+                          <div className="flex items-center gap-1 bg-white rounded-lg border border-slate-200 shadow-sm p-1 max-w-full overflow-hidden">
+                            {/* Language Search Filter */}
+                            <div className="w-16 sm:w-20 shrink-0 border-r border-slate-100 pr-1">
+                              <input
+                                className="w-full text-xs px-1 py-1 bg-transparent border-none focus:ring-0 placeholder:text-slate-400 text-slate-700"
+                                placeholder="Search..."
+                                value={voiceSearch || ""}
+                                onChange={(e) => setVoiceSearch(e.target.value)}
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            </div>
+
+                            <select
+                              className="bg-transparent text-slate-900 text-xs sm:text-sm border-none px-1 py-0.5 w-24 sm:w-32 focus:ring-0 cursor-pointer truncate"
+                              value={selectedVoiceURI}
+                              onChange={(e) => setSelectedVoiceURI(e.target.value)}
+                              title="Select voice for pronunciation"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <option value="">Default Voice</option>
+                              {voices
+                                .filter(v => {
+                                  if (!voiceSearch) return true;
+                                  const search = voiceSearch.toLowerCase();
+                                  let label = v.name.toLowerCase();
+                                  try {
+                                    const langName = new Intl.DisplayNames(['en'], { type: 'language' }).of(v.lang);
+                                    if (langName) label += " " + langName.toLowerCase();
+                                  } catch (e) { }
+                                  return label.includes(search);
+                                })
+                                .map((v) => {
+                                  let label = v.name;
+                                  try {
+                                    const langName = new Intl.DisplayNames(['en'], { type: 'language' }).of(v.lang);
+                                    if (langName) {
+                                      label = `${v.name} (${langName})`;
+                                    }
+                                  } catch (e) {
+                                    // Fallback if Intl.DisplayNames fails or lang code is invalid
+                                  }
+                                  return (
+                                    <option key={v.voiceURI} value={v.voiceURI}>
+                                      {label}
+                                    </option>
+                                  );
+                                })}
+                            </select>
+                          </div>
+                        </div>
+                      )}
+
+
+                      {/* Speech-to-Text Mic - Only visible when NOT peeking (typing answer) */}
+                      {!isPeeking && (
                         <button
                           type="button"
-                          onClick={() => {
-                            if (!current) return;
-                            const text = current.answer || "";
-                            if (!text) return;
-
-                            // Cancel any ongoing speech
-                            window.speechSynthesis.cancel();
-
-                            const utterance = new SpeechSynthesisUtterance(text);
-
-                            if (selectedVoiceURI) {
-                              const voice = voices.find(v => v.voiceURI === selectedVoiceURI);
-                              if (voice) utterance.voice = voice;
-                            }
-
-                            window.speechSynthesis.speak(utterance);
-                          }}
-                          className="p-2 bg-emerald-100 text-emerald-700 rounded-full hover:bg-emerald-200 transition-colors shadow-sm"
-                          title="Pronounce answer"
+                          onClick={toggleListening}
+                          className={`absolute bottom-3 right-3 p-2 rounded-full transition-all shadow-sm z-10 ${isListening
+                            ? "bg-rose-500 text-white animate-pulse ring-2 ring-rose-300"
+                            : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                            }`}
+                          title={isListening ? "Stop listening" : "Speak answer"}
                         >
-                          <Volume2 className="w-5 h-5" />
+                          <Mic className="w-5 h-5" />
                         </button>
-
-                        <select
-                          className="bg-white text-slate-900 text-xs sm:text-sm rounded-lg border border-slate-200 px-2 py-1.5 max-w-[120px] sm:max-w-[200px] focus:outline-none focus:ring-1 focus:ring-emerald-500 shadow-sm"
-                          value={selectedVoiceURI}
-                          onChange={(e) => setSelectedVoiceURI(e.target.value)}
-                          title="Select voice for pronunciation"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <option value="">Default Voice</option>
-                          {voices.map((v) => {
-                            let label = v.name;
-                            try {
-                              const langName = new Intl.DisplayNames(['en'], { type: 'language' }).of(v.lang);
-                              if (langName) {
-                                label = `${v.name} (${langName})`;
-                              }
-                            } catch (e) {
-                              // Fallback if Intl.DisplayNames fails or lang code is invalid
-                            }
-                            return (
-                              <option key={v.voiceURI} value={v.voiceURI}>
-                                {label}
-                              </option>
-                            );
-                          })}
-                        </select>
-                      </div>
-                    )}
+                      )}
+                    </div>
 
 
                     {/* Mobile Enter/Prev/Next */}
