@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
+import { Info } from "lucide-react";
 
 // For PDF extraction (same as Dashboard)
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist/build/pdf.mjs";
@@ -18,6 +19,7 @@ export default function Editor() {
   const [questions, setQuestions] = useState([]);
   const [groupId, setGroupId] = useState(""); // "" => No group
   const [aiGrading, setAiGrading] = useState(false);
+  const [activeInfo, setActiveInfo] = useState(null);
   const [msg, setMsg] = useState("");
 
   // Persisted meta (prompt & prior file info, if present)
@@ -848,15 +850,29 @@ export default function Editor() {
               </button>
             </div>
             <div className="mt-3">
-              <label className="flex items-center gap-2 text-sm text-white/70 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 accent-emerald-500 rounded"
-                  checked={aiGrading}
-                  onChange={(e) => setAiGrading(e.target.checked)}
-                />
-                <span>Smart Grading (AI)</span>
-              </label>
+              <div className="relative flex items-center gap-2">
+                <label className="flex items-center gap-2 text-sm text-white/70 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-emerald-500 rounded"
+                    checked={aiGrading}
+                    onChange={(e) => setAiGrading(e.target.checked)}
+                  />
+                  <span>Creative Answers</span>
+                </label>
+                <button
+                  onMouseEnter={() => setActiveInfo("aiGrading")}
+                  onMouseLeave={() => setActiveInfo(null)}
+                  className="text-white/40 hover:text-white/80 transition-colors cursor-help"
+                >
+                  <Info className="w-4 h-4" />
+                </button>
+                {activeInfo === "aiGrading" && (
+                  <div className="absolute bottom-full left-0 mb-2 w-64 p-3 bg-slate-900 border border-white/10 rounded-lg shadow-xl z-50 text-xs text-white/90 leading-relaxed pointer-events-none">
+                    This mode allows for open-ended answers. Instead of matching a rigid answer key, the AI evaluates your creativity and context—perfect for practicing vocabulary in sentences.
+                  </div>
+                )}
+              </div>
             </div>
 
             {selectedCount > 0 && (
