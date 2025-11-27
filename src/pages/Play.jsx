@@ -394,6 +394,7 @@ export default function Play() {
   const [voiceSearch, setVoiceSearch] = useState("");
   const [isProcessingAudio, setIsProcessingAudio] = useState(false);
   const [ttsLoading, setTtsLoading] = useState(false);
+  const [gradingLoading, setGradingLoading] = useState(false);
 
   useEffect(() => {
     const loadVoices = async () => {
@@ -592,7 +593,7 @@ export default function Play() {
       if (isAllMode) {
         const { data: rows, error } = await supabase
           .from("quizzes")
-          .select("id, title, questions, review_questions")
+          .select("id, title, questions, review_questions, ai_grading")
           .eq("user_id", user.id)
           .order("updated_at", { ascending: false });
 
@@ -619,6 +620,7 @@ export default function Play() {
               answer: String(q?.answer ?? ""),
               __srcQuizId: row.id,
               __srcTitle: row.title || "Untitled Quiz",
+              __srcAiGrading: !!row.ai_grading,
             });
           }
         }
@@ -670,7 +672,7 @@ export default function Play() {
 
         let q = supabase
           .from("quizzes")
-          .select("id, title, questions, review_questions, group_id")
+          .select("id, title, questions, review_questions, group_id, ai_grading")
           .eq("user_id", user.id)
           .order("updated_at", { ascending: false });
 
@@ -732,13 +734,13 @@ export default function Play() {
       // --- SINGLE QUIZ ---
       const { data, error } = await supabase
         .from("quizzes")
-        .select("title, questions, review_questions, file_id")
+        .select("title, questions, review_questions, file_id, ai_grading")
         .eq("id", quizId)
         .eq("user_id", user.id)
         .single();
 
       if (error || !data) {
-        setQuiz({ title: "Quiz", questions: [], review_questions: [] });
+        setQuiz({ title: "Quiz", questions: [], review_questions: [], ai_grading: false });
       }
 
       const arr = isReviewMode
@@ -1339,36 +1341,49 @@ export default function Play() {
       if (local.pass) {
         isCorrect = true;
       } else {
-        try {
-          const { data: sessionRes } = await supabase.auth.getSession();
-          const jwt = sessionRes?.session?.access_token;
+        // AI Fallback if enabled
+        const useAi = isSyntheticMode
+          ? !!current.__srcAiGrading
+          : !!quiz.ai_grading;
 
-          const res = await fetch(
-            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/grade-answer`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
-              },
-              body: JSON.stringify({
-                question,
-                expected,
-                user_answer: userAns,
-              }),
-            }
-          );
+        if (useAi) {
+          setGradingLoading(true);
+          try {
+            const { data: sessionRes } = await supabase.auth.getSession();
+            const jwt = sessionRes?.session?.access_token;
 
-          if (res.ok) {
-            const out = await res.json();
-            isCorrect = !!out.correct;
-            if (!isCorrect) {
-              setFeedback("Incorrect ❌ Press c to continue");
+            const res = await fetch(
+              `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/grade-answer`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+                },
+                body: JSON.stringify({
+                  question,
+                  expected,
+                  user_answer: userAns,
+                  mode: "creative",
+                }),
+              }
+            );
+
+            if (res.ok) {
+              const out = await res.json();
+              isCorrect = !!out.correct;
+              if (!isCorrect) {
+                setFeedback(out.reason ? `Incorrect ❌ (${out.reason}) Press c to continue` : "Incorrect ❌ Press c to continue");
+              }
+            } else {
+              setFeedback("Incorrect ❌ (AI unavailable) Press c to continue");
             }
-          } else {
-            setFeedback("Incorrect ❌ Press c to continue");
+          } catch {
+            setFeedback("Incorrect ❌ (AI error) Press c to continue");
+          } finally {
+            setGradingLoading(false);
           }
-        } catch {
+        } else {
           setFeedback("Incorrect ❌ Press c to continue");
         }
       }
@@ -2101,10 +2116,18 @@ export default function Play() {
 
                       {/* Mobile Feedback Overlay (Inside Textarea) */}
                       <div className="absolute bottom-3 left-4 right-16 pointer-events-none sm:hidden flex flex-col justify-end text-sm font-medium leading-tight">
-                        {feedback && !isPeeking && (
-                          <span className={isPositiveFeedback ? "text-emerald-600" : "text-rose-600"}>
-                            {isPositiveFeedback ? "Correct! ✓" : "Incorrect ✕"}
+                        {gradingLoading ? (
+                          <span className="text-emerald-600 animate-pulse">
+                            AI Grading...
                           </span>
+                        ) : (
+                          <>
+                            {feedback && !isPeeking && (
+                              <span className={isPositiveFeedback ? "text-emerald-600" : "text-rose-600"}>
+                                {isPositiveFeedback ? "Correct! ✓" : "Incorrect ✕"}
+                              </span>
+                            )}
+                          </>
                         )}
 
                         {!showReviewPrompt && addedToReview && (
@@ -2221,16 +2244,22 @@ export default function Play() {
 
                   {/* Feedback + prompts (Desktop Only) */}
                   <div className="hidden sm:block">
-                    {feedback && (
-                      <p
-                        className={`mt-3 text-base sm:text-lg text-center ${isPositiveFeedback
-                          ? "text-green-400"
-                          : "text-red-400"
-                          }`}
-                        aria-live="polite"
-                      >
-                        {feedback}
+                    {gradingLoading ? (
+                      <p className="mt-3 text-base sm:text-lg text-center text-emerald-400 animate-pulse">
+                        AI Grading...
                       </p>
+                    ) : (
+                      feedback && (
+                        <p
+                          className={`mt-3 text-base sm:text-lg text-center ${isPositiveFeedback
+                            ? "text-green-400"
+                            : "text-red-400"
+                            }`}
+                          aria-live="polite"
+                        >
+                          {feedback}
+                        </p>
+                      )
                     )}
 
                     {showReviewPrompt && !addedToReview && (

@@ -1,5 +1,5 @@
 // src/pages/Dashboard.jsx
-import { Play, History, SquarePen, Trash2, Mail, PanelRight, Download, Loader2 } from "lucide-react";
+import { Play, History, SquarePen, Trash2, Mail, PanelRight, Download, Loader2, Info } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
@@ -361,6 +361,8 @@ export default function Dashboard() {
   const [gGroupId, setGGroupId] = useState(NO_GROUP_SENTINEL);
   const [gFile, setGFile] = useState(null);
   const [gNoRepeat, setGNoRepeat] = useState(true);
+  const [gAiGrading, setGAiGrading] = useState(false);
+  const [activeInfo, setActiveInfo] = useState(null); // "noRepeat" | "aiGrading" | null
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [downloadingTranscript, setDownloadingTranscript] = useState(false);
 
@@ -1230,6 +1232,7 @@ export default function Dashboard() {
             group_id: resolvedGroupId,
             file_id,
             no_repeat: !!gNoRepeat,
+            ai_grading: !!gAiGrading,
             avoid_prompts,
             source_type: sourceType,
           }),
@@ -1948,16 +1951,53 @@ export default function Dashboard() {
                   </div>
 
                   <div className="sm:col-span-2">
-                    <label className="inline-flex items-center gap-2 text-sm text-white/80">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4"
-                        checked={gNoRepeat}
-                        onChange={(e) => setGNoRepeat(e.target.checked)}
-                        disabled={generating}
-                      />
-                      <span>Do not repeat previous questions</span>
-                    </label>
+                    <div className="relative flex items-center gap-2">
+                      <label className="flex items-center gap-2 text-sm text-white/70 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-emerald-500 rounded"
+                          checked={gNoRepeat}
+                          onChange={(e) => setGNoRepeat(e.target.checked)}
+                        />
+                        <span>Do not repeat previous questions</span>
+                      </label>
+                      <button
+                        onMouseEnter={() => setActiveInfo("noRepeat")}
+                        onMouseLeave={() => setActiveInfo(null)}
+                        className="text-white/40 hover:text-white/80 transition-colors cursor-help"
+                      >
+                        <Info className="w-4 h-4" />
+                      </button>
+                      {activeInfo === "noRepeat" && (
+                        <div className="absolute top-full left-0 mt-2 w-64 p-3 bg-slate-900 border border-white/10 rounded-lg shadow-xl z-50 text-xs text-white/90 leading-relaxed pointer-events-none">
+                          Guarantees unique questions. The system filters out any questions you have already received in previous quizzes within this group.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="relative flex items-center gap-2">
+                      <label className="flex items-center gap-2 text-sm text-white/70 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-emerald-500 rounded"
+                          checked={gAiGrading}
+                          onChange={(e) => setGAiGrading(e.target.checked)}
+                        />
+                        <span>Creative Answers</span>
+                      </label>
+                      <button
+                        onMouseEnter={() => setActiveInfo("aiGrading")}
+                        onMouseLeave={() => setActiveInfo(null)}
+                        className="text-white/40 hover:text-white/80 transition-colors cursor-help"
+                      >
+                        <Info className="w-4 h-4" />
+                      </button>
+                      {activeInfo === "aiGrading" && (
+                        <div className="absolute top-full left-0 mt-2 w-64 p-3 bg-slate-900 border border-white/10 rounded-lg shadow-xl z-50 text-xs text-white/90 leading-relaxed pointer-events-none">
+                          This mode allows for open-ended answers. Instead of matching a rigid answer key, the AI evaluates your creativity and context—perfect for practicing vocabulary in sentences.
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <div className="sm:col-span-2">
@@ -3172,15 +3212,53 @@ export default function Dashboard() {
               </div>
 
               <div className="sm:col-span-2">
-                <label className="inline-flex items-center gap-2 text-sm text-white/80">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4"
-                    checked={gNoRepeat}
-                    onChange={(e) => setGNoRepeat(e.target.checked)}
-                  />
-                  <span>Do not repeat previous questions</span>
-                </label>
+                <div className="relative flex items-center gap-2">
+                  <label className="flex items-center gap-2 text-sm text-white/70 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-emerald-500 rounded"
+                      checked={gNoRepeat}
+                      onChange={(e) => setGNoRepeat(e.target.checked)}
+                    />
+                    <span>Do not repeat previous questions</span>
+                  </label>
+                  <button
+                    onMouseEnter={() => setActiveInfo("modalNoRepeat")}
+                    onMouseLeave={() => setActiveInfo(null)}
+                    className="text-white/40 hover:text-white/80 transition-colors cursor-help"
+                  >
+                    <Info className="w-4 h-4" />
+                  </button>
+                  {activeInfo === "modalNoRepeat" && (
+                    <div className="absolute bottom-full left-0 mb-2 w-64 p-3 bg-slate-900 border border-white/10 rounded-lg shadow-xl z-50 text-xs text-white/90 leading-relaxed pointer-events-none">
+                      Guarantees unique questions. The system filters out any questions you have already received in previous quizzes within this group.
+                    </div>
+                  )}
+                </div>
+
+                <div className="relative flex items-center gap-2">
+                  <label className="flex items-center gap-2 text-sm text-white/70 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-emerald-500 rounded"
+                      checked={gAiGrading}
+                      onChange={(e) => setGAiGrading(e.target.checked)}
+                    />
+                    <span>Creative Answers</span>
+                  </label>
+                  <button
+                    onMouseEnter={() => setActiveInfo("modalAiGrading")}
+                    onMouseLeave={() => setActiveInfo(null)}
+                    className="text-white/40 hover:text-white/80 transition-colors cursor-help"
+                  >
+                    <Info className="w-4 h-4" />
+                  </button>
+                  {activeInfo === "modalAiGrading" && (
+                    <div className="absolute bottom-full left-0 mb-2 w-64 p-3 bg-slate-900 border border-white/10 rounded-lg shadow-xl z-50 text-xs text-white/90 leading-relaxed pointer-events-none">
+                      This mode allows for open-ended answers. Instead of matching a rigid answer key, the AI evaluates your creativity and context—perfect for practicing vocabulary in sentences.
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="sm:col-span-2">

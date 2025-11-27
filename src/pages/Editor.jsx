@@ -17,6 +17,7 @@ export default function Editor() {
   const [title, setTitle] = useState("");
   const [questions, setQuestions] = useState([]);
   const [groupId, setGroupId] = useState(""); // "" => No group
+  const [aiGrading, setAiGrading] = useState(false);
   const [msg, setMsg] = useState("");
 
   // Persisted meta (prompt & prior file info, if present)
@@ -139,6 +140,7 @@ export default function Editor() {
       setQuestions(Array.isArray(data.questions) ? data.questions : []);
       const gid = data.group_id || fallbackGroupId || null;
       setGroupId(gid || "");
+      setAiGrading(!!data.ai_grading);
       prevGroupRef.current = gid || null;
 
       setSourcePrompt(data.source_prompt || "");
@@ -257,6 +259,7 @@ export default function Editor() {
         title,
         questions,
         group_id: resolvedGroupId,
+        ai_grading: aiGrading,
         source_prompt: sourcePrompt || null,
         updated_at: new Date().toISOString(),
       })
@@ -843,6 +846,17 @@ export default function Editor() {
               >
                 New group +
               </button>
+            </div>
+            <div className="mt-3">
+              <label className="flex items-center gap-2 text-sm text-white/70 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-emerald-500 rounded"
+                  checked={aiGrading}
+                  onChange={(e) => setAiGrading(e.target.checked)}
+                />
+                <span>Smart Grading (AI)</span>
+              </label>
             </div>
 
             {selectedCount > 0 && (

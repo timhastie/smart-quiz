@@ -33,6 +33,7 @@ type GradeRequest = {
   question?: string;
   expected?: string;
   user_answer?: string;
+  mode?: "creative" | "standard";
 };
 
 function normalize(s: string) {
@@ -157,15 +158,28 @@ function heuristicGrade(expectedRaw: string, userRaw: string) {
   return { pass: false, why: "heuristic-fail" };
 }
 
-async function llmGrade(question: string, expected: string, userAnswer: string) {
+async function llmGrade(question: string, expected: string, userAnswer: string, mode: "creative" | "standard" = "standard") {
   const client = getOpenAI();
-  const sys =
-    `You grade short quiz answers.\n` +
-    `Respond with JSON: {"correct": boolean, "reason": string}.\n` +
-    `If the learner's answer expresses the same fact, intent, or concept, mark it correct even if wording differs.\n` +
-    `Match question intent. Example: Question "What is the primary diet of lions?" should treat answers "meat", "other animals", or "carnivorous" as correct because they all indicate meat-eating.\n` +
-    `Be generous when the answer clearly includes the required idea (e.g., "protect and mate" satisfies a question asking for protection as the main role).\n` +
-    `Only mark incorrect when the answer omits the key idea or states a contradictory fact.`;
+
+  let sys = "";
+  if (mode === "creative") {
+    sys =
+      `You grade creative or open-ended quiz answers.\n` +
+      `Respond with JSON: {"correct": boolean, "reason": string}.\n` +
+      `The 'expected' answer is just an example. Do NOT require the user to match it.\n` +
+      `Evaluate if the user's answer is a valid, logical, and correct response to the question.\n` +
+      `Example: If asked to "Use 'ubiquitous' in a sentence", ANY sentence correctly using the word is CORRECT.\n` +
+      `Example: If asked "Why is the sky blue?", any scientifically accurate explanation is CORRECT, even if phrased differently from the example.\n` +
+      `Mark INCORRECT only if the answer is factually wrong, irrelevant, or fails to address the prompt.`;
+  } else {
+    sys =
+      `You grade short quiz answers.\n` +
+      `Respond with JSON: {"correct": boolean, "reason": string}.\n` +
+      `If the learner's answer expresses the same fact, intent, or concept, mark it correct even if wording differs.\n` +
+      `Match question intent. Example: Question "What is the primary diet of lions?" should treat answers "meat", "other animals", or "carnivorous" as correct because they all indicate meat-eating.\n` +
+      `Be generous when the answer clearly includes the required idea (e.g., "protect and mate" satisfies a question asking for protection as the main role).\n` +
+      `Only mark incorrect when the answer omits the key idea or states a contradictory fact.`;
+  }
 
   const user = JSON.stringify({ question, expected, user_answer: userAnswer });
 
@@ -262,31 +276,35 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { question, expected, user_answer }: GradeRequest = await req.json();
+    const { question, expected, user_answer, mode }: GradeRequest = await req.json();
 
-    if (!expected || typeof expected !== "string") {
-      return text("Missing expected answer", 400);
-    }
     if (!user_answer || typeof user_answer !== "string") {
       return json({ correct: false, reason: "No answer provided" }, 200);
     }
 
-    // Heuristic pass
-    const heur = heuristicGrade(expected, user_answer);
-    if (heur.pass) {
-      return json({ correct: true, reason: heur.why }, 200);
+    // In standard mode, we require an expected answer. In creative mode, it's optional context.
+    if ((!mode || mode === "standard") && (!expected || typeof expected !== "string")) {
+      return text("Missing expected answer", 400);
     }
 
-    // LLM fallback
+    const safeExpected = expected || "";
+    const safeQuestion = question || "";
+    const isCreative = mode === "creative";
+
+    // Heuristic pass (ONLY for standard mode)
+    if (!isCreative) {
+      const heur = heuristicGrade(safeExpected, user_answer);
+      if (heur.pass) {
+        return json({ correct: true, reason: heur.why }, 200);
+      }
+    }
+
+    // LLM fallback (or primary for creative)
     try {
-      const llm = await llmGrade(
-        question ?? "",
-        expected ?? "",
-        user_answer ?? ""
-      );
-      return json(llm, 200);
-    } catch (err) {
-      return json({ correct: false, reason: "LLM unavailable" }, 200);
+      const result = await llmGrade(safeQuestion, safeExpected, user_answer, isCreative ? "creative" : "standard");
+      return json(result, 200);
+    } catch (e) {
+      return text("LLM error", 500);
     }
   } catch (e: any) {
     return text(`Server error: ${e?.message ?? e}`, 500);

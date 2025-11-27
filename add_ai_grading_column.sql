@@ -1,0 +1,1 @@
+ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS ai_grading BOOLEAN DEFAULT false;

@@ -290,12 +290,14 @@ Deno.serve(async (req) => {
       source_prompt,         // optional: prompt to persist (usually equals topic)
       source_file_name,      // optional: human-readable file name to persist
       source_type,           // optional: 'document' | 'youtube'
+      ai_grading,            // optional: boolean (smart grading)
     } = await req.json();
 
     const n = Math.max(1, Math.min(Number(count) || 10, 30));
     const safeTitle = String(title || "Generated Quiz").slice(0, 120);
     const prompt = String(topic || "Create programming quiz questions.").slice(0, 2000);
     const wantNoRepeat = no_repeat !== false; // default = true
+    const wantAiGrading = !!ai_grading;
 
     // Fast trial-cap precheck only if we are INSERTING a new quiz
     // Fast trial-cap precheck only if we are INSERTING a new quiz
@@ -507,6 +509,7 @@ Deno.serve(async (req) => {
           source_prompt: promptToPersist,
           source_file_name: nameToPersist,
           source_type: source_type || "document",
+          ai_grading: wantAiGrading,
           updated_at: now,
         })
         .eq("id", replace_quiz_id)
@@ -533,6 +536,7 @@ Deno.serve(async (req) => {
         source_prompt: promptToPersist,
         source_file_name: nameToPersist,
         source_type: source_type || "document",
+        ai_grading: wantAiGrading,
         created_at: now,
         updated_at: now,
       })
