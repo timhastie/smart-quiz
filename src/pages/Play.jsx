@@ -1603,6 +1603,7 @@ export default function Play() {
   const btnBase =
     "btn-sentence px-4 py-2 rounded-2xl font-semibold text-sm sm:text-base disabled:opacity-50 disabled:cursor-not-allowed";
   const btnGray = `bg-white/10 hover:bg-white/20 text-white ${pressAnim}`;
+  const btnGreen = `bg-emerald-500/90 hover:bg-emerald-400 text-slate-950 ${pressAnim}`;
   const btnIndigo = `bg-sky-500/90 hover:bg-sky-400 text-slate-950 ${pressAnim}`;
 
   if (!quiz) return null;
@@ -2172,7 +2173,7 @@ export default function Play() {
                       <button
                         type="button"
                         onClick={submit}
-                        className={`col-span-2 w-full ${btnBase} ${btnGray} h-12 flex items-center justify-center`}
+                        className={`col-span-2 w-full ${btnBase} ${btnGreen} h-12 flex items-center justify-center`}
                         aria-label="Submit answer"
                         title="Submit (same as pressing Enter)"
                       >
@@ -2184,7 +2185,7 @@ export default function Play() {
                     <button
                       type="button"
                       onClick={submit}
-                      className={`${btnBase} ${btnGray} h-12 items-center justify-center w-[150px]`}
+                      className={`${btnBase} ${btnGreen} h-12 items-center justify-center w-[150px]`}
                       aria-label="Submit answer"
                       title="Submit (same as pressing Enter)"
                     >

@@ -2293,7 +2293,7 @@ export default function Dashboard() {
                       return (
                         <li
                           key={q.id}
-                          className="w-full max-w-[620px] surface-panel p-6 flex flex-col overflow-visible min-h-[380px] h-auto"
+                          className="w-full max-w-[620px] surface-panel p-6 flex flex-col overflow-visible min-h-[380px] h-auto shadow-2xl hover:-translate-y-2 transition-transform duration-300"
                         >
                           {/* Top: meta + preview */}
                           <div className="flex-1 grid grid-cols-1 gap-3 min-h-0 overflow-visible">
@@ -2395,7 +2395,7 @@ export default function Dashboard() {
                               </div>
                             </div>
 
-                            <div className="relative bg-white/5 border border-white/5 rounded-2xl p-3 overflow-hidden h-[200px]">
+                            <div className="relative bg-white/5 border border-white/5 rounded-2xl p-3 overflow-hidden h-[200px] shadow-lg shadow-black/40">
                               <div
                                 className="text-[13px] leading-5 whitespace-pre-wrap text-white/90 font-normal"
                                 style={{
@@ -2419,7 +2419,7 @@ export default function Dashboard() {
                           <div className="mt-3 grid grid-cols-4 gap-2">
                             <Link
                               to={`/play/${q.id}`}
-                              className={`${btnBase} ${btnGray} h-11 p-0 flex items-center justify-center`}
+                              className={`${btnBase} ${btnGreen} h-11 p-0 flex items-center justify-center`}
                               aria-label="Play quiz"
                               title="Play"
                             >
@@ -2517,10 +2517,10 @@ export default function Dashboard() {
                         key={q.id}
                         className="sm:snap-start shrink-0 w-[560px] max-w-[600px]
                                    surface-card px-6 py-5
-                                   h-[470px] flex flex-col overflow-visible"
+                                   h-[470px] flex flex-col overflow-visible shadow-2xl hover:-translate-y-2 transition-transform duration-300"
                       >
                         {/* Top content */}
-                        <div className="flex-1 grid grid-cols-2 gap-4 min-h-0 overflow-hidden">
+                        <div className="flex-1 grid grid-cols-2 gap-4 min-h-0 overflow-visible">
                           {/* LEFT: title + meta */}
                           <div className="min-w-0 flex-1">
                             <div className="flex items-start gap-3 pl-1">
@@ -2614,7 +2614,7 @@ export default function Dashboard() {
                             </div>
                           </div>
 
-                          <div className="relative bg-white/5 border border-white/5 rounded-2xl p-3 overflow-hidden">
+                          <div className="relative bg-white/5 border border-white/5 rounded-2xl p-3 overflow-hidden shadow-lg shadow-black/40">
                             <div className="text-sm leading-6 whitespace-pre-wrap line-clamp-[13] text-white/90 font-normal">
                               {(Array.isArray(q.questions) ? q.questions : []).slice(0, 20).map((it, idx) => {
                                 const p = (it?.prompt || "").toString().trim();
@@ -2630,7 +2630,7 @@ export default function Dashboard() {
                         <div className="mt-4 grid grid-cols-4 gap-2">
                           <Link
                             to={`/play/${q.id}`}
-                            className={`${btnBase} ${btnGray} h-12 sm:h-14 p-0 flex items-center justify-center`}
+                            className={`${btnBase} ${btnGreen} h-12 sm:h-14 p-0 flex items-center justify-center`}
                             aria-label="Play quiz"
                             title="Play"
                           >

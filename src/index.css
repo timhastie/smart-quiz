@@ -74,7 +74,7 @@
 
 /* Utility classes for consistent surfaces */
 .surface-card {
-  @apply bg-teal-300/10 border border-teal-200/40 rounded-3xl shadow-2xl shadow-teal-900/25 backdrop-blur-xl;
+  @apply bg-teal-300/10 border border-teal-200/40 rounded-3xl shadow-2xl shadow-black/60 backdrop-blur-xl;
   -webkit-backdrop-filter: blur(32px);
   backdrop-filter: blur(32px);
   transform: translateZ(0);
@@ -83,7 +83,7 @@
 }
 
 .surface-panel {
-  @apply bg-teal-200/10 border border-teal-100/30 rounded-2xl shadow-xl shadow-teal-900/20 backdrop-blur;
+  @apply bg-teal-200/10 border border-teal-100/30 rounded-2xl shadow-xl shadow-black/50 backdrop-blur;
   -webkit-backdrop-filter: blur(24px);
 }
 
