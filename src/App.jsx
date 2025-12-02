@@ -1,5 +1,5 @@
 // src/App.jsx
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import Dashboard from "./pages/Dashboard";
 import Editor from "./pages/Editor";
@@ -14,6 +14,9 @@ import SharedAttemptAnswers from "./pages/SharedAttemptAnswers";
 export default function App() {
   return (
     <Routes>
+      {/* QR Code Redirect Fallback */}
+      <Route path="/qr" element={<Navigate to="/" replace />} />
+
       {/* Main dashboard (requires auth) */}
       <Route
         path="/"

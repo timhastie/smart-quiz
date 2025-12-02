@@ -1,4 +1,11 @@
 {
+  "redirects": [
+    {
+      "source": "/qr",
+      "destination": "https://www.smart-quiz.app",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     {
       "source": "/(.*)",
