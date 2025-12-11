@@ -134,10 +134,31 @@ function conceptTags(str: string) {
   return tags;
 }
 
+function extractNumbers(s: string) {
+  // Extract integers or decimals. normalize() already removed some punctuation but kept alphanumeric.
+  // We'll look for simple digit sequences.
+  return s.match(/\d+/g) || [];
+}
+
 function heuristicGrade(expectedRaw: string, userRaw: string) {
   const e = normalize(expectedRaw);
   const u = normalize(userRaw);
   if (!e || !u) return { pass: false, why: "empty" };
+
+  // --- STRICT NUMBER CHECK ---
+  // If the expected answer contains digits, the user's answer MUST contain those same digits.
+  // This prevents atomic typos like "1995" vs "1999" from passing via Levenshtein.
+  const eNums = extractNumbers(e);
+  if (eNums.length > 0) {
+    const uNums = new Set(extractNumbers(u));
+    // Every number in expected must appear in user answer
+    for (const num of eNums) {
+      if (!uNums.has(num)) {
+        return { pass: false, why: "number-mismatch" };
+      }
+    }
+  }
+
   if (e === u) return { pass: true, why: "exact" };
 
   const d = lev(u, e);
@@ -166,19 +187,21 @@ async function llmGrade(question: string, expected: string, userAnswer: string, 
     sys =
       `You grade creative or open-ended quiz answers.\n` +
       `Respond with JSON: {"correct": boolean, "reason": string}.\n` +
-      `The 'expected' answer is just an example. Do NOT require the user to match it.\n` +
+      `The 'expected' answer is just an example. Do NOT require the user to match it word-for-word.\n` +
       `Evaluate if the user's answer is a valid, logical, and correct response to the question.\n` +
-      `Example: If asked to "Use 'ubiquitous' in a sentence", ANY sentence correctly using the word is CORRECT.\n` +
-      `Example: If asked "Why is the sky blue?", any scientifically accurate explanation is CORRECT, even if phrased differently from the example.\n` +
-      `Mark INCORRECT only if the answer is factually wrong, irrelevant, or fails to address the prompt.`;
+      `IMPORTANT EXCEPTION for NUMBERS/DATES/FACTS: If the question asks for a specific year, date, count, or factual number (e.g., "What year?", "How many?"), the user's answer MUST contain the exact correct number. If the correct answer is "1999" and the user writes "1995", it is INCORRECT.\n` +
+      `Example: "Use 'ubiquitous' in a sentence" -> ANY valid sentence is CORRECT.\n` +
+      `Example: "What year did Tony Hawk land the 900?" -> "1999" is CORRECT. "1995" is INCORRECT.\n` +
+      `Mark INCORRECT if the answer is factually wrong, irrelevant, or fails to address the prompt.`;
   } else {
     sys =
       `You grade short quiz answers.\n` +
       `Respond with JSON: {"correct": boolean, "reason": string}.\n` +
       `If the learner's answer expresses the same fact, intent, or concept, mark it correct even if wording differs.\n` +
-      `Match question intent. Example: Question "What is the primary diet of lions?" should treat answers "meat", "other animals", or "carnivorous" as correct because they all indicate meat-eating.\n` +
-      `Be generous when the answer clearly includes the required idea (e.g., "protect and mate" satisfies a question asking for protection as the main role).\n` +
-      `Only mark incorrect when the answer omits the key idea or states a contradictory fact.`;
+      `STRICT NUMERIC CHECK: If the answer requires a specific number (year, quantity, date), the user MUST provide that exact number. Close numbers (e.g. 1995 vs 1999) are INCORRECT.\n` +
+      `Match question intent. Example: "What is the primary diet of lions?" -> "meat", "other animals", "carnivorous" are all CORRECT.\n` +
+      `Be generous with wording, but strict with facts and numbers.\n` +
+      `Only mark incorrect when the answer omits the key idea, gets the core fact/number wrong, or states a contradictory fact.`;
   }
 
   const user = JSON.stringify({ question, expected, user_answer: userAnswer });

@@ -361,7 +361,7 @@ export default function Dashboard() {
   const [gGroupId, setGGroupId] = useState(NO_GROUP_SENTINEL);
   const [gFile, setGFile] = useState(null);
   const [gNoRepeat, setGNoRepeat] = useState(true);
-  const [gAiGrading, setGAiGrading] = useState(false);
+  const [gAiGrading, setGAiGrading] = useState(true);
   const [activeInfo, setActiveInfo] = useState(null); // "noRepeat" | "aiGrading" | null
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [downloadingTranscript, setDownloadingTranscript] = useState(false);
