@@ -211,6 +211,18 @@ function localGrade(userRaw, expectedRaw) {
   const u = normalize(userRaw);
   const e = normalize(expectedRaw);
   if (!u || !e) return { pass: false, why: "empty" };
+
+  // --- Strict Number Check ---
+  // If expected answer has numbers, user must match them exactly.
+  // This prevents "1954" from passing for "1950" via Levenshtein.
+  const eNums = numTokens(e);
+  if (eNums.length > 0) {
+    const uNums = new Set(numTokens(u));
+    for (const n of eNums) {
+      if (!uNums.has(n)) return { pass: false, why: "number-mismatch" };
+    }
+  }
+
   if (u === e) return { pass: true, why: "exact-normalized" };
   const d = lev(u, e);
   const maxEdits = Math.max(1, Math.floor(Math.min(u.length, e.length) * 0.2));
