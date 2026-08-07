@@ -121,7 +121,10 @@ Deno.serve(async (req) => {
     const fetch_options = body?.fetch_options;
 
     if (youtube_url) {
-      const SUPADATA_API_KEY = "sd_6bee9cf2be2962a94a7256c1d0042824";
+      const SUPADATA_API_KEY = Deno.env.get("SUPADATA_API_KEY");
+      if (!SUPADATA_API_KEY) {
+        return text("SUPADATA_API_KEY is not configured.", 500);
+      }
 
       try {
         // If action is 'list_transcripts' OR fetch_options is true, fetch metadata
