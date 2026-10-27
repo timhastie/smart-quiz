@@ -2220,7 +2220,7 @@ export default function Dashboard() {
                                 className="h-7 flex items-center justify-center text-base font-bold transition-all"
                                 style={{
                                   scrollSnapAlign: 'center',
-                                  color: num === gCount ? '#ffffff' : '#94a3b8',
+                                  color: num === gCount ? '#173d35' : '#526e65',
                                   transform: num === gCount ? 'scale(1.3)' : 'scale(1)',
                                 }}
                               >
@@ -3476,7 +3476,7 @@ export default function Dashboard() {
                             className="h-7 flex items-center justify-center text-base font-bold transition-all"
                             style={{
                               scrollSnapAlign: 'center',
-                              color: num === gCount ? '#ffffff' : '#94a3b8',
+                              color: num === gCount ? '#173d35' : '#526e65',
                               transform: num === gCount ? 'scale(1.3)' : 'scale(1)',
                             }}
                           >

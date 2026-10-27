@@ -6,21 +6,21 @@
   :root {
     font-family: "Inter", "SF Pro Display", "Segoe UI", system-ui, -apple-system,
       BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-    background-color: #07131a;
-    color: #f8fafc;
+    background-color: #edf8f1;
+    color: #173d35;
     font-feature-settings: "cv02" 1, "cv03" 1, "cv04" 1, "liga" 1;
   }
 
   html,
   body {
-    @apply min-h-full bg-[#041c21] text-slate-50 antialiased;
+    @apply min-h-full bg-[#edf8f1] text-slate-800 antialiased;
     margin: 0;
   }
 
   body {
-    background-image: radial-gradient(circle at 12% 18%, rgba(45, 212, 191, 0.35) 0, transparent 30%),
-      radial-gradient(circle at 78% 4%, rgba(20, 184, 166, 0.32) 0, transparent 40%),
-      linear-gradient(180deg, #0b2c32 0%, #082229 45%, #03141a 100%);
+    background-image: radial-gradient(circle at 12% 18%, rgba(110, 231, 183, 0.15) 0, transparent 30%),
+      radial-gradient(circle at 78% 4%, rgba(45, 212, 191, 0.12) 0, transparent 40%),
+      linear-gradient(180deg, #f4fbf6 0%, #edf8f1 45%, #e3f2e8 100%);
     background-attachment: fixed;
   }
 
@@ -74,7 +74,7 @@
 
 /* Utility classes for consistent surfaces */
 .surface-card {
-  @apply bg-teal-300/10 border border-teal-200/40 rounded-3xl shadow-2xl shadow-black/60 backdrop-blur-xl;
+  @apply bg-white/90 border border-emerald-200/70 rounded-3xl shadow-2xl shadow-emerald-950/10 backdrop-blur-xl;
   -webkit-backdrop-filter: blur(32px);
   backdrop-filter: blur(32px);
   transform: translateZ(0);
@@ -83,7 +83,7 @@
 }
 
 .surface-panel {
-  @apply bg-teal-200/10 border border-teal-100/30 rounded-2xl shadow-xl shadow-black/50 backdrop-blur;
+  @apply bg-emerald-50/90 border border-emerald-200/70 rounded-2xl shadow-xl shadow-emerald-950/10 backdrop-blur;
   -webkit-backdrop-filter: blur(24px);
 }
 
@@ -131,4 +131,70 @@
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
   /* Chrome, Safari and Opera */
+}
+
+/* Light green palette. These overrides change color only; the existing
+   components, spacing, typography, and behavior retain their original classes. */
+:root {
+  --quiz-ink: #173d35;
+  --quiz-muted: #526e65;
+  --quiz-soft-ink: #526e65;
+  --quiz-border: #cce2d5;
+}
+
+#root :is(.text-white, .text-slate-50, .text-slate-100,
+  [class~="text-white/90"], [class~="text-white/80"]) { color: var(--quiz-ink); }
+#root :is([class~="text-white/70"], [class~="text-white/60"]) { color: var(--quiz-muted); }
+#root :is([class~="text-white/50"], [class~="text-white/40"], .text-gray-400, .text-slate-400) { color: var(--quiz-soft-ink); }
+#root :is([class~="hover:text-white"], [class~="hover:text-white/80"]):hover { color: #0e6651; }
+#root [class~="placeholder:text-white/40"]::placeholder { color: var(--quiz-soft-ink); }
+
+#root :is([class~="bg-white/5"], [class~="bg-white/10"]) { background-color: #dcefe4; }
+#root [class~="bg-white/20"] { background-color: #c9e6d7; }
+#root [class~="hover:bg-white/10"]:hover { background-color: #d4eade; }
+#root [class~="hover:bg-white/20"]:hover { background-color: #c3e2d2; }
+#root :is(.bg-slate-950, [class~="bg-slate-950/80"], [class~="bg-slate-950/90"]) { background-color: #edf8f1; }
+#root :is(.bg-slate-900, [class~="bg-slate-900/60"]) { background-color: #e6f3eb; }
+#root [class~="bg-[#0d3b44]"] { background-color: #f9fdfb; }
+#root [class~="bg-[#041c21]"] { background-color: #edf8f1; }
+#root [class~="from-slate-950/60"] { --tw-gradient-from: rgb(237 248 241 / .85) var(--tw-gradient-from-position); --tw-gradient-to: rgb(237 248 241 / 0) var(--tw-gradient-to-position); }
+
+#root :is([class~="border-white/5"], [class~="border-white/10"], [class~="border-white/20"]) { border-color: var(--quiz-border); }
+#root :is(.text-emerald-200, .text-emerald-300, .text-emerald-400) { color: #08734f; }
+#root .text-green-400 { color: #16733b; }
+#root :is(.text-red-300, .text-red-400, .text-rose-400) { color: #bd2943; }
+#root :is(.text-yellow-400, .text-amber-300) { color: #8c6004; }
+#root .text-blue-400 { color: #1d5ea8; }
+#root :is([class~="hover:text-emerald-200"], [class~="hover:text-emerald-300"]):hover { color: #065f46; }
+#root :is([class~="hover:text-red-300"], [class~="hover:text-red-400"]):hover { color: #a61e37; }
+#root :is([class~="bg-emerald-900/30"], [class~="bg-emerald-500/20"], [class~="bg-emerald-500/30"]) { background-color: #ccebd9; }
+#root :is([class~="bg-emerald-500/5"], [class~="bg-emerald-500/10"]) { background-color: #e1f3e8; }
+#root [class~="bg-red-900/30"] { background-color: #fce5e9; }
+#root :is([class~="shadow-black/40"], [class~="shadow-black/50"], [class~="shadow-black/60"]) { --tw-shadow-color: rgb(15 66 49 / .13); }
+
+/* Keep the logo bars dark, with their original light-on-dark hierarchy. */
+#root :is(header, footer)[class] {
+  background-color: #102a32;
+  border-color: #29444a;
+  color: #f8fafc;
+}
+#root :is(header, footer) :is(.text-white, .text-slate-100, [class~="text-white/90"], [class~="text-white/80"]) { color: #f0faf6; }
+#root :is(header, footer) :is([class~="text-white/70"], [class~="text-white/60"], [class~="text-white/50"], [class~="text-white/40"]) { color: #b5c9c5; }
+#root :is(header, footer) [class~="bg-white/10"] { background-color: rgb(255 255 255 / .1); }
+#root :is(header, footer) [class~="hover:bg-white/20"]:hover { background-color: rgb(255 255 255 / .2); }
+#root :is(header, footer) [class~="hover:text-white"]:hover { color: #fff; }
+
+/* Solid action buttons retain readable labels on their accent backgrounds. */
+#root :is([class~="bg-rose-500"], [class~="bg-rose-500/70"], [class~="bg-rose-500/80"], [class~="bg-rose-600/80"]) {
+  background-color: #c93652;
+  color: #fff;
+}
+#root [class~="hover:bg-rose-500"]:hover { background-color: #b82440; color: #fff; }
+#root button.bg-slate-900 { background-color: #165d49; color: #fff; }
+#root button[class~="hover:bg-slate-800"]:hover { background-color: #104735; color: #fff; }
+#root :is([class~="bg-sky-500/90"], .bg-sky-400) { color: #082f49; }
+
+#root :is(input, select, textarea):focus {
+  border-color: #14846b;
+  --tw-ring-color: rgb(20 132 107 / .6);
 }
