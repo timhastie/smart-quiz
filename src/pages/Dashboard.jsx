@@ -2192,7 +2192,7 @@ export default function Dashboard() {
                         {/* Mobile: Scrollable Spinner */}
                         <div className="sm:hidden relative h-24 w-20 mx-auto overflow-hidden rounded-xl bg-white/5 border border-white/10">
                           <div
-                            className="absolute inset-0 overflow-y-scroll scrollbar-hide"
+                            className="absolute inset-0 z-10 overflow-y-scroll scrollbar-hide"
                             style={{
                               scrollSnapType: 'y mandatory',
                               paddingTop: '2.5rem',
@@ -3448,7 +3448,7 @@ export default function Dashboard() {
                     {/* Mobile: Scrollable Spinner */}
                     <div className="sm:hidden relative h-24 w-20 mx-auto overflow-hidden rounded-xl bg-white/5 border border-white/10">
                       <div
-                        className="absolute inset-0 overflow-y-scroll scrollbar-hide"
+                        className="absolute inset-0 z-10 overflow-y-scroll scrollbar-hide"
                         style={{
                           scrollSnapType: 'y mandatory',
                           paddingTop: '2.5rem',
